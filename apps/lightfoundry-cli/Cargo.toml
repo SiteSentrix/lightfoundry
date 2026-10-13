@@ -1,0 +1,17 @@
+[package]
+name = "lightfoundry-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "lightfoundry-cli"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+lightfoundry-engine = { workspace = true }
+serde_json = { workspace = true }

@@ -1,0 +1,26 @@
+[package]
+name = "lightfoundry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+default-run = "lightfoundry"
+
+[lints]
+workspace = true
+
+[features]
+default = ["serial"]
+# Real serial ports (GRBL over USB). Disable for a simulator-only build.
+serial = ["lightfoundry-device/serial"]
+
+[dependencies]
+lightfoundry-engine = { workspace = true }
+lightfoundry-ui-egui = { workspace = true }
+lightfoundry-device = { workspace = true }
+eframe = { workspace = true, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = { workspace = true }
+log = { workspace = true }
+serde_json = { workspace = true }
+rfd = "0.17"
+env_logger = "0.11"

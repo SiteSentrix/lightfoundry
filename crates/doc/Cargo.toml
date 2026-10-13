@@ -1,0 +1,17 @@
+[package]
+name = "lightfoundry-doc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LightFoundry doc"
+
+[lints]
+workspace = true
+
+[dependencies]
+lightfoundry-geom = { workspace = true }
+kurbo = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

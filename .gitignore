@@ -1,0 +1,5 @@
+*~
+/target
+/plan/
+/dist
+.DS_Store
