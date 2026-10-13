@@ -1,0 +1,17 @@
+[package]
+name = "lightfoundry-toolpath"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LightFoundry toolpath"
+
+[lints]
+workspace = true
+
+[dependencies]
+lightfoundry-geom = { workspace = true }
+lightfoundry-doc = { workspace = true }
+kurbo = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]

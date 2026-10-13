@@ -1,0 +1,48 @@
+use std::path::PathBuf;
+
+use lightfoundry_device::Transport;
+use lightfoundry_ui_egui::{LightFoundryApp, Platform};
+
+pub struct Host {
+    pub app: LightFoundryApp,
+}
+
+impl eframe::App for Host {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.app.ui(ui);
+    }
+}
+
+/// Native file dialogs and serial ports.
+pub struct DesktopPlatform;
+
+impl Platform for DesktopPlatform {
+    fn pick_open(&self, title: &str, extensions: &[&str]) -> Option<PathBuf> {
+        rfd::FileDialog::new().set_title(title).add_filter("Supported files", extensions).pick_file()
+    }
+
+    fn pick_save(&self, title: &str, default_name: &str, extensions: &[&str]) -> Option<PathBuf> {
+        rfd::FileDialog::new().set_title(title).set_file_name(default_name).add_filter("File", extensions).save_file()
+    }
+
+    #[cfg(feature = "serial")]
+    fn serial_ports(&self) -> Vec<String> {
+        lightfoundry_device::serial::list_ports()
+    }
+
+    #[cfg(not(feature = "serial"))]
+    fn serial_ports(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    #[cfg(feature = "serial")]
+    fn open_serial(&self, port: &str) -> Result<Box<dyn Transport + Send>, String> {
+        let t = lightfoundry_device::serial::SerialTransport::open(port, lightfoundry_device::serial::DEFAULT_BAUD).map_err(|e| e.to_string())?;
+        Ok(Box::new(t))
+    }
+
+    #[cfg(not(feature = "serial"))]
+    fn open_serial(&self, _port: &str) -> Result<Box<dyn Transport + Send>, String> {
+        Err("this build has no serial support".into())
+    }
+}

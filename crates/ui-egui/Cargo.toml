@@ -1,0 +1,20 @@
+[package]
+name = "lightfoundry-ui-egui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LightFoundry ui-egui"
+
+[lints]
+workspace = true
+
+[dependencies]
+lightfoundry-engine = { workspace = true }
+lightfoundry-device = { workspace = true }
+lightfoundry-geom = { workspace = true }
+lightfoundry-doc = { workspace = true }
+lightfoundry-toolpath = { workspace = true }
+egui = { workspace = true }
+kurbo = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }

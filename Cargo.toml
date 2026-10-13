@@ -1,0 +1,60 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/*", "xtask"]
+default-members = ["crates/*", "apps/lightfoundry-cli", "xtask"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+repository = "https://github.com/SiteSentrix/lightfoundry"
+
+[workspace.dependencies]
+# internal
+lightfoundry-geom = { path = "crates/geom" }
+lightfoundry-doc = { path = "crates/doc" }
+lightfoundry-toolpath = { path = "crates/toolpath" }
+lightfoundry-gcode = { path = "crates/gcode" }
+lightfoundry-svg = { path = "crates/svg" }
+lightfoundry-dxf = { path = "crates/dxf" }
+lightfoundry-format = { path = "crates/format" }
+lightfoundry-device = { path = "crates/device" }
+lightfoundry-engine = { path = "crates/engine" }
+lightfoundry-ui-egui = { path = "crates/ui-egui" }
+
+# foundation
+kurbo = { version = "0.13", features = ["serde"] }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = "2"
+log = "0.4"
+proptest = "1"
+usvg = "0.48"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "bmp"] }
+eframe = { version = "0.36", default-features = false }
+egui = "0.36"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+# LightFoundry never crashes: shipped code returns `Result`/`Option` instead of panicking (see
+# AGENTS.md › Robustness). Tests may unwrap (clippy.toml).
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

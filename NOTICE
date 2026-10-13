@@ -1,0 +1,13 @@
+LightFoundry
+Copyright (c) 2026 the LightFoundry contributors.
+Licensed under the MIT License or the Apache License, Version 2.0, at your option
+(LICENSE-MIT, LICENSE-APACHE).
+
+LightFoundry is an independent project. It is not affiliated with, endorsed by or derived from
+LightBurn Software, and "LightBurn" is a trademark of its owner, used here only to describe the
+kind of application this is.
+
+Third-party material: this repository contains no bundled assets (icons are drawn in code; see
+ATTRIBUTION.md). Rust dependencies are fetched from crates.io under their own licences. egui's
+default fonts are compiled in through the epaint_default_fonts crate (Ubuntu Light under the Ubuntu
+Font Licence 1.0, Hack under MIT, Noto Emoji under the SIL Open Font License 1.1).
