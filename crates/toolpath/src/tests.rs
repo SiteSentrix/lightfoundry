@@ -646,7 +646,7 @@ mod order_option_tests {
         let lines = vec![outer.clone(), far.clone(), inner.clone()];
         let start = Point::new(0.0, 0.0);
         let order = |inner_first, reduce_travel| {
-            let opts = Optimize { inner_first, reduce_travel, remove_duplicates: false };
+            let opts = Optimize { inner_first, reduce_travel, remove_duplicates: false, ..Optimize::default() };
             order_polylines(lines.clone(), start, &opts).iter().map(|l| l.bounds().map_or(0.0, |b| b.x1 - b.x0).round() as usize).collect::<Vec<_>>()
         };
         let sizes = |v: Vec<usize>| v;
@@ -936,5 +936,60 @@ mod overscan_and_ramp_tests {
             l.max_power = 20.0; // minimum above maximum: no ramp, no panic
         }
         assert!(plan(&doc).is_ok());
+    }
+}
+
+mod group_and_start_tests {
+    use super::*;
+
+    /// Three squares in a row at x = 10, 100 and 200; the first and last belong to one group.
+    fn row() -> Document {
+        let mut doc = Document::default();
+        for (i, x) in [10.0, 100.0, 200.0].into_iter().enumerate() {
+            let mut shape = Shape::path(format!("s{i}"), 0, rect_path(x, 10.0, 20.0, 20.0));
+            shape.group = if i == 1 { Some(6) } else { Some(5) };
+            doc.add_shape(shape);
+        }
+        doc
+    }
+
+    fn first_x(op: &Op) -> f64 {
+        op.moves.first().map_or(f64::NAN, |m| m.target().x)
+    }
+
+    #[test]
+    fn without_grouping_the_nearest_outline_goes_next_and_with_it_each_group_finishes_first() {
+        let mut doc = row();
+        doc.optimize.by_group = false;
+        let flat = plan(&doc).unwrap();
+        assert_eq!(flat.ops.len(), 1);
+        let xs: Vec<f64> = flat.ops[0].moves.iter().filter_map(|m| if let Move::Travel(p) = m { Some(p.x.round()) } else { None }).collect();
+        assert!(xs[0] < 40.0 && xs[1] > 90.0 && xs[1] < 130.0 && xs[2] > 190.0, "nearest first: {xs:?}");
+
+        doc.optimize.by_group = true;
+        let grouped = plan(&doc).unwrap();
+        assert_eq!(grouped.ops.len(), 2, "one operation per group");
+        // Group 5 (x = 10 and 200) is cut as a whole, then group 6 (x = 100).
+        assert!(first_x(&grouped.ops[0]) < 40.0);
+        let reach = grouped.ops[0].moves.iter().map(|m| m.target().x).fold(0.0, f64::max);
+        assert!(reach > 200.0, "the first operation includes the far shape of its group");
+        assert!(first_x(&grouped.ops[1]) > 90.0 && first_x(&grouped.ops[1]) < 130.0);
+    }
+
+    #[test]
+    fn the_start_point_decides_which_outline_is_first() {
+        let mut doc = row();
+        doc.optimize.start = Some([210.0, 10.0]);
+        let job = plan(&doc).unwrap();
+        let first = job.ops[0].moves.iter().find_map(|m| if let Move::Travel(p) = m { Some(*p) } else { None }).unwrap();
+        assert!(first.x > 190.0, "ordering began near the chosen point: {first:?}");
+        for bad in [Some([f64::NAN, 0.0]), Some([0.0, f64::INFINITY])] {
+            doc.optimize.start = bad;
+            let job = plan(&doc).unwrap();
+            assert!(
+                job.ops[0].moves.iter().find_map(|m| if let Move::Travel(p) = m { Some(p.x) } else { None }).unwrap() < 40.0,
+                "a bad start falls back to the origin"
+            );
+        }
     }
 }

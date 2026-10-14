@@ -145,7 +145,7 @@ impl Layer {
 }
 
 /// Cut-order options for outlines.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Optimize {
     /// Shapes nested inside others are cut first, so parts do not drop out before their holes.
     pub inner_first: bool,
@@ -153,11 +153,17 @@ pub struct Optimize {
     pub reduce_travel: bool,
     /// Drop outlines that lie exactly on top of an earlier one (they would be burned twice).
     pub remove_duplicates: bool,
+    /// Finish each group of shapes before starting the next (shapes grouped with Ctrl+G stay together).
+    #[serde(default)]
+    pub by_group: bool,
+    /// Where the head is taken to be when ordering starts, workspace mm (`None` = the bed's origin).
+    #[serde(default)]
+    pub start: Option<[f64; 2]>,
 }
 
 impl Default for Optimize {
     fn default() -> Self {
-        Optimize { inner_first: true, reduce_travel: true, remove_duplicates: true }
+        Optimize { inner_first: true, reduce_travel: true, remove_duplicates: true, by_group: false, start: None }
     }
 }
 

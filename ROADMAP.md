@@ -227,4 +227,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   their size and stand on the line, long edges are cut into 0.5 mm steps so they follow curves,
   closed paths wrap), producing plain geometry; Arrange > Text on Path applies it to a selected text
   and shape. New `geom::along` measures polylines by arc length.
+- **2026-10-14 — cut order by group and start point.** `Optimize::by_group` finishes each group of
+  shapes (Ctrl+G groups) before starting the next, within each layer; `Optimize::start` sets where
+  ordering begins instead of the bed's origin. Both are in the Cut order section and
+  `job.set_optimize`.
 
