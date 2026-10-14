@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/*", "xtask"]
+exclude = ["fuzz"]
 default-members = ["crates/*", "apps/lightfoundry-cli", "xtask"]
 
 [workspace.package]
@@ -24,6 +25,7 @@ lightfoundry-format = { path = "crates/format" }
 lightfoundry-device = { path = "crates/device" }
 lightfoundry-engine = { path = "crates/engine" }
 lightfoundry-mcp = { path = "crates/mcp" }
+lightfoundry-fuzzkit = { path = "crates/fuzzkit" }
 lightfoundry-ui-egui = { path = "crates/ui-egui" }
 
 # foundation

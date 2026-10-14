@@ -135,10 +135,21 @@ pub fn stream_program(
     Ok(StreamReport { lines: job.progress().total })
 }
 
+/// A byte that must never be sent as part of a G-code line: GRBL treats `?`, `!`, `~` and the soft
+/// reset (0x18) as real-time commands wherever they appear (so a stray one could pause, resume or
+/// reset the machine mid-job), and control, DEL and non-ASCII bytes are not valid G-code.
+pub(crate) fn forbidden_byte(line: &str) -> Option<u8> {
+    line.bytes().find(|b| matches!(b, b'?' | b'!' | b'~') || (*b < 0x20 && *b != b'\t') || *b >= 0x7f)
+}
+
 /// Strips comments and blank lines; refuses lines GRBL would truncate.
 pub(crate) fn prepare(program: &str) -> Result<Vec<String>, DeviceError> {
     let mut out = Vec::new();
     for (i, raw) in program.lines().enumerate() {
+        // GRBL acts on these bytes wherever they appear, comments included.
+        if let Some(byte) = forbidden_byte(raw) {
+            return Err(DeviceError::ForbiddenByte { line: i + 1, byte });
+        }
         let code = raw.split(';').next().unwrap_or("");
         let code = strip_paren_comments(code);
         let code = code.trim();
@@ -208,6 +219,24 @@ mod tests {
             let mut last = None;
             stream_program(&mut sim, &program(20), &StreamOptions::default(), &AtomicBool::new(false), |p| last = Some(p)).unwrap();
             assert_eq!(last, Some(Progress { sent: 20, acknowledged: 20, total: 20 }));
+        }
+    }
+
+    mod realtime_byte_tests {
+        use super::*;
+
+        #[test]
+        fn programs_with_realtime_or_odd_bytes_are_refused_before_anything_is_sent() {
+            for bad in
+                ["G0 X1\n\u{18}\nG0 X2\n", "G0 X1 (pause !)\n", "G1 X1 ; why?\n", "G0 X1~\n", "G0 X1\u{7}\n", "G0 X1 \u{e9}\n", "G0 X\u{7f}1\n"]
+            {
+                assert!(matches!(prepare(bad), Err(DeviceError::ForbiddenByte { .. })), "{bad:?}");
+                let mut sim = SimulatedGrbl::new();
+                let r = stream_program(&mut sim, bad, &StreamOptions::default(), &AtomicBool::new(false), |_| {});
+                assert!(matches!(r, Err(DeviceError::ForbiddenByte { .. })), "{bad:?}");
+                assert!(sim.received().is_empty() && !sim.was_reset(), "nothing reached the controller for {bad:?}");
+            }
+            assert!(prepare("G0 X1\tY2 (note)\n; comment\n").is_ok(), "tabs and ordinary comments are fine");
         }
     }
 

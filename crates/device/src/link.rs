@@ -105,7 +105,7 @@ impl Link {
         if line.is_empty() {
             return Ok(());
         }
-        if line.len() > MAX_LINE_BYTES || line.contains(['\n', '\r', '\0']) || line.bytes().any(|b| b == realtime::SOFT_RESET) {
+        if line.len() > MAX_LINE_BYTES || line.contains(['\n', '\r', '\0']) || crate::stream::forbidden_byte(line).is_some() {
             return Err(LinkError::Rejected("not a valid single G-code line".into()));
         }
         self.require_idle()?;
@@ -577,6 +577,14 @@ mod tests {
             link.jog(1.0, 0.0, 1000.0).unwrap();
             let s = wait_for(&link, "the error", |s| s.console.iter().any(|l| l.starts_with("< error:20")));
             assert!(s.console.iter().any(|l| l.contains("(for: $J=G91 G21 X1 F1000)")), "{:?}", s.console);
+        }
+
+        #[test]
+        fn console_lines_cannot_smuggle_realtime_bytes() {
+            let link = sim_link();
+            for bad in ["G0 X1 ?", "!", "~", "G0\u{18}", "$J=G91 X1\u{e9}"] {
+                assert!(matches!(link.send_line(bad), Err(LinkError::Rejected(_))), "{bad:?}");
+            }
         }
 
         #[test]

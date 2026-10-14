@@ -140,11 +140,12 @@ impl SimulatedGrbl {
         }
         let (mut x, mut y) = (None, None);
         for word in body.split_whitespace() {
-            let (axis, value) = word.split_at(1);
+            let mut chars = word.chars();
+            let (Some(axis), value) = (chars.next(), chars.as_str()) else { continue };
             if let Ok(v) = value.parse::<f64>() {
                 match axis {
-                    "X" => x = Some(v),
-                    "Y" => y = Some(v),
+                    'X' => x = Some(v),
+                    'Y' => y = Some(v),
                     _ => {}
                 }
             }

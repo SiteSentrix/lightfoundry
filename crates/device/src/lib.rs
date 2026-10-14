@@ -50,6 +50,8 @@ pub enum DeviceError {
     Alarm(u32),
     #[error("line {line} is {len} bytes; GRBL accepts at most {} per line", stream::MAX_LINE_BYTES)]
     LineTooLong { line: usize, len: usize },
+    #[error("line {line} contains byte 0x{byte:02x}, which the controller would act on as a real-time command or cannot parse")]
+    ForbiddenByte { line: usize, byte: u8 },
     #[error("no response from the controller for {0} s")]
     Timeout(u64),
     #[error("job cancelled")]

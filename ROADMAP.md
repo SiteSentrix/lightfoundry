@@ -154,4 +154,11 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — cross-hatch fill and a Star button.** `crosshatch` on a layer plans the fill a
   second time at right angles (older files load with it off); the Create by numbers section gets a
   Star button.
+- **2026-10-14 — fuzz harnesses, and two bugs they found.** `crates/fuzzkit` has one entry point
+  per untrusted-input path (SVG, DXF, project files, controller lines, G-code programs, MCP
+  messages, text, commands with junk parameters), driven by deterministic mutation tests on stable
+  and by `cargo-fuzz` targets in `/fuzz` (nightly; not run here). Found and fixed: the simulated
+  controller panicked on a non-ASCII G-code word, and a program containing GRBL's real-time bytes
+  (0x18 soft reset, `?`, `!`, `~`) would have been streamed as is; the streamer and the console
+  now refuse such lines, comments included, before anything is sent.
 

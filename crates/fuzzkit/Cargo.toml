@@ -1,0 +1,19 @@
+[package]
+name = "lightfoundry-fuzzkit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+lightfoundry-engine = { workspace = true }
+lightfoundry-svg = { workspace = true }
+lightfoundry-dxf = { workspace = true }
+lightfoundry-format = { workspace = true }
+lightfoundry-device = { workspace = true }
+lightfoundry-mcp = { workspace = true }
+lightfoundry-text = { workspace = true }
+serde_json = { workspace = true }
