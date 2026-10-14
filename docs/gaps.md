@@ -15,7 +15,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 14 | Ship an original starter material library; share presets between projects (per-project presets and test grids are done) | Reusing settings for a known material                               |
 | 15 | Other controllers: verify the Marlin/Smoothieware dialects on hardware and add a link for them; Ruida is a large project | Reach beyond GRBL                                                   |
 | 16 | Camera overlay and print-and-cut alignment                                           | Placing work on printed or irregular material                       |
-| 17 | MCP server and JSON control channel on top of `Session::execute`                     | Agent-driven design, like the sibling apps                          |
+| 17 | MCP: resources (documents as files), prompts, a live link to the running desktop app (the stdio server edits its own session) | Agent-driven design, like the sibling apps                          |
 | 18 | WASM/web build                                                                       | Same engine in a browser (Web Serial for the machine link)          |
 | 19 | Fuzz harnesses (`cargo-fuzz`) for SVG/DXF/format/G-code line paths                   | The tests are hostile-input unit tests, not a fuzzer                |
 | 20 | Rotary, Z-axis, galvo                                                                | Hardware variants                                                   |

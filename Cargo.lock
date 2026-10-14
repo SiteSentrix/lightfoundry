@@ -1409,6 +1409,7 @@ name = "lightfoundry-cli"
 version = "0.1.0"
 dependencies = [
  "lightfoundry-engine",
+ "lightfoundry-mcp",
  "serde_json",
 ]
 
@@ -1491,6 +1492,15 @@ dependencies = [
  "kurbo",
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "lightfoundry-mcp"
+version = "0.1.0"
+dependencies = [
+ "lightfoundry-engine",
+ "log",
+ "serde_json",
 ]
 
 [[package]]

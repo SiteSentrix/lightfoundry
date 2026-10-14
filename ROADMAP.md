@@ -134,4 +134,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   or closed, are cut as dashes with rapid moves over the gaps (laser off), replacing tabs when
   both are set. Lengths below 0.05 mm, non-finite values and absurd piece counts fall back to a
   solid line (or a plan error for bad settings).
+- **2026-10-14 — MCP server.** New crate `lightfoundry-mcp` (layer 6; the UI layer moved to 7): a
+  newline-delimited JSON-RPC 2.0 server implementing initialize, ping, tools/list and tools/call,
+  where every engine command is a tool (`shape.rectangle` becomes `shape_rectangle`) plus a
+  read-only `document_summary`. Engine failures are tool errors; messages over 64 MB are skipped
+  without being buffered. `lightfoundry-cli mcp` serves it on stdin/stdout. Note for operators: the
+  file.* tools read and write paths the agent names, so only attach it to agents you trust.
 

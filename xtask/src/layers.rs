@@ -7,7 +7,7 @@ use std::process::Command;
 use serde_json::Value;
 
 const PREFIX: &str = "lightfoundry-";
-const UI_LAYER: u8 = 6;
+const UI_LAYER: u8 = 7;
 const UI_TOOLKITS: &[&str] = &["egui", "eframe", "winit", "rfd", "wgpu", "glow"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +32,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("format", Class::Layer(3)),
     ("device", Class::Layer(3)),
     ("engine", Class::Layer(5)),
+    ("mcp", Class::Layer(6)),
     ("ui-egui", Class::Layer(UI_LAYER)),
     ("testkit", Class::Testkit),
     ("lightfoundry", Class::Exempt),

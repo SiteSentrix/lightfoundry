@@ -7,13 +7,13 @@ How LightFoundry is built today. Rules (clean-room, never-crash, quality gates) 
 
 ## Shape
 
-A Cargo workspace of 12 library crates under `crates/`, two apps under `apps/`, and `xtask`. Pure
+A Cargo workspace of 13 library crates under `crates/`, two apps under `apps/`, and `xtask`. Pure
 Rust. The same engine runs the desktop app and the headless CLI.
 
 ## Layers
 
 `cargo xtask layers` (part of `cargo xtask ci`) enforces that a crate depends only on lower layers
-and that nothing below L6 depends on a UI toolkit. The table lives in `xtask/src/layers.rs`.
+and that nothing below L7 depends on a UI toolkit. The table lives in `xtask/src/layers.rs`.
 
 | Layer | Crates     | Role                                                                                             |
 |-------|------------|--------------------------------------------------------------------------------------------------|
@@ -28,8 +28,9 @@ and that nothing below L6 depends on a UI toolkit. The table lives in `xtask/src
 | L3    | `format`   | the native `.lightfoundry` file: versioned JSON, atomic save, validation on load                 |
 | L3    | `device`   | `Transport` trait, GRBL character-counting streamer (`JobStream`), status parsing, the persistent `Link` (worker thread: status polling, jog/home/unlock/zero, job streaming, pause/resume/stop, console), simulated controller, optional serial port (`serial` feature) |
 | L5    | `engine`   | `Session` (document, selection, undo/redo), the command registry, the panic guard                |
-| L6    | `ui-egui`  | menus, tools, canvas, panels; talks to the engine only through `execute`                         |
-| L7    | `apps/lightfoundry`, `apps/lightfoundry-cli`, `xtask` | the eframe desktop app (native dialogs, serial), the CLI, build tooling |
+| L6    | `mcp`      | a Model Context Protocol server over stdio: every engine command is a tool                       |
+| L7    | `ui-egui`  | menus, tools, canvas, panels; talks to the engine only through `execute`                         |
+| L8    | `apps/lightfoundry`, `apps/lightfoundry-cli`, `xtask` | the eframe desktop app (native dialogs, serial), the CLI, build tooling |
 
 ## Everything is a command
 
