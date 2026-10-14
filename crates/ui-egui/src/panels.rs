@@ -1062,7 +1062,17 @@ fn override_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let Some(first) = sel.first().and_then(|id| app.session.doc.shape(*id)) else { return };
     let layer = app.session.doc.layer(first.layer).cloned();
     let current = first.cut;
+    let order = first.order;
     ui.separator();
+    ui.horizontal(|ui| {
+        ui.label("Cut order");
+        let mut n = order;
+        let r =
+            ui.add(egui::DragValue::new(&mut n).range(-1000..=1000)).on_hover_text("Lower numbers are cut first within the layer; 0 is the default");
+        if committed(&r) && n != order {
+            app.run("shape.set_order", json!({ "order": n }));
+        }
+    });
     ui.horizontal(|ui| {
         let mut on = current.is_some();
         if ui.checkbox(&mut on, "Own cut settings").on_hover_text("Use these settings for the selected shapes instead of their layer's").changed() {

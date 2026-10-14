@@ -21,6 +21,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         run: cut_override,
     },
     CommandSpec {
+        id: "shape.set_order",
+        label: "Cut Order",
+        menu: "Laser",
+        shortcut: None,
+        params_doc: "{ids?, order: integer -1000..1000}  — cut priority within the layer: lower numbers are cut first; shapes default to 0 and ties keep the drawing order",
+        mutates: true,
+        run: set_order,
+    },
+    CommandSpec {
         id: "generate.test_grid",
         label: "Material Test Grid",
         menu: "Laser",
@@ -70,6 +79,29 @@ fn cut_override(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         shape.cut = Some(c).filter(|c| !c.is_empty());
     }
     Ok(json!({ "shapes": ids.len() }))
+}
+
+#[derive(Deserialize)]
+struct OrderParams {
+    ids: Option<Vec<ShapeId>>,
+    order: i32,
+}
+
+fn set_order(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: OrderParams = parse(params)?;
+    if !(-1000..=1000).contains(&p.order) {
+        return Err(EngineError::BadParams("order must be between -1000 and 1000".into()));
+    }
+    let ids: Vec<ShapeId> = id_list(&p.ids, &s.selection).into_iter().filter(|id| s.doc.shape(*id).is_some()).collect();
+    if ids.is_empty() {
+        return Err(EngineError::NothingSelected);
+    }
+    for id in &ids {
+        if let Some(shape) = s.doc.shape_mut(*id) {
+            shape.order = p.order;
+        }
+    }
+    Ok(json!({ "shapes": ids.len(), "order": p.order }))
 }
 
 #[derive(Deserialize)]

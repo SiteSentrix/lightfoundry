@@ -78,6 +78,7 @@ fn create(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         kind: ShapeKind::Text { content: p.text, style: settings, path },
         cut: None,
         group: None,
+        order: 0,
     };
     let id = s.doc.add_shape(shape);
     s.selection = vec![id];
