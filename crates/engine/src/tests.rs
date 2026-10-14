@@ -1013,6 +1013,36 @@ mod import_tests {
     }
 
     #[test]
+    fn outline_text_from_a_font_file_is_filled_survives_without_the_font_and_can_switch_back() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-font-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let font = dir.join("tiny.ttf");
+        std::fs::write(&font, lightfoundry_text::testfont::tiny_font()).unwrap();
+        let mut s = Session::new();
+        let v = s.execute("text.create", &json!({"text": "AB", "x": 20, "y": 30, "height": 14, "font": font})).unwrap();
+        let id = v["id"].as_u64().unwrap();
+        let b = s.doc.shape(id).unwrap().world_bounds().unwrap();
+        assert!((b.y1 - b.y0 - 14.0).abs() < 0.1 && b.x0 >= 19.9, "{b:?}");
+
+        // Fill mode engraves it solid, with the hole in the A left alone.
+        s.execute("layer.set", &json!({"id": 0, "mode": "fill", "interval": 0.5})).unwrap();
+        let g = s.execute("job.gcode", &json!({"include": true})).unwrap()["gcode"].as_str().unwrap().to_string();
+        assert!(g.lines().filter(|l| l.starts_with("G1")).count() > 40, "many scan lines");
+
+        // The project keeps the shapes; opening it needs no font.
+        std::fs::remove_file(&font).unwrap();
+        let back = lightfoundry_format::from_bytes(&lightfoundry_format::to_bytes(&s.doc).unwrap()).unwrap();
+        assert!(back.shape(id).unwrap().world_bounds().is_some());
+        assert!(s.execute("text.edit", &json!({"id": id, "text": "BA"})).is_err(), "editing the text needs the font again");
+        let r = s.execute("text.edit", &json!({"id": id, "text": "BA", "font": ""})).unwrap();
+        assert!(r["unsupported"].as_array().unwrap().is_empty());
+        assert!(s.execute("text.create", &json!({"text": "A", "font": "/no/such/font.ttf"})).is_err());
+        let junk = dir.join("junk.ttf");
+        std::fs::write(&junk, b"definitely not a font").unwrap();
+        assert!(s.execute("text.create", &json!({"text": "A", "font": junk})).is_err());
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

@@ -755,7 +755,30 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     if let Some(w) = &app.text_warning {
         ui.colored_label(app.tokens.error, w);
     }
-    ui.weak("Single-line stroke font: engraves each stroke in one pass (Line mode).");
+    ui.horizontal_wrapped(|ui| {
+        let name = style.font.as_deref().map_or("Built-in stroke font".to_string(), |p| {
+            std::path::Path::new(p).file_name().map_or_else(|| p.to_string(), |n| n.to_string_lossy().into_owned())
+        });
+        ui.label(format!("Font: {name}"));
+        if ui.button("Choose font…").on_hover_text("A .ttf or .otf file of yours: draws filled outlines (use a Fill layer)").clicked()
+            && let Some(path) = app.pick_open("Choose a font", &["ttf", "otf"])
+            && let Some(v) = app.run("text.edit", json!({ "id": id, "font": path }))
+        {
+            app.note_unsupported(&v);
+            app.text_buffer = None;
+        }
+        if style.font.is_some() && ui.button("Built-in").clicked() {
+            app.run("text.edit", json!({ "id": id, "font": "" }));
+            app.text_buffer = None;
+        }
+    });
+    if style.font.is_some() {
+        ui.weak(
+            "Outline text: set its layer to Fill to engrave it solid. The shapes are saved in the project; the font is only needed to edit the text.",
+        );
+    } else {
+        ui.weak("Single-line stroke font: engraves each stroke in one pass (Line mode).");
+    }
 }
 
 /// Boolean combine and offset for the current selection.

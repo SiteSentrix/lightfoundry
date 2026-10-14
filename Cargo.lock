@@ -1543,6 +1543,7 @@ version = "0.1.0"
 dependencies = [
  "kurbo",
  "lightfoundry-geom",
+ "skrifa",
  "thiserror 2.0.21",
 ]
 

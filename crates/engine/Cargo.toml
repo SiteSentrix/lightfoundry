@@ -27,3 +27,4 @@ log = { workspace = true }
 image = { workspace = true }
 
 [dev-dependencies]
+lightfoundry-text = { workspace = true, features = ["testfont"] }

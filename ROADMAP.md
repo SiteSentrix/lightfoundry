@@ -171,4 +171,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   resumed job restores it. `Machine::rotary` (reference and object diameter) scales Y by
   reference/object, refuses unusable diameters, and the Device section can set the bed height to
   one turn of the object. Galvo needs controller-specific protocols and stays out of scope.
+- **2026-10-14 — outline fonts.** `text::layout_outline` draws filled glyph outlines (holes
+  included) from a TrueType/OpenType file the person supplies, via `skrifa`; sizes are set by cap
+  height, advances come from the font (no kerning or shaping). `text.create` / `text.edit` take
+  `font` (a path; "" returns to the stroke font); the laid-out shapes are stored, so projects open
+  without the font. No font is in the repository: tests use a font built in code
+  (`text::testfont`, behind the `testfont` feature).
 

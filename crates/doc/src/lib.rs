@@ -430,11 +430,15 @@ pub struct TextSettings {
     pub letter_spacing: f64,
     pub line_spacing: f64,
     pub align: TextAlign,
+    /// Path of a TrueType/OpenType file to draw outlines from (filled text); `None` = the built-in
+    /// single-line font. Only needed to edit the text again: the laid-out shapes are stored.
+    #[serde(default)]
+    pub font: Option<String>,
 }
 
 impl Default for TextSettings {
     fn default() -> Self {
-        Self { height: 10.0, letter_spacing: 1.0, line_spacing: 1.0, align: TextAlign::Left }
+        Self { height: 10.0, letter_spacing: 1.0, line_spacing: 1.0, align: TextAlign::Left, font: None }
     }
 }
 
