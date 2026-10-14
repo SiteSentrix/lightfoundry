@@ -1,11 +1,11 @@
 # Roadmap
 
-> **Stage:** M0, the vertical slice, complete · **Next:** M1, drive a real machine
+> **Stage:** M1 software complete, hardware verification pending · **Next:** run on a real GRBL machine (gap 1)
 
 | Milestone | Goal                                                                                       | Status |
 |-----------|--------------------------------------------------------------------------------------------|--------|
 | M0        | Import, layers, toolpath, G-code, simulated streaming, desktop app, CLI, quality gates     | done   |
-| M1        | Real-hardware verification; jog/home/position; job origin; pause/resume (gaps 1–3)         | next   |
+| M1        | Jog/home/position, job origin, pause/resume (done, simulator-tested); real-hardware verification (gap 1) | in progress |
 | M2        | Design tools: text, node edit, offset, booleans, snapping (gaps 4–7)                       |        |
 | M3        | Planning quality: cut-order options, lead-ins, tabs, image adjustments, timeline preview   |        |
 | M4        | Workflow: groups, autosave/recovery, material test grids, agent control (MCP)              |        |
@@ -20,3 +20,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   SVG/DXF/image import, native file format, GRBL streamer with simulator and optional serial
   transport, engine with 31 commands, undo/redo and panic guard, egui desktop app, CLI, `xtask`
   (fmt, clippy, tests, layers, clean-room, assets). 118 tests. Not yet run on real hardware.
+- **2026-10-14 — M1.** Persistent GRBL `Link` (status polling, jog, home, unlock, set/go to origin,
+  pause/resume/stop, console) with a shared `JobStream` protocol core; simulator learned `$J=`, `$H`,
+  `G92`, G90/G91 and feed hold. Job origin modes (`job.set_origin`: absolute / user origin / current
+  position, 9-point anchor) through the document, G-code placement, file format, CLI and UI. UI jog pad
+  and anchor picker drawn in code (the default font has no arrow glyphs). 143 tests. Still not run on
+  real hardware.

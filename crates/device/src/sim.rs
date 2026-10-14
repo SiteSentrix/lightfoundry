@@ -19,7 +19,13 @@ pub struct SimulatedGrbl {
     silent: bool,
     fail_prefix: Option<String>,
     alarm_prefix: Option<String>,
+    /// Machine position (mm).
     position: (f64, f64),
+    /// Work-coordinate offset set by `G92`.
+    offset: (f64, f64),
+    relative: bool,
+    held: bool,
+    homed: bool,
     latency: Duration,
 }
 
@@ -46,8 +52,17 @@ impl SimulatedGrbl {
         self.reset
     }
 
+    /// Machine position in mm.
     pub fn position(&self) -> (f64, f64) {
         self.position
+    }
+
+    pub fn is_held(&self) -> bool {
+        self.held
+    }
+
+    pub fn is_homed(&self) -> bool {
+        self.homed
     }
 
     /// Lines starting with `prefix` answer `error:20`.
@@ -83,17 +98,62 @@ impl SimulatedGrbl {
         self.received.push(line);
     }
 
+    /// A tiny subset of GRBL's behaviour: enough for jogging, homing, work zero and motion.
     fn apply(&mut self, line: &str) {
-        for word in line.split_whitespace() {
+        let upper = line.to_ascii_uppercase();
+        if upper == "$H" {
+            self.position = (0.0, 0.0);
+            self.homed = true;
+            return;
+        }
+        let (body, jog) = match upper.strip_prefix("$J=") {
+            Some(rest) => (rest.to_string(), true),
+            None => (upper.clone(), false),
+        };
+        if body.starts_with('$') {
+            return;
+        }
+        let mut relative = jog || self.relative;
+        if body.contains("G91") {
+            relative = true;
+            self.relative = !jog;
+        }
+        if body.contains("G90") {
+            relative = false;
+            self.relative = false;
+        }
+        let (mut x, mut y) = (None, None);
+        for word in body.split_whitespace() {
             let (axis, value) = word.split_at(1);
             if let Ok(v) = value.parse::<f64>() {
                 match axis {
-                    "X" => self.position.0 = v,
-                    "Y" => self.position.1 = v,
+                    "X" => x = Some(v),
+                    "Y" => y = Some(v),
                     _ => {}
                 }
             }
         }
+        if body.contains("G92") {
+            // The head's current position becomes the given work coordinate.
+            self.offset = (self.position.0 - x.unwrap_or(0.0), self.position.1 - y.unwrap_or(0.0));
+            return;
+        }
+        if relative {
+            self.position.0 += x.unwrap_or(0.0);
+            self.position.1 += y.unwrap_or(0.0);
+        } else {
+            if let Some(x) = x {
+                self.position.0 = self.offset.0 + x;
+            }
+            if let Some(y) = y {
+                self.position.1 = self.offset.1 + y;
+            }
+        }
+    }
+
+    fn status_line(&self) -> String {
+        let state = if self.held { "Hold:0" } else { "Idle" };
+        format!("<{state}|MPos:{:.3},{:.3},0.000|FS:0,0>", self.position.0, self.position.1)
     }
 }
 
@@ -102,12 +162,22 @@ impl Transport for SimulatedGrbl {
         for &b in bytes {
             if b == realtime::SOFT_RESET {
                 self.reset = true;
+                self.held = false;
                 self.pending.clear();
                 self.pending_bytes = 0;
                 continue;
             }
             if b == realtime::STATUS_QUERY {
-                self.responses.push_back(format!("<Idle|MPos:{:.3},{:.3},0.000|FS:0,0>", self.position.0, self.position.1));
+                let status = self.status_line();
+                self.responses.push_back(status);
+                continue;
+            }
+            if b == realtime::FEED_HOLD {
+                self.held = true;
+                continue;
+            }
+            if b == realtime::CYCLE_START {
+                self.held = false;
                 continue;
             }
             if b == b'\n' {
@@ -130,12 +200,17 @@ impl Transport for SimulatedGrbl {
             std::thread::sleep(timeout);
             return Ok(None);
         }
-        if self.responses.is_empty() {
+        if self.responses.is_empty() && !self.held {
             if !self.latency.is_zero() && !self.pending.is_empty() {
                 std::thread::sleep(self.latency);
             }
             self.process_one();
         }
-        Ok(self.responses.pop_front())
+        let response = self.responses.pop_front();
+        if response.is_none() {
+            // A real port blocks until the timeout; do the same so callers do not spin.
+            std::thread::sleep(timeout.min(Duration::from_millis(5)));
+        }
+        Ok(response)
     }
 }

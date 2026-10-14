@@ -17,7 +17,8 @@ simulator when nothing is plugged in.
 - **Cut layers:** 16 layers, each with Line / Fill / Fill + Line mode, speed, min/max power, passes, fill interval and angle, bi-directional scanning, air assist, and image dithering (threshold, Floyd–Steinberg, grayscale).
 - **Toolpath:** inner shapes cut before outer ones, nearest-neighbour ordering, serpentine scan fill with holes, raster engraving with overscan, and a toolpath preview with time estimate.
 - **Output:** GRBL G-code (`M4` dynamic power or `M3`, configurable `$30` S range, bottom-left or top-left origin, bed-bounds refusal), frame-the-job, save G-code.
-- **Machine:** character-counting GRBL streaming over serial (feature `serial`, on by default in the desktop app) with progress, stop (soft reset) and error reporting; a simulated controller that checks the 128-byte RX buffer is never overrun.
+- **Job origin:** Absolute coordinates, User origin, or Current position, with a 9-point anchor on the job bounds, so work can be placed on material wherever the head is (`G92` for current position).
+- **Machine control:** a persistent GRBL connection with live status and position, jog pad (direction follows the machine's origin corner), home, unlock, set origin here, go to origin, pause/resume (feed hold), stop (soft reset, laser off), a console with a command line, and character-counting job streaming with progress. Serial ports are behind the `serial` feature (on by default in the desktop app); a built-in simulated controller needs no hardware and checks the 128-byte RX buffer is never overrun.
 - **Files:** native `.lightfoundry` (versioned JSON, atomic saves, validated on load).
 - **Headless:** `lightfoundry-cli` converts files to G-code and runs JSON command scripts.
 
@@ -36,6 +37,9 @@ cargo xtask ci                                              # fmt, clippy, tests
 
 Linux needs the usual windowing libraries for eframe (X11 or Wayland, `libxkbcommon`, a GL driver).
 Serial ports use the `serialport` crate without `libudev`; you may need to be in the `dialout` group.
+
+> **Not yet verified on real hardware.** Everything machine-side has run against the built-in
+> simulator only. Use Frame and low power first, and stay present.
 
 > **Safety:** a laser is a fire and eye hazard. Test with the simulator and the Frame button first,
 > never leave a running machine unattended, and wear appropriate eye protection. This software is

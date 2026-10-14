@@ -190,31 +190,102 @@ mod select_tests {
     }
 }
 
-mod job_tests {
+mod machine_tests {
+    use std::time::{Duration, Instant};
+
+    use lightfoundry_device::JobState;
+    use lightfoundry_doc::Origin;
+
     use super::*;
+
+    /// Runs frames until `done` holds (the worker thread updates asynchronously).
+    fn pump(h: &mut Harness, what: &str, mut done: impl FnMut(&Harness) -> bool) {
+        let start = Instant::now();
+        while !done(h) {
+            h.frame(vec![]);
+            assert!(start.elapsed() < Duration::from_secs(10), "timed out waiting for {what}; status {:?}", h.app.status);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn position(h: &Harness) -> Option<(f64, f64)> {
+        h.app.snap.as_ref().and_then(|s| s.status.as_ref()).and_then(|st| st.position).map(|(x, y, _)| (x, y))
+    }
+
+    fn connected() -> Harness {
+        let mut h = Harness::new();
+        h.app.connect();
+        pump(&mut h, "the first status report", |h| position(h).is_some());
+        h
+    }
 
     #[test]
     fn simulator_job_runs_to_completion_and_reports() {
-        let mut h = Harness::new();
+        let mut h = connected();
         h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 20, "height": 20}));
         let program = h.app.run("job.gcode", json!({"include": true})).and_then(|v| v["gcode"].as_str().map(String::from)).unwrap();
         h.app.start_job(program);
-        let start = std::time::Instant::now();
-        while h.app.runner.as_ref().is_some_and(|r| r.is_running()) {
-            h.frame(vec![]);
-            assert!(start.elapsed() < std::time::Duration::from_secs(10), "job hung");
-            std::thread::sleep(std::time::Duration::from_millis(5));
-        }
+        pump(&mut h, "the job", |h| matches!(h.app.snap.as_ref().map(|s| &s.job), Some(JobState::Finished(_))));
         h.frame(vec![]);
-        assert!(matches!(h.app.run_result, Some(Ok(_))), "{:?}", h.app.run_result);
+        assert!(matches!(&h.app.status, Some((m, false)) if m.starts_with("Job finished")), "{:?}", h.app.status);
+    }
+
+    #[test]
+    fn jog_directions_follow_the_machine_origin() {
+        assert_eq!(panels::machine_delta(Origin::TopLeft, 0.0, -5.0), (0.0, -5.0));
+        assert_eq!(panels::machine_delta(Origin::BottomLeft, 0.0, -5.0), (0.0, 5.0), "screen-up is +Y on a bottom-left machine");
+        assert_eq!(panels::machine_delta(Origin::BottomLeft, 3.0, 0.0), (3.0, 0.0));
+    }
+
+    #[test]
+    fn a_jog_through_the_link_moves_the_simulated_head() {
+        let mut h = connected();
+        h.app.link_do(|l| l.jog(0.0, 10.0, 3000.0));
+        pump(&mut h, "the jog", |h| position(h) == Some((0.0, 10.0)));
+    }
+
+    #[test]
+    fn starting_without_a_connection_explains_what_to_do() {
+        let mut h = Harness::new();
+        h.app.start_job("G21\n".into());
+        assert!(matches!(&h.app.status, Some((m, true)) if m.contains("Connect")), "{:?}", h.app.status);
     }
 
     #[test]
     fn serial_target_without_a_platform_reports_instead_of_crashing() {
         let mut h = Harness::new();
         h.app.target = Target::Serial("/dev/ttyUSB0".into());
-        h.app.start_job("G21\n".into());
+        h.app.connect();
         assert!(matches!(&h.app.status, Some((m, true)) if m.contains("Could not open")), "{:?}", h.app.status);
-        assert!(h.app.runner.is_none());
+        assert!(h.app.link.is_none());
+    }
+
+    #[test]
+    fn disconnect_mid_job_cancels_and_clears_state() {
+        let mut h = connected();
+        let program: String = (0..3000).map(|i| format!("G1 X{} Y0 F100\n", i % 100)).collect();
+        h.app.start_job(program);
+        pump(&mut h, "the job to start", |h| h.app.job_active());
+        h.app.disconnect();
+        assert!(h.app.link.is_none() && h.app.snap.is_none());
+        h.frame(vec![]);
+    }
+
+    #[test]
+    fn job_origin_controls_drive_the_engine_command() {
+        let mut h = Harness::new();
+        h.app.run("job.set_origin", json!({"start_from": "user_origin", "anchor": "center"}));
+        h.frame(vec![]);
+        assert_eq!(h.app.session.doc.job_origin.anchor, lightfoundry_doc::Anchor::Center);
+    }
+
+    #[test]
+    fn the_laser_panel_renders_connected_and_disconnected() {
+        let mut h = connected();
+        for _ in 0..3 {
+            h.frame(vec![]);
+        }
+        h.app.disconnect();
+        h.frame(vec![]);
     }
 }

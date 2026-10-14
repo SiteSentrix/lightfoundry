@@ -21,12 +21,32 @@ pub enum GcodeError {
     NonFinite,
     #[error("machine {0} must be a positive finite number")]
     BadMachine(&'static str),
+    #[error("the job is {w:.1}×{h:.1} mm, larger than the {bw:.0}×{bh:.0} mm work area")]
+    JobLargerThanBed { w: f64, h: f64, bw: f64, bh: f64 },
+}
+
+/// Where machine coordinates come from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Placement {
+    /// Workspace coordinates are machine coordinates (the machine is homed / zeroed at its bed corner).
+    Absolute,
+    /// Coordinates are relative to a job anchor that sits at the machine's work-zero. The bed cannot
+    /// be checked point by point (the zero is wherever the user put it), so the job's extent must
+    /// fit within the bed instead.
+    Relative {
+        /// The job-bounds point (workspace mm) that maps to work-zero.
+        anchor: Point,
+        /// `(width, height)` of the job bounds, mm.
+        extent: (f64, f64),
+        /// Emit `G92 X0 Y0` so the head's current position becomes zero ("Current Position").
+        set_zero: bool,
+    },
 }
 
 /// Generates a complete program: preamble, every op × passes, shutdown.
-pub fn generate(job: &Job, machine: &Machine) -> Result<String, GcodeError> {
+pub fn generate(job: &Job, machine: &Machine, placement: Placement) -> Result<String, GcodeError> {
     check_machine(machine)?;
-    let mut w = Writer::new(machine);
+    let mut w = Writer::new(machine, placement)?;
     w.preamble("LightFoundry job");
     for op in &job.ops {
         if op.air_assist {
@@ -50,12 +70,12 @@ pub fn generate(job: &Job, machine: &Machine) -> Result<String, GcodeError> {
 }
 
 /// A program that traces `bounds` at low power (`power` percent, 0 for a dry run), `loops` times.
-pub fn frame(bounds: Rect, machine: &Machine, speed: f64, power: f64) -> Result<String, GcodeError> {
+pub fn frame(bounds: Rect, machine: &Machine, placement: Placement, speed: f64, power: f64) -> Result<String, GcodeError> {
     check_machine(machine)?;
     if !(speed.is_finite() && speed > 0.0) {
         return Err(GcodeError::BadMachine("frame speed"));
     }
-    let mut w = Writer::new(machine);
+    let mut w = Writer::new(machine, placement)?;
     w.preamble("LightFoundry frame");
     let corners = [(bounds.x0, bounds.y0), (bounds.x1, bounds.y0), (bounds.x1, bounds.y1), (bounds.x0, bounds.y1), (bounds.x0, bounds.y0)];
     for (i, (x, y)) in corners.iter().enumerate() {
@@ -85,6 +105,7 @@ fn check_machine(m: &Machine) -> Result<(), GcodeError> {
 struct Writer<'a> {
     out: String,
     machine: &'a Machine,
+    placement: Placement,
     x: Option<f64>,
     y: Option<f64>,
     s: Option<u32>,
@@ -92,14 +113,25 @@ struct Writer<'a> {
 }
 
 impl<'a> Writer<'a> {
-    fn new(machine: &'a Machine) -> Self {
-        Writer { out: String::new(), machine, x: None, y: None, s: None, f: None }
+    fn new(machine: &'a Machine, placement: Placement) -> Result<Self, GcodeError> {
+        if let Placement::Relative { extent: (w, h), anchor, .. } = placement {
+            if !(w.is_finite() && h.is_finite() && anchor.x.is_finite() && anchor.y.is_finite()) {
+                return Err(GcodeError::NonFinite);
+            }
+            if w > machine.bed_width + BED_EPSILON || h > machine.bed_height + BED_EPSILON {
+                return Err(GcodeError::JobLargerThanBed { w, h, bw: machine.bed_width, bh: machine.bed_height });
+            }
+        }
+        Ok(Writer { out: String::new(), machine, placement, x: None, y: None, s: None, f: None })
     }
 
     fn preamble(&mut self, title: &str) {
         self.comment(title);
         self.line("G21");
         self.line("G90");
+        if matches!(self.placement, Placement::Relative { set_zero: true, .. }) {
+            self.line("G92 X0 Y0");
+        }
         self.line(if self.machine.dynamic_power { "M4 S0" } else { "M3 S0" });
         self.s = Some(0);
     }
@@ -156,6 +188,14 @@ impl<'a> Writer<'a> {
             return Err(GcodeError::NonFinite);
         }
         let m = self.machine;
+        if let Placement::Relative { anchor, .. } = self.placement {
+            let (dx, dy) = (p.x - anchor.x, p.y - anchor.y);
+            let y = match m.origin {
+                Origin::TopLeft => dy,
+                Origin::BottomLeft => -dy,
+            };
+            return Ok((round3(dx), round3(y)));
+        }
         if p.x < -BED_EPSILON || p.y < -BED_EPSILON || p.x > m.bed_width + BED_EPSILON || p.y > m.bed_height + BED_EPSILON {
             return Err(GcodeError::OutOfBed { x: p.x, y: p.y, w: m.bed_width, h: m.bed_height });
         }
@@ -207,7 +247,7 @@ mod tests {
             l.max_power = 50.0;
         }
         doc.add_shape(Shape::path("r", 0, rect_path(10.0, 10.0, 20.0, 10.0)));
-        generate(&plan(&doc).unwrap(), &doc.machine).unwrap()
+        generate(&plan(&doc).unwrap(), &doc.machine, Placement::Absolute).unwrap()
     }
 
     mod program_tests {
@@ -248,7 +288,7 @@ G0 X0 Y0
                 l.air_assist = true;
             }
             doc.add_shape(Shape::path("r", 0, rect_path(0.0, 0.0, 5.0, 5.0)));
-            let g = generate(&plan(&doc).unwrap(), &doc.machine).unwrap();
+            let g = generate(&plan(&doc).unwrap(), &doc.machine, Placement::Absolute).unwrap();
             assert_eq!(g.matches("pass").count(), 2);
             assert!(g.contains("M8") && g.contains("M9"));
         }
@@ -257,7 +297,7 @@ G0 X0 Y0
         fn constant_power_mode_uses_m3() {
             let mut doc = Document::default();
             doc.machine.dynamic_power = false;
-            assert!(generate(&Job::default(), &doc.machine).unwrap().contains("M3 S0"));
+            assert!(generate(&Job::default(), &doc.machine, Placement::Absolute).unwrap().contains("M3 S0"));
         }
     }
 
@@ -268,7 +308,7 @@ G0 X0 Y0
         fn out_of_bed_is_refused() {
             let mut doc = Document::default();
             doc.add_shape(Shape::path("r", 0, rect_path(390.0, 0.0, 50.0, 5.0)));
-            let err = generate(&plan(&doc).unwrap(), &doc.machine).unwrap_err();
+            let err = generate(&plan(&doc).unwrap(), &doc.machine, Placement::Absolute).unwrap_err();
             assert!(matches!(err, GcodeError::OutOfBed { .. }), "{err}");
         }
 
@@ -284,21 +324,21 @@ G0 X0 Y0
                     moves: vec![Move::Travel(Point::new(f64::NAN, 0.0))],
                 }],
             };
-            assert_eq!(generate(&job, &Machine::default()), Err(GcodeError::NonFinite));
+            assert_eq!(generate(&job, &Machine::default(), Placement::Absolute), Err(GcodeError::NonFinite));
         }
 
         #[test]
         fn broken_machine_profiles_are_refused() {
             let m = Machine { bed_width: 0.0, ..Machine::default() };
-            assert!(generate(&Job::default(), &m).is_err());
+            assert!(generate(&Job::default(), &m, Placement::Absolute).is_err());
             let m = Machine { max_s: 0, ..Machine::default() };
-            assert!(generate(&Job::default(), &m).is_err());
+            assert!(generate(&Job::default(), &m, Placement::Absolute).is_err());
         }
 
         #[test]
         fn layer_names_cannot_inject_gcode_through_comments() {
             let machine = Machine::default();
-            let mut w = Writer::new(&machine);
+            let mut w = Writer::new(&machine, Placement::Absolute).unwrap();
             w.comment("evil\nM3 S1000");
             assert!(!w.out.contains("\nM3"));
         }
@@ -311,12 +351,74 @@ G0 X0 Y0
         }
     }
 
+    mod placement_tests {
+        use super::*;
+
+        fn job_at(x: f64, y: f64) -> (Document, Job) {
+            let mut doc = Document::default();
+            doc.machine.origin = Origin::TopLeft;
+            doc.add_shape(Shape::path("r", 0, rect_path(x, y, 20.0, 10.0)));
+            let job = plan(&doc).unwrap();
+            (doc, job)
+        }
+
+        #[test]
+        fn relative_placement_zeroes_the_anchor_and_can_set_work_zero() {
+            let (doc, job) = job_at(100.0, 50.0);
+            let p = Placement::Relative { anchor: Point::new(100.0, 50.0), extent: (20.0, 10.0), set_zero: true };
+            let g = generate(&job, &doc.machine, p).unwrap();
+            assert!(g.contains("G92 X0 Y0"), "{g}");
+            assert!(
+                g.contains(
+                    "G0 X0 Y0
+G1 X20 S"
+                ),
+                "{g}"
+            );
+            assert!(!g.contains("X100"), "{g}");
+        }
+
+        #[test]
+        fn user_origin_does_not_emit_g92() {
+            let (doc, job) = job_at(5.0, 5.0);
+            let p = Placement::Relative { anchor: Point::new(5.0, 5.0), extent: (20.0, 10.0), set_zero: false };
+            assert!(!generate(&job, &doc.machine, p).unwrap().contains("G92"));
+        }
+
+        #[test]
+        fn relative_y_flips_for_a_bottom_left_machine() {
+            let (mut doc, job) = job_at(0.0, 0.0);
+            doc.machine.origin = Origin::BottomLeft;
+            let p = Placement::Relative { anchor: Point::new(0.0, 0.0), extent: (20.0, 10.0), set_zero: false };
+            let g = generate(&job, &doc.machine, p).unwrap();
+            assert!(g.contains("Y-10"), "{g}");
+        }
+
+        #[test]
+        fn relative_jobs_may_sit_anywhere_but_must_fit_the_bed() {
+            let (doc, job) = job_at(5000.0, 0.0); // far outside the bed in design space, fine when relative
+            let ok = Placement::Relative { anchor: Point::new(5000.0, 0.0), extent: (20.0, 10.0), set_zero: false };
+            assert!(generate(&job, &doc.machine, ok).is_ok());
+            let too_big = Placement::Relative { anchor: Point::ORIGIN, extent: (500.0, 10.0), set_zero: false };
+            assert!(matches!(generate(&job, &doc.machine, too_big), Err(GcodeError::JobLargerThanBed { .. })));
+            let nan = Placement::Relative { anchor: Point::new(f64::NAN, 0.0), extent: (1.0, 1.0), set_zero: false };
+            assert_eq!(generate(&job, &doc.machine, nan), Err(GcodeError::NonFinite));
+        }
+    }
+
     mod frame_tests {
         use super::*;
 
         #[test]
         fn frame_traces_bounds_with_requested_power() {
-            let g = frame(Rect::new(10.0, 10.0, 30.0, 20.0), &Machine { origin: Origin::TopLeft, ..Machine::default() }, 3000.0, 1.0).unwrap();
+            let g = frame(
+                Rect::new(10.0, 10.0, 30.0, 20.0),
+                &Machine { origin: Origin::TopLeft, ..Machine::default() },
+                Placement::Absolute,
+                3000.0,
+                1.0,
+            )
+            .unwrap();
             assert!(g.contains("S10"), "{g}");
             assert_eq!(g.matches("G1").count(), 4);
         }

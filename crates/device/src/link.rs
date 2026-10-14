@@ -1,0 +1,668 @@
+//! A persistent connection to a GRBL controller: a worker thread owns the [`Transport`] and does
+//! status polling, immediate commands (jog, home, unlock, set zero), job streaming with
+//! pause/resume/stop, and keeps a console log. The UI only sends commands and reads snapshots.
+
+use std::collections::VecDeque;
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+use crate::stream::{JobStream, MAX_LINE_BYTES};
+use crate::{DeviceError, Progress, Status, Transport, parse_status, realtime};
+
+/// Console lines kept.
+pub const CONSOLE_LIMIT: usize = 500;
+/// How often the worker asks the controller for a status report.
+const STATUS_INTERVAL: Duration = Duration::from_millis(200);
+/// How long one worker iteration waits for a response.
+const POLL: Duration = Duration::from_millis(10);
+/// A running job fails if the controller says nothing for this long (unless paused).
+const JOB_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Largest single jog step accepted, in mm.
+pub const MAX_JOG_MM: f64 = 1000.0;
+pub const MAX_FEED: f64 = 30_000.0;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobState {
+    Idle,
+    Running,
+    Paused,
+    /// Finished, with the number of lines streamed or the reason it stopped.
+    Finished(Result<usize, String>),
+}
+
+#[derive(Debug, Clone)]
+pub struct Snapshot {
+    pub connected: bool,
+    pub status: Option<Status>,
+    pub job: JobState,
+    pub progress: Option<Progress>,
+    pub console: Vec<String>,
+}
+
+#[derive(Debug, PartialEq, thiserror::Error)]
+pub enum LinkError {
+    #[error("a job is running; stop it first")]
+    Busy,
+    #[error("not connected")]
+    Disconnected,
+    #[error("{0}")]
+    Rejected(String),
+}
+
+pub struct Link {
+    tx: Sender<Cmd>,
+    shared: Arc<Mutex<Shared>>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl Link {
+    pub fn connect(transport: Box<dyn Transport + Send>) -> Link {
+        let (tx, rx) = channel();
+        let shared = Arc::new(Mutex::new(Shared::default()));
+        if let Ok(mut s) = shared.lock() {
+            s.connected = true;
+        }
+        let worker_shared = Arc::clone(&shared);
+        let handle = std::thread::spawn(move || Worker::new(transport, rx, worker_shared).run());
+        Link { tx, shared, handle: Some(handle) }
+    }
+
+    pub fn snapshot(&self) -> Snapshot {
+        match self.shared.lock() {
+            Ok(s) => Snapshot {
+                connected: s.connected,
+                status: s.status.clone(),
+                job: s.job.clone(),
+                progress: s.progress,
+                console: s.console.iter().cloned().collect(),
+            },
+            Err(_) => {
+                Snapshot { connected: false, status: None, job: JobState::Idle, progress: None, console: vec!["link state unavailable".into()] }
+            }
+        }
+    }
+
+    pub fn is_job_active(&self) -> bool {
+        matches!(self.snapshot().job, JobState::Running | JobState::Paused)
+    }
+
+    /// Sends one G-code / `$` command line as-is (not while a job is running).
+    pub fn send_line(&self, line: &str) -> Result<(), LinkError> {
+        let line = line.trim();
+        if line.is_empty() {
+            return Ok(());
+        }
+        if line.len() > MAX_LINE_BYTES || line.contains(['\n', '\r', '\0']) || line.bytes().any(|b| b == realtime::SOFT_RESET) {
+            return Err(LinkError::Rejected("not a valid single G-code line".into()));
+        }
+        self.require_idle()?;
+        self.send(Cmd::Line(line.to_string()))
+    }
+
+    /// Relative jog in *machine* axes (`$J=G91 G21 ...`). Steps and feed are bounded.
+    pub fn jog(&self, dx: f64, dy: f64, feed: f64) -> Result<(), LinkError> {
+        self.send_line(&jog_line(dx, dy, feed)?)
+    }
+
+    /// `$H`: run the homing cycle.
+    pub fn home(&self) -> Result<(), LinkError> {
+        self.send_line("$H")
+    }
+
+    /// `$X`: clear an alarm lock.
+    pub fn unlock(&self) -> Result<(), LinkError> {
+        self.send_line("$X")
+    }
+
+    /// `G92 X0 Y0`: make the head's current position the work origin.
+    pub fn set_zero(&self) -> Result<(), LinkError> {
+        self.send_line("G92 X0 Y0")
+    }
+
+    /// Rapid move back to the work origin.
+    pub fn go_to_zero(&self) -> Result<(), LinkError> {
+        self.send_line("G90 G0 X0 Y0")
+    }
+
+    pub fn start_job(&self, program: String) -> Result<(), LinkError> {
+        self.require_idle()?;
+        self.send(Cmd::Start(program))
+    }
+
+    pub fn pause(&self) -> Result<(), LinkError> {
+        self.send(Cmd::Pause)
+    }
+
+    pub fn resume(&self) -> Result<(), LinkError> {
+        self.send(Cmd::Resume)
+    }
+
+    /// Soft-resets the controller: motion stops and the laser goes off.
+    pub fn stop(&self) -> Result<(), LinkError> {
+        self.send(Cmd::Stop)
+    }
+
+    fn require_idle(&self) -> Result<(), LinkError> {
+        if self.is_job_active() { Err(LinkError::Busy) } else { Ok(()) }
+    }
+
+    fn send(&self, cmd: Cmd) -> Result<(), LinkError> {
+        self.tx.send(cmd).map_err(|_| LinkError::Disconnected)
+    }
+}
+
+impl Drop for Link {
+    fn drop(&mut self) {
+        // Never leave a laser job running unattended when its owner goes away.
+        let _ = self.tx.send(Cmd::Close);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+
+/// Builds a GRBL jog command, refusing non-finite or huge values.
+pub fn jog_line(dx: f64, dy: f64, feed: f64) -> Result<String, LinkError> {
+    let ok = |v: f64| v.is_finite() && v.abs() <= MAX_JOG_MM;
+    if !(ok(dx) && ok(dy)) || !(feed.is_finite() && (1.0..=MAX_FEED).contains(&feed)) {
+        return Err(LinkError::Rejected(format!("jog steps must be within ±{MAX_JOG_MM} mm and feed within 1–{MAX_FEED} mm/min")));
+    }
+    let mut line = String::from("$J=G91 G21");
+    if dx != 0.0 {
+        line.push_str(&format!(" X{}", trim_num(dx)));
+    }
+    if dy != 0.0 {
+        line.push_str(&format!(" Y{}", trim_num(dy)));
+    }
+    line.push_str(&format!(" F{}", trim_num(feed)));
+    Ok(line)
+}
+
+fn trim_num(v: f64) -> String {
+    let s = format!("{v:.3}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if s.is_empty() || s == "-0" { "0".into() } else { s.into() }
+}
+
+enum Cmd {
+    Line(String),
+    Start(String),
+    Pause,
+    Resume,
+    Stop,
+    Close,
+}
+
+struct Shared {
+    connected: bool,
+    status: Option<Status>,
+    job: JobState,
+    progress: Option<Progress>,
+    console: VecDeque<String>,
+}
+
+impl Default for Shared {
+    fn default() -> Self {
+        Shared { connected: false, status: None, job: JobState::Idle, progress: None, console: VecDeque::new() }
+    }
+}
+
+struct Worker {
+    transport: Box<dyn Transport + Send>,
+    rx: Receiver<Cmd>,
+    shared: Arc<Mutex<Shared>>,
+    job: Option<JobStream>,
+    /// Immediate lines sent and not yet acknowledged.
+    pending: VecDeque<String>,
+    paused: bool,
+    finishing: bool,
+    last_status_request: Instant,
+    last_activity: Instant,
+}
+
+impl Worker {
+    fn new(transport: Box<dyn Transport + Send>, rx: Receiver<Cmd>, shared: Arc<Mutex<Shared>>) -> Self {
+        let now = Instant::now();
+        Worker {
+            transport,
+            rx,
+            shared,
+            job: None,
+            pending: VecDeque::new(),
+            paused: false,
+            finishing: false,
+            last_status_request: now - STATUS_INTERVAL,
+            last_activity: now,
+        }
+    }
+
+    fn run(mut self) {
+        loop {
+            match self.drain_commands() {
+                Ok(true) => {}
+                Ok(false) => break,
+                Err(e) => {
+                    self.fail_io(e);
+                    break;
+                }
+            }
+            if let Err(e) = self.step() {
+                if matches!(e, DeviceError::Io(_)) {
+                    // The connection itself is gone; there is nothing left to talk to.
+                    self.fail_io(e);
+                    break;
+                }
+                self.fail_job(e);
+            }
+        }
+        // Closing: stop motion and the laser if a job was in progress.
+        if self.job.is_some() {
+            let _ = self.transport.write_all(&[realtime::SOFT_RESET]);
+        }
+        self.update(|s| s.connected = false);
+    }
+
+    /// Returns `Ok(false)` when asked to close.
+    fn drain_commands(&mut self) -> Result<bool, DeviceError> {
+        loop {
+            match self.rx.try_recv() {
+                Ok(cmd) => {
+                    if !self.handle(cmd)? {
+                        return Ok(false);
+                    }
+                }
+                Err(TryRecvError::Empty) => return Ok(true),
+                Err(TryRecvError::Disconnected) => return Ok(false),
+            }
+        }
+    }
+
+    fn handle(&mut self, cmd: Cmd) -> Result<bool, DeviceError> {
+        match cmd {
+            Cmd::Close => return Ok(false),
+            Cmd::Line(line) => {
+                if self.job.is_some() {
+                    self.log("! ignored: a job is running");
+                } else {
+                    self.log(format!("> {line}"));
+                    self.transport.write_all(format!("{line}\n").as_bytes())?;
+                    self.pending.push_back(line);
+                }
+            }
+            Cmd::Start(program) => {
+                if self.job.is_some() {
+                    self.log("! a job is already running");
+                } else {
+                    match JobStream::new(&program) {
+                        Ok(job) => {
+                            self.log(format!("job started: {} lines", job.progress().total));
+                            self.job = Some(job);
+                            self.paused = false;
+                            self.finishing = false;
+                            self.last_activity = Instant::now();
+                            self.update(|s| s.job = JobState::Running);
+                        }
+                        Err(e) => self.finish_job(Err(e.to_string())),
+                    }
+                }
+            }
+            Cmd::Pause if self.job.is_some() && !self.paused => {
+                self.transport.write_all(&[realtime::FEED_HOLD])?;
+                self.paused = true;
+                self.log("job paused (feed hold)");
+                self.update(|s| s.job = JobState::Paused);
+            }
+            Cmd::Resume if self.job.is_some() && self.paused => {
+                self.transport.write_all(&[realtime::CYCLE_START])?;
+                self.paused = false;
+                self.last_activity = Instant::now();
+                self.log("job resumed");
+                self.update(|s| s.job = JobState::Running);
+            }
+            Cmd::Pause | Cmd::Resume => {}
+            Cmd::Stop => {
+                self.transport.write_all(&[realtime::SOFT_RESET])?;
+                self.pending.clear();
+                if self.job.take().is_some() {
+                    self.paused = false;
+                    self.finish_job(Err(DeviceError::Cancelled.to_string()));
+                }
+                self.log("stopped (soft reset); if the machine reports an alarm, use Unlock");
+            }
+        }
+        Ok(true)
+    }
+
+    fn step(&mut self) -> Result<(), DeviceError> {
+        if self.last_status_request.elapsed() >= STATUS_INTERVAL {
+            self.transport.write_all(&[realtime::STATUS_QUERY])?;
+            self.last_status_request = Instant::now();
+        }
+        if let Some(job) = self.job.as_mut()
+            && !self.finishing
+        {
+            job.pump(self.transport.as_mut())?;
+            let p = job.progress();
+            self.update(|s| s.progress = Some(p));
+        }
+        match self.transport.read_line(POLL)? {
+            Some(line) => {
+                self.last_activity = Instant::now();
+                self.on_line(line.trim())
+            }
+            None => {
+                let waiting = self.job.as_ref().is_some_and(|j| j.has_in_flight());
+                if waiting && !self.paused && self.last_activity.elapsed() > JOB_IDLE_TIMEOUT {
+                    return Err(DeviceError::Timeout(JOB_IDLE_TIMEOUT.as_secs()));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn on_line(&mut self, line: &str) -> Result<(), DeviceError> {
+        if line.is_empty() {
+            return Ok(());
+        }
+        if let Some(status) = parse_status(line) {
+            let idle = status.state == crate::MachineState::Idle;
+            self.update(|s| s.status = Some(status));
+            if self.finishing && idle {
+                let lines = self.job.as_ref().map_or(0, |j| j.progress().total);
+                self.job = None;
+                self.finishing = false;
+                self.log("job finished");
+                self.finish_job(Ok(lines));
+            }
+            return Ok(());
+        }
+        if line == "ok" || line.starts_with("error:") || line.starts_with("ALARM:") {
+            if let Some(job) = self.job.as_mut()
+                && job.has_in_flight()
+            {
+                if job.on_response(line)? {
+                    let p = job.progress();
+                    let done = job.is_done();
+                    self.update(|s| s.progress = Some(p));
+                    if done {
+                        // Everything is accepted; wait for the machine to finish moving.
+                        self.finishing = true;
+                    }
+                }
+                return Ok(());
+            }
+            let sent = self.pending.pop_front();
+            self.log(match sent {
+                Some(s) if line != "ok" => format!("< {line}   (for: {s})"),
+                _ => format!("< {line}"),
+            });
+            if line.starts_with("ALARM:") {
+                self.log("the machine is in an alarm state: use Unlock ($X), or Home ($H)");
+            }
+            return Ok(());
+        }
+        self.log(format!("< {line}"));
+        Ok(())
+    }
+
+    fn fail_job(&mut self, e: DeviceError) {
+        self.log(format!("! {e}"));
+        if self.job.take().is_some() {
+            // An aborted job must not leave motion queued or the laser on.
+            let _ = self.transport.write_all(&[realtime::SOFT_RESET]);
+            self.paused = false;
+            self.finishing = false;
+            self.finish_job(Err(e.to_string()));
+        }
+    }
+
+    fn fail_io(&mut self, e: DeviceError) {
+        self.log(format!("! connection error: {e}"));
+        self.job = None;
+        self.update(|s| {
+            s.connected = false;
+            if matches!(s.job, JobState::Running | JobState::Paused) {
+                s.job = JobState::Finished(Err(e.to_string()));
+            }
+        });
+    }
+
+    fn finish_job(&mut self, result: Result<usize, String>) {
+        self.update(|s| s.job = JobState::Finished(result));
+    }
+
+    fn log(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        self.update(|s| {
+            s.console.push_back(text);
+            while s.console.len() > CONSOLE_LIMIT {
+                s.console.pop_front();
+            }
+        });
+    }
+
+    fn update(&self, f: impl FnOnce(&mut Shared)) {
+        if let Ok(mut s) = self.shared.lock() {
+            f(&mut s);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use crate::{MachineState, SimulatedGrbl};
+
+    use super::*;
+
+    const WAIT: Duration = Duration::from_secs(10);
+
+    fn sim_link() -> Link {
+        let mut sim = SimulatedGrbl::new();
+        sim.set_latency(Duration::from_millis(1));
+        Link::connect(Box::new(sim))
+    }
+
+    fn wait_for(link: &Link, what: &str, mut ok: impl FnMut(&Snapshot) -> bool) -> Snapshot {
+        let start = Instant::now();
+        loop {
+            let s = link.snapshot();
+            if ok(&s) {
+                return s;
+            }
+            assert!(start.elapsed() < WAIT, "timed out waiting for {what}; console: {:?}", s.console);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    fn position(s: &Snapshot) -> Option<(f64, f64)> {
+        s.status.as_ref().and_then(|st| st.position).map(|(x, y, _)| (x, y))
+    }
+
+    fn long_program(lines: usize) -> String {
+        (0..lines).map(|i| format!("G1 X{} Y{} F1000\n", i % 100, i % 50)).collect()
+    }
+
+    mod immediate_tests {
+        use super::*;
+
+        #[test]
+        fn status_is_polled_and_jog_moves_the_head() {
+            let link = sim_link();
+            wait_for(&link, "first status", |s| s.status.is_some());
+            link.jog(10.0, -2.5, 3000.0).unwrap();
+            let s = wait_for(&link, "jog to land", |s| position(s) == Some((10.0, -2.5)));
+            assert_eq!(s.status.unwrap().state, MachineState::Idle);
+            assert!(s.console.iter().any(|l| l == "> $J=G91 G21 X10 Y-2.5 F3000"), "{:?}", s.console);
+        }
+
+        #[test]
+        fn home_and_set_zero_and_go_to_zero() {
+            let link = sim_link();
+            link.jog(30.0, 40.0, 3000.0).unwrap();
+            wait_for(&link, "jog", |s| position(s) == Some((30.0, 40.0)));
+            link.set_zero().unwrap(); // work zero here
+            link.jog(5.0, 5.0, 3000.0).unwrap();
+            wait_for(&link, "second jog", |s| position(s) == Some((35.0, 45.0)));
+            link.go_to_zero().unwrap();
+            wait_for(&link, "return to the work origin", |s| position(s) == Some((30.0, 40.0)));
+            link.home().unwrap();
+            wait_for(&link, "homing", |s| position(s) == Some((0.0, 0.0)));
+        }
+
+        #[test]
+        fn errors_from_the_controller_reach_the_console() {
+            let mut sim = SimulatedGrbl::new();
+            sim.fail_on("$J=");
+            let link = Link::connect(Box::new(sim));
+            link.jog(1.0, 0.0, 1000.0).unwrap();
+            let s = wait_for(&link, "the error", |s| s.console.iter().any(|l| l.starts_with("< error:20")));
+            assert!(s.console.iter().any(|l| l.contains("(for: $J=G91 G21 X1 F1000)")), "{:?}", s.console);
+        }
+
+        #[test]
+        fn alarms_explain_how_to_recover() {
+            let mut sim = SimulatedGrbl::new();
+            sim.alarm_on("G0");
+            let link = Link::connect(Box::new(sim));
+            link.send_line("G0 X1").unwrap();
+            wait_for(&link, "the alarm hint", |s| s.console.iter().any(|l| l.contains("Unlock")));
+        }
+    }
+
+    mod validation_tests {
+        use super::*;
+
+        #[test]
+        fn jog_lines_are_bounded_and_formatted() {
+            assert_eq!(jog_line(0.0, 5.0, 1200.0).unwrap(), "$J=G91 G21 Y5 F1200");
+            assert_eq!(jog_line(-0.1, 0.0, 600.0).unwrap(), "$J=G91 G21 X-0.1 F600");
+            for bad in [(f64::NAN, 0.0, 100.0), (2000.0, 0.0, 100.0), (1.0, 0.0, 0.0), (1.0, 0.0, f64::INFINITY), (1.0, 0.0, 1e9)] {
+                assert!(jog_line(bad.0, bad.1, bad.2).is_err(), "{bad:?}");
+            }
+        }
+
+        #[test]
+        fn lines_that_could_smuggle_commands_are_rejected() {
+            let link = sim_link();
+            assert!(link.send_line("G0 X1\nM3 S1000").is_err());
+            assert!(link.send_line("G0 X1\r").is_ok(), "a trailing CR is trimmed, not smuggled");
+            assert!(link.send_line(&"X".repeat(200)).is_err());
+            assert!(link.send_line("G0\u{18}X1").is_err(), "an embedded soft-reset byte is refused");
+            assert!(link.send_line("   ").is_ok());
+        }
+    }
+
+    mod job_tests {
+        use super::*;
+
+        #[test]
+        fn a_job_runs_to_completion_and_waits_for_idle() {
+            let link = sim_link();
+            link.start_job(long_program(60)).unwrap();
+            let s = wait_for(&link, "the job to finish", |s| matches!(s.job, JobState::Finished(_)));
+            assert_eq!(s.job, JobState::Finished(Ok(60)));
+            assert_eq!(s.progress.map(|p| p.acknowledged), Some(60));
+        }
+
+        #[test]
+        fn immediate_commands_are_refused_while_a_job_runs() {
+            let link = sim_link();
+            link.start_job(long_program(2000)).unwrap();
+            wait_for(&link, "the job to start", |s| s.job == JobState::Running);
+            assert_eq!(link.send_line("G0 X1"), Err(LinkError::Busy));
+            assert_eq!(link.jog(1.0, 0.0, 1000.0), Err(LinkError::Busy));
+            assert_eq!(link.start_job("G21".into()), Err(LinkError::Busy));
+            link.stop().unwrap();
+            wait_for(&link, "stop", |s| matches!(s.job, JobState::Finished(_)));
+        }
+
+        #[test]
+        fn pause_holds_progress_and_resume_finishes() {
+            let link = sim_link();
+            link.start_job(long_program(400)).unwrap();
+            wait_for(&link, "some progress", |s| s.progress.is_some_and(|p| p.acknowledged > 5));
+            link.pause().unwrap();
+            let held =
+                wait_for(&link, "the hold", |s| s.job == JobState::Paused && s.status.as_ref().is_some_and(|st| st.state == MachineState::Hold));
+            let at = held.progress.unwrap().acknowledged;
+            std::thread::sleep(Duration::from_millis(150));
+            let later = link.snapshot().progress.unwrap().acknowledged;
+            assert!(later <= at + 1, "progress must stop while held ({at} -> {later})");
+            link.resume().unwrap();
+            let s = wait_for(&link, "the job to finish", |s| matches!(s.job, JobState::Finished(_)));
+            assert_eq!(s.job, JobState::Finished(Ok(400)));
+        }
+
+        #[test]
+        fn stop_cancels_and_the_link_stays_usable() {
+            let link = sim_link();
+            link.start_job(long_program(5000)).unwrap();
+            wait_for(&link, "some progress", |s| s.progress.is_some_and(|p| p.acknowledged > 3));
+            link.stop().unwrap();
+            let s = wait_for(&link, "stop", |s| matches!(s.job, JobState::Finished(_)));
+            assert_eq!(s.job, JobState::Finished(Err("job cancelled".into())));
+            assert!(s.connected);
+            link.jog(1.0, 1.0, 1000.0).unwrap();
+            wait_for(&link, "a jog after stop", |s| s.console.iter().any(|l| l.contains("$J=")));
+        }
+
+        #[test]
+        fn a_controller_error_aborts_the_job_with_the_line_and_resets() {
+            let mut sim = SimulatedGrbl::new();
+            sim.fail_on("G1 X3 ");
+            let link = Link::connect(Box::new(sim));
+            link.start_job("G21\nG1 X1 F100\nG1 X3 Y3\nG1 X4\n".into()).unwrap();
+            let s = wait_for(&link, "failure", |s| matches!(s.job, JobState::Finished(_)));
+            match s.job {
+                JobState::Finished(Err(m)) => assert!(m.contains("line 3") && m.contains("error:20"), "{m}"),
+                other => panic!("expected failure, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn dropping_a_link_mid_job_returns_promptly() {
+            let link = sim_link();
+            link.start_job(long_program(5000)).unwrap();
+            wait_for(&link, "the job to start", |s| s.progress.is_some());
+            let start = Instant::now();
+            drop(link);
+            assert!(start.elapsed() < Duration::from_secs(2));
+        }
+
+        #[test]
+        fn an_invalid_program_fails_cleanly() {
+            let link = sim_link();
+            link.start_job(format!("G1 {}", "X1 ".repeat(40))).unwrap();
+            let s = wait_for(&link, "failure", |s| matches!(s.job, JobState::Finished(_)));
+            assert!(matches!(s.job, JobState::Finished(Err(_))));
+        }
+    }
+
+    mod connection_tests {
+        use super::*;
+
+        struct Broken;
+
+        impl Transport for Broken {
+            fn write_all(&mut self, _: &[u8]) -> io::Result<()> {
+                Err(io::Error::other("unplugged"))
+            }
+
+            fn read_line(&mut self, _: Duration) -> io::Result<Option<String>> {
+                Err(io::Error::other("unplugged"))
+            }
+        }
+
+        #[test]
+        fn a_vanished_device_marks_the_link_disconnected_instead_of_spinning() {
+            let link = Link::connect(Box::new(Broken));
+            let s = wait_for(&link, "disconnect", |s| !s.connected);
+            assert!(s.console.iter().any(|l| l.contains("connection error")), "{:?}", s.console);
+            assert_eq!(link.send_line("G0 X1"), Err(LinkError::Disconnected), "commands after a disconnect report it");
+        }
+    }
+}

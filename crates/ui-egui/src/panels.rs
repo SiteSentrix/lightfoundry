@@ -1,4 +1,5 @@
-use lightfoundry_doc::{Dither, LayerMode, Origin};
+use lightfoundry_device::{JobState, Link};
+use lightfoundry_doc::{Anchor, Dither, LayerMode, Origin, StartFrom};
 use serde_json::{Value, json};
 
 use crate::menus::format_duration;
@@ -215,58 +216,13 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         }
     });
 
-    ui.horizontal(|ui| {
-        ui.label("Send to");
-        let current = match &app.target {
-            Target::Simulator => "Simulator".to_string(),
-            Target::Serial(p) => p.clone(),
-        };
-        egui::ComboBox::from_id_salt("target").selected_text(current).show_ui(ui, |ui| {
-            ui.selectable_value(&mut app.target, Target::Simulator, "Simulator");
-            for p in app.ports.clone() {
-                ui.selectable_value(&mut app.target, Target::Serial(p.clone()), p);
-            }
-        });
-        if ui.small_button("↻").on_hover_text("Rescan serial ports").clicked() {
-            app.ports = app.platform.serial_ports();
-        }
-    });
-
-    let running = app.runner.as_ref().is_some_and(|r| r.is_running());
-    ui.horizontal(|ui| {
-        if ui.button("Generate").clicked() {
-            generate(app);
-        }
-        if ui.add_enabled(!running, egui::Button::new("Frame")).clicked()
-            && let Some(v) = app.run("job.frame", json!({ "power": app.frame_power }))
-            && let Some(g) = v["gcode"].as_str()
-        {
-            app.start_job(g.to_string());
-        }
-        if ui.add_enabled(!running, egui::Button::new("Start")).clicked()
-            && let Some(v) = app.run("job.gcode", json!({ "include": true }))
-            && let Some(g) = v["gcode"].as_str()
-        {
-            app.start_job(g.to_string());
-        }
-        if ui.add_enabled(running, egui::Button::new("Stop")).clicked()
-            && let Some(r) = &app.runner
-        {
-            r.cancel();
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.label("Frame power");
-        ui.add(egui::DragValue::new(&mut app.frame_power).range(0.0..=100.0).suffix(" %"));
-    });
-    if let Some(r) = &app.runner {
-        let p = r.progress();
-        if p.total > 0 {
-            ui.add(egui::ProgressBar::new(p.acknowledged as f32 / p.total as f32).text(format!("{} / {}", p.acknowledged, p.total)));
-        }
-    }
-    if let Some(Err(e)) = &app.run_result {
-        ui.colored_label(app.tokens.error, e);
+    job_origin(app, ui);
+    ui.separator();
+    connection(app, ui);
+    job_controls(app, ui);
+    if app.link.is_some() {
+        jog_pad(app, ui);
+        console(app, ui);
     }
     if let Some(gcode) = app.session.last_gcode.clone() {
         ui.collapsing("G-code", |ui| {
@@ -302,4 +258,232 @@ fn number(ui: &mut egui::Ui, value: f64, range: std::ops::RangeInclusive<f64>, s
 
 fn committed(r: &egui::Response) -> bool {
     r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged() && !r.has_focus())
+}
+
+/// Workspace-direction step → machine-axis step (the machine's Y axis may point up or down).
+pub(crate) fn machine_delta(origin: Origin, dx: f64, dy: f64) -> (f64, f64) {
+    match origin {
+        Origin::TopLeft => (dx, dy),
+        Origin::BottomLeft => (dx, -dy),
+    }
+}
+
+fn job_origin(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let o = app.session.doc.job_origin;
+    ui.horizontal(|ui| {
+        ui.label("Start from");
+        let mut start_from = o.start_from;
+        egui::ComboBox::from_id_salt("start_from")
+            .selected_text(match start_from {
+                StartFrom::Absolute => "Absolute coordinates",
+                StartFrom::UserOrigin => "User origin",
+                StartFrom::CurrentPosition => "Current position",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut start_from, StartFrom::Absolute, "Absolute coordinates");
+                ui.selectable_value(&mut start_from, StartFrom::UserOrigin, "User origin");
+                ui.selectable_value(&mut start_from, StartFrom::CurrentPosition, "Current position");
+            });
+        if start_from != o.start_from {
+            app.run("job.set_origin", json!({ "start_from": start_from }));
+        }
+    });
+    if o.start_from == StartFrom::Absolute {
+        return;
+    }
+    ui.horizontal(|ui| {
+        ui.label("Job origin");
+        egui::Grid::new("anchor_grid").spacing([2.0, 2.0]).show(ui, |ui| {
+            for row in Anchor::ALL.chunks(3) {
+                for a in row {
+                    if anchor_button(ui, o.anchor == *a).clicked() {
+                        app.run("job.set_origin", json!({ "anchor": a }));
+                    }
+                }
+                ui.end_row();
+            }
+        });
+    });
+    ui.weak(match o.start_from {
+        StartFrom::UserOrigin => "Jog to the spot, then Set origin; that spot is the job origin.",
+        _ => "The head's position when the job starts becomes the job origin.",
+    });
+}
+
+fn connection(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let connected = app.link.is_some();
+    ui.horizontal(|ui| {
+        ui.label("Machine");
+        let current = match &app.target {
+            Target::Simulator => "Simulator".to_string(),
+            Target::Serial(p) => p.clone(),
+        };
+        ui.add_enabled_ui(!connected, |ui| {
+            egui::ComboBox::from_id_salt("target").selected_text(current).show_ui(ui, |ui| {
+                ui.selectable_value(&mut app.target, Target::Simulator, "Simulator");
+                for p in app.ports.clone() {
+                    ui.selectable_value(&mut app.target, Target::Serial(p.clone()), p);
+                }
+            });
+            if ui.small_button("↻").on_hover_text("Rescan serial ports").clicked() {
+                app.ports = app.platform.serial_ports();
+            }
+        });
+        if connected {
+            if ui.button("Disconnect").clicked() {
+                app.disconnect();
+            }
+        } else if ui.button("Connect").clicked() {
+            app.connect();
+        }
+    });
+    if let Some(s) = &app.snap {
+        let state = s.status.as_ref().map_or("…".to_string(), |st| format!("{:?}", st.state));
+        let pos = s.status.as_ref().and_then(|st| st.position).map_or(String::new(), |(x, y, _)| format!("   X {x:.2}  Y {y:.2}"));
+        ui.label(egui::RichText::new(format!("{state}{pos}")).monospace());
+    }
+}
+
+fn job_controls(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let connected = app.link.is_some();
+    let active = app.job_active();
+    let paused = app.snap.as_ref().is_some_and(|s| s.job == JobState::Paused);
+    ui.horizontal(|ui| {
+        if ui.button("Generate").clicked() {
+            generate(app);
+        }
+        if ui.add_enabled(connected && !active, egui::Button::new("Frame")).clicked()
+            && let Some(v) = app.run("job.frame", json!({ "power": app.frame_power }))
+            && let Some(g) = v["gcode"].as_str()
+        {
+            app.start_job(g.to_string());
+        }
+        if ui.add_enabled(connected && !active, egui::Button::new("Start")).clicked()
+            && let Some(v) = app.run("job.gcode", json!({ "include": true }))
+            && let Some(g) = v["gcode"].as_str()
+        {
+            app.start_job(g.to_string());
+        }
+    });
+    ui.horizontal(|ui| {
+        if paused {
+            if ui.button("Resume").clicked() {
+                app.link_do(Link::resume);
+            }
+        } else if ui.add_enabled(active, egui::Button::new("Pause")).clicked() {
+            app.link_do(Link::pause);
+        }
+        if ui.add_enabled(connected, egui::Button::new("Stop")).on_hover_text("Soft reset: stops motion and turns the laser off").clicked() {
+            app.link_do(Link::stop);
+        }
+        ui.label("Frame power");
+        ui.add(egui::DragValue::new(&mut app.frame_power).range(0.0..=100.0).suffix(" %"));
+    });
+    if let Some(p) = app.snap.as_ref().and_then(|s| s.progress)
+        && p.total > 0
+        && active
+    {
+        ui.add(egui::ProgressBar::new(p.acknowledged as f32 / p.total as f32).text(format!("{} / {}", p.acknowledged, p.total)));
+    }
+}
+
+fn jog_pad(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let enabled = !app.job_active();
+    let origin = app.session.doc.machine.origin;
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Step");
+            egui::ComboBox::from_id_salt("jog_step").selected_text(format!("{} mm", app.jog_step)).show_ui(ui, |ui| {
+                for s in [0.1, 1.0, 10.0, 50.0] {
+                    ui.selectable_value(&mut app.jog_step, s, format!("{s} mm"));
+                }
+            });
+            ui.label("Speed");
+            ui.add(egui::DragValue::new(&mut app.jog_feed).range(10.0..=30_000.0).suffix(" mm/min"));
+        });
+        let step = app.jog_step;
+        let jog = |app: &mut LightFoundryApp, wx: f64, wy: f64| {
+            let (dx, dy) = machine_delta(origin, wx * step, wy * step);
+            let feed = app.jog_feed;
+            app.link_do(|l| l.jog(dx, dy, feed));
+        };
+        // Directions are in workspace terms: "up" is toward the top of the canvas.
+        let rows: [[Option<(f64, f64)>; 3]; 3] =
+            [[None, Some((0.0, -1.0)), None], [Some((-1.0, 0.0)), None, Some((1.0, 0.0))], [None, Some((0.0, 1.0)), None]];
+        egui::Grid::new("jog_grid").spacing([2.0, 2.0]).show(ui, |ui| {
+            for cells in rows {
+                for cell in cells {
+                    if let Some((wx, wy)) = cell {
+                        if arrow_button(ui, wx, wy).clicked() {
+                            jog(app, wx, wy);
+                        }
+                    } else {
+                        ui.allocate_space(egui::vec2(34.0, 28.0));
+                    }
+                }
+                ui.end_row();
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Home").on_hover_text("Run the homing cycle ($H)").clicked() {
+                app.link_do(Link::home);
+            }
+            if ui.button("Unlock").on_hover_text("Clear an alarm ($X)").clicked() {
+                app.link_do(Link::unlock);
+            }
+            if ui.button("Set origin here").on_hover_text("Make the head's position the work origin (G92)").clicked() {
+                app.link_do(Link::set_zero);
+            }
+            if ui.button("Go to origin").clicked() {
+                app.link_do(Link::go_to_zero);
+            }
+        });
+    });
+}
+
+fn console(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    ui.collapsing("Console", |ui| {
+        let lines = app.snap.as_ref().map(|s| s.console.clone()).unwrap_or_default();
+        egui::ScrollArea::vertical().max_height(140.0).stick_to_bottom(true).show(ui, |ui| {
+            for l in lines.iter().rev().take(100).rev() {
+                ui.label(egui::RichText::new(l).monospace().small());
+            }
+        });
+        let r =
+            ui.add(egui::TextEdit::singleline(&mut app.console_input).hint_text("G-code or $ command, Enter to send").desired_width(f32::INFINITY));
+        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            let line = std::mem::take(&mut app.console_input);
+            app.link_do(|l| l.send_line(&line));
+            r.request_focus();
+        }
+    });
+}
+
+/// A square button with a triangle pointing along `(dx, dy)`, drawn in code (the default font has
+/// no arrow glyphs, and we ship no icon assets).
+fn arrow_button(ui: &mut egui::Ui, dx: f64, dy: f64) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 28.0), egui::Sense::click());
+    let visuals = ui.style().interact(&resp);
+    ui.painter().rect_filled(rect, 3.0, visuals.weak_bg_fill);
+    let (fx, fy) = (dx as f32, dy as f32);
+    let c = rect.center();
+    let along = egui::vec2(fx, fy) * 7.0;
+    let across = egui::vec2(-fy, fx) * 6.0;
+    let points = vec![c + along, c - along * 0.6 + across, c - along * 0.6 - across];
+    ui.painter().add(egui::Shape::convex_polygon(points, visuals.fg_stroke.color, egui::Stroke::NONE));
+    resp
+}
+
+/// One cell of the 3×3 job-origin picker: a ring, filled when selected (drawn in code).
+fn anchor_button(ui: &mut egui::Ui, selected: bool) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
+    let visuals = ui.style().interact(&resp);
+    ui.painter().rect_filled(rect, 3.0, visuals.weak_bg_fill);
+    let color = if selected { ui.visuals().selection.stroke.color } else { visuals.fg_stroke.color };
+    if selected {
+        ui.painter().circle_filled(rect.center(), 5.5, color);
+    } else {
+        ui.painter().circle_stroke(rect.center(), 5.0, egui::Stroke::new(1.5, color));
+    }
+    resp
 }

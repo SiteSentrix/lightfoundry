@@ -4,7 +4,7 @@
 //! No UI and no OS serial code lives here; real serial ports implement [`Transport`] elsewhere
 //! (see the `serial` feature).
 
-mod runner;
+mod link;
 mod sim;
 mod status;
 mod stream;
@@ -12,7 +12,7 @@ mod stream;
 #[cfg(feature = "serial")]
 pub mod serial;
 
-pub use runner::JobRunner;
+pub use link::{CONSOLE_LIMIT, JobState, Link, LinkError, MAX_FEED, MAX_JOG_MM, Snapshot, jog_line};
 pub use sim::SimulatedGrbl;
 pub use status::{MachineState, Status, parse_status};
 pub use stream::{Progress, StreamOptions, StreamReport, stream_program};
