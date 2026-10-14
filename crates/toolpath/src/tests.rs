@@ -616,6 +616,37 @@ mod order_option_tests {
     use super::*;
 
     #[test]
+    fn a_shared_edge_is_cut_once() {
+        let rect = |x0: f64, x1: f64| Polyline::new(vec![Point::new(x0, 0.0), Point::new(x1, 0.0), Point::new(x1, 10.0), Point::new(x0, 10.0)], true);
+        let length = |ls: &[Polyline]| -> f64 { ls.iter().map(|l| l.length()).sum() };
+        let both = vec![rect(0.0, 10.0), rect(10.0, 20.0)];
+        let before = length(&both);
+        let after = remove_overlaps(both);
+        assert!((before - after.iter().map(|l| l.length()).sum::<f64>() - 10.0).abs() < 1e-6, "the shared 10 mm side is cut once");
+        assert!((length(&after) - 70.0).abs() < 1e-6);
+        let apart = vec![rect(0.0, 10.0), rect(11.0, 20.0)];
+        assert_eq!(remove_overlaps(apart.clone()), apart, "shapes that do not touch are untouched");
+    }
+
+    #[test]
+    fn partly_overlapping_collinear_lines_are_trimmed() {
+        let line = |a: f64, b: f64| Polyline::new(vec![Point::new(a, 0.0), Point::new(b, 0.0)], false);
+        let out = remove_overlaps(vec![line(0.0, 10.0), line(5.0, 15.0), line(2.0, 8.0)]);
+        assert_eq!(out, vec![line(0.0, 10.0), line(10.0, 15.0)]);
+    }
+
+    #[test]
+    fn overlap_removal_ignores_hostile_input() {
+        let nan = Polyline::new(vec![Point::new(f64::NAN, 0.0), Point::new(1.0, 0.0)], false);
+        assert_eq!(remove_overlaps(vec![nan.clone(), nan]).len(), 2);
+        let dot = Polyline::new(vec![Point::new(1.0, 1.0), Point::new(1.0, 1.0)], false);
+        assert_eq!(remove_overlaps(vec![dot.clone(), dot.clone()]).len(), 2);
+        assert!(remove_overlaps(Vec::new()).is_empty());
+        let many: Vec<Polyline> = (0..4000).map(|i| Polyline::new(vec![Point::new(0.0, 0.0), Point::new(f64::from(i), 0.0)], false)).collect();
+        assert_eq!(remove_overlaps(many).len(), 4000, "too many segments are left alone");
+    }
+
+    #[test]
     fn identical_outlines_are_cut_once_whatever_their_direction_or_start() {
         let sq = |pts: [(f64, f64); 4]| Polyline::new(pts.iter().map(|&(x, y)| Point::new(x, y)).collect(), true);
         let a = sq([(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);

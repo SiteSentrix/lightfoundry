@@ -267,3 +267,6 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   a stream that aborts soft-resets the controller; stray `ok`s are ignored; errors carry source line
   numbers; jogs use G53 and a work-position flag picks `WPos` versus `MPos`; run-from-line restores
   `G92` and the spindle line; G-code refuses bad feeds, NaN power and out-of-extent relative moves.
+- **2026-10-14 — overlapping edges.** With "remove duplicates" on, straight edges lying on top of an
+  earlier edge (shared sides of touching shapes, a line drawn twice) are cut once; the trimmed shape
+  becomes open pieces. Shapes that overlap nothing are untouched; huge or non-finite jobs are skipped.

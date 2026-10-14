@@ -4,6 +4,7 @@
 
 mod fill;
 mod order;
+mod overlap;
 mod perforate;
 mod raster;
 mod tabs;
@@ -12,6 +13,7 @@ mod trace;
 
 pub use fill::fill_segments;
 pub use order::{order_polylines, remove_duplicates};
+pub use overlap::remove_overlaps;
 pub use raster::{Grid, dither, sample_grid};
 pub use timeline::{LayerTime, Moment, OpTime, Timeline, move_seconds};
 pub use trace::{MAX_TRACE_PIXELS, trace};
@@ -354,7 +356,10 @@ fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) ->
     if doc.optimize.remove_duplicates && vector.len() <= MAX_DEDUPLICATED {
         vector = remove_duplicates(vector);
     }
-    let outlines = apply_kerf(layer, &vector)?;
+    let mut outlines = apply_kerf(layer, &vector)?;
+    if doc.optimize.remove_duplicates && outlines.len() <= MAX_DEDUPLICATED {
+        outlines = remove_overlaps(outlines);
+    }
     let power = layer.max_power.clamp(0.0, 100.0);
     let passes = layer.passes.clamp(1, 1000);
     let mk = |kind, moves| Op {
