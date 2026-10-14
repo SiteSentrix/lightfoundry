@@ -14,6 +14,27 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                     app.view = None;
                     ui.close();
                 }
+                ui.checkbox(&mut app.show_rulers, "Rulers");
+                ui.checkbox(&mut app.snapping.objects, "Snap to objects and guides");
+                let mut grid_on = app.snapping.grid.is_some();
+                if ui.checkbox(&mut grid_on, "Snap to grid").changed() {
+                    app.snapping.grid = grid_on.then_some(app.snapping.grid.unwrap_or(5.0));
+                }
+                if let Some(step) = app.snapping.grid.as_mut() {
+                    ui.horizontal(|ui| {
+                        ui.label("Grid step");
+                        egui::ComboBox::from_id_salt("grid_step").selected_text(format!("{step} mm")).show_ui(ui, |ui| {
+                            for s in [0.5, 1.0, 2.0, 5.0, 10.0] {
+                                ui.selectable_value(step, s, format!("{s} mm"));
+                            }
+                        });
+                    });
+                }
+                if ui.add_enabled(!app.guides.is_empty(), egui::Button::new("Clear guides")).clicked() {
+                    app.guides.clear();
+                    ui.close();
+                }
+                ui.separator();
                 ui.checkbox(&mut app.show_preview, "Toolpath preview");
                 ui.checkbox(&mut app.show_travel, "Show travel moves");
             });

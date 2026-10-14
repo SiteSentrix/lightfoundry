@@ -11,6 +11,9 @@ pub struct Tokens {
     pub selection: Color32,
     pub handle: Color32,
     pub travel: Color32,
+    pub guide: Color32,
+    pub ruler: Color32,
+    pub ruler_text: Color32,
     pub error: Color32,
     pub ok: Color32,
 }
@@ -25,6 +28,9 @@ impl Tokens {
         selection: Color32::from_rgb(90, 170, 255),
         handle: Color32::from_rgb(255, 255, 255),
         travel: Color32::from_rgba_premultiplied(120, 120, 130, 90),
+        guide: Color32::from_rgb(70, 200, 210),
+        ruler: Color32::from_rgb(36, 39, 44),
+        ruler_text: Color32::from_rgb(150, 156, 166),
         error: Color32::from_rgb(255, 110, 100),
         ok: Color32::from_rgb(120, 210, 140),
     };

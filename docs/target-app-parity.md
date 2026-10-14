@@ -16,7 +16,7 @@
 | Machine control       |   45% | persistent link: status/position, jog, home, unlock, set/go to origin, pause/resume, stop, console, streaming with progress, simulator | machine settings ($$) editor, jog by dragging on canvas, camera, auto-reconnect, run-from-line |
 | Preview               |   20% | static toolpath preview with travel toggle                              | timeline simulation, scrubbing, speed/power colouring, 3D, print-time breakdown per layer                |
 | Files & workflow      |   40% | native JSON project, atomic save, undo/redo (200), autosave and crash recovery, unsaved-changes prompts, dirty title | recent files, templates, material library, print-and-cut, camera alignment, scripting |
-| UI                    |   25% | menus, tool bar, canvas pan/zoom/grid, layer palette, inspector         | rulers, snapping, guides, layers list reorder, keyboard map, i18n, theming, accessibility                |
+| UI                    |  35% | menus, tool bar, canvas pan/zoom/grid, rulers, guides, snapping (grid, edges/centres, guides), Shift constraints, layer palette, inspector, groups, undo | keyboard map editor, i18n, theming, accessibility, layer list reorder by drag |
 | Robustness            |   60% | no-panic lints, rollback on failure, hostile-input tests, safe streaming | fuzzing harnesses, data recovery, soak tests on real hardware                                            |
 
 **Not yet verified on real hardware.** Everything on the machine side has been exercised against the
@@ -25,7 +25,7 @@ low power, and stay present.
 
 ## Evidence of what ships
 
-- 265 tests across the workspace (`cargo test --workspace`); gates in `cargo xtask ci`.
+- 286 tests across the workspace (`cargo test --workspace`); gates in `cargo xtask ci`.
 - End-to-end: `lightfoundry-cli gcode demo.svg` → G-code; the desktop app was driven under Xvfb
   (draw with each tool, generate, start on the simulator, progress and completion shown; jog pad
   clicks moved the simulated head the expected way and the console logged each `$J=` line).
