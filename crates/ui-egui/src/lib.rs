@@ -9,6 +9,7 @@ mod nodes_ui;
 mod panels;
 mod platform;
 mod recent;
+mod recovery;
 mod register_ui;
 mod settings_ui;
 pub(crate) mod snap;
@@ -138,6 +139,8 @@ pub struct LightFoundryApp {
     awaiting_upload: Option<UploadKind>,
     /// Waiting for the host to finish choosing and opening a serial device.
     awaiting_serial: bool,
+    /// Backups from an earlier session were recovered and still sit on disk until the work is saved.
+    stale_backups: bool,
     marks: register_ui::Marks,
     auto_reconnect: bool,
     reconnect: Option<Reconnect>,
@@ -188,7 +191,8 @@ pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(20);
 impl LightFoundryApp {
     pub fn new(session: Session, platform: Box<dyn Platform>) -> Self {
         let ports = platform.serial_ports();
-        let pending_recovery = platform.recovery_file().filter(|p| p.exists());
+        // Offer the newest autosave that still reads back; a damaged newest copy falls back to an older one.
+        let pending_recovery = platform.recovery_file().and_then(|base| recovery::newest_readable(&base).or_else(|| base.exists().then_some(base)));
         let recent = platform.recent_file().map(|p| recent::Recent::load(&p)).unwrap_or_default();
         Self {
             session,
@@ -253,6 +257,7 @@ impl LightFoundryApp {
             resume_line: 1,
             awaiting_upload: None,
             awaiting_serial: false,
+            stale_backups: false,
             marks: register_ui::Marks::default(),
             auto_reconnect: true,
             reconnect: None,
@@ -299,8 +304,8 @@ impl LightFoundryApp {
             return;
         }
         if !self.session.dirty {
-            if self.autosave_revision.take().is_some() {
-                self.platform.clear_recovery();
+            if std::mem::take(&mut self.stale_backups) | self.autosave_revision.take().is_some() {
+                self.clear_recovery();
             }
             return;
         }
@@ -317,9 +322,24 @@ impl LightFoundryApp {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent); // a missing folder surfaces as the save error below
         }
+        recovery::rotate(&path);
         match self.session.execute("file.autosave", &serde_json::json!({ "path": path })) {
-            Ok(_) => self.autosave_revision = Some(self.session.revision),
+            Ok(_) => {
+                self.autosave_revision = Some(self.session.revision);
+                // A copy that cannot be read back is no safety net: say so while it can still be fixed.
+                if !recovery::is_readable(&path) {
+                    self.status = Some(("The automatic backup could not be read back; save your work".into(), true));
+                }
+            }
             Err(e) => log::warn!("autosave failed: {e}"),
+        }
+    }
+
+    /// Removes the autosave and its older copies (the work was saved or knowingly discarded).
+    fn clear_recovery(&mut self) {
+        self.platform.clear_recovery();
+        if let Some(base) = self.platform.recovery_file() {
+            recovery::remove_all(&base);
         }
     }
 
@@ -355,7 +375,7 @@ impl LightFoundryApp {
             UploadKind::Project => {
                 let ok = self.run("file.open", serde_json::json!({ "data_base64": data })).is_some();
                 if ok {
-                    self.platform.clear_recovery();
+                    self.clear_recovery();
                     self.autosave_revision = None;
                     self.view = None;
                 }
@@ -412,7 +432,7 @@ impl LightFoundryApp {
         match action {
             PendingAction::New => {
                 self.run("file.new", Value::Null);
-                self.platform.clear_recovery();
+                self.clear_recovery();
                 self.autosave_revision = None;
                 self.view = None;
             }
@@ -420,14 +440,14 @@ impl LightFoundryApp {
             PendingAction::Open => {
                 if let Some(path) = self.platform.pick_open("Open project", &["lightfoundry"]) {
                     self.run("file.open", serde_json::json!({ "path": path }));
-                    self.platform.clear_recovery();
+                    self.clear_recovery();
                     self.autosave_revision = None;
                     self.view = None;
                 }
             }
             PendingAction::OpenPath(path) => {
                 if self.run("file.open", serde_json::json!({ "path": path })).is_some() {
-                    self.platform.clear_recovery();
+                    self.clear_recovery();
                     self.autosave_revision = None;
                     self.view = None;
                 } else {
@@ -437,7 +457,7 @@ impl LightFoundryApp {
             }
             PendingAction::Close => {
                 self.allow_close = true;
-                self.platform.clear_recovery();
+                self.clear_recovery();
             }
         }
     }
@@ -448,8 +468,9 @@ impl LightFoundryApp {
         if recover {
             self.run("file.recover", serde_json::json!({ "path": path }));
             self.view = None;
+            self.stale_backups = true;
         } else {
-            self.platform.clear_recovery();
+            self.clear_recovery();
         }
     }
 
