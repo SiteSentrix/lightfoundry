@@ -13,6 +13,7 @@ mod recent;
 mod recovery;
 mod register_ui;
 mod settings_ui;
+mod shortcuts;
 pub(crate) mod snap;
 mod theme;
 mod timeline_ui;
@@ -134,6 +135,11 @@ pub struct LightFoundryApp {
     /// An action waiting for "save changes?" to be answered.
     pending_action: Option<PendingAction>,
     recent: recent::Recent,
+    shortcuts: shortcuts::Shortcuts,
+    shortcuts_open: bool,
+    /// The action waiting for its new key combination.
+    capturing: Option<shortcuts::Action>,
+    shortcut_error: Option<String>,
     /// Percentages to cut off the left, top, right and bottom of the selected image.
     crop_pct: [f64; 4],
     /// Dragging the edges of the selected picture on the canvas shows and sets `crop_pct`.
@@ -209,6 +215,7 @@ impl LightFoundryApp {
         // Offer the newest autosave that still reads back; a damaged newest copy falls back to an older one.
         let pending_recovery = platform.recovery_file().and_then(|base| recovery::newest_readable(&base).or_else(|| base.exists().then_some(base)));
         let recent = platform.recent_file().map(|p| recent::Recent::load(&p)).unwrap_or_default();
+        let shortcuts = platform.shortcuts_file().map(|p| shortcuts::Shortcuts::load(&p)).unwrap_or_default();
         Self {
             session,
             platform,
@@ -268,6 +275,10 @@ impl LightFoundryApp {
             pending_recovery,
             pending_action: None,
             recent,
+            shortcuts,
+            shortcuts_open: false,
+            capturing: None,
+            shortcut_error: None,
             crop_pct: [0.0; 4],
             crop_mode: false,
             crop_drag: None,
@@ -328,7 +339,7 @@ impl LightFoundryApp {
     }
 
     fn has_modal(&self) -> bool {
-        self.pending_recovery.is_some() || self.pending_action.is_some()
+        self.pending_recovery.is_some() || self.pending_action.is_some() || self.capturing.is_some()
     }
 
     /// Writes the recovery copy while there are unsaved changes, and removes it once they are saved.
@@ -464,6 +475,12 @@ impl LightFoundryApp {
         self.save_recent();
     }
 
+    fn save_shortcuts(&self) {
+        if let Some(file) = self.platform.shortcuts_file() {
+            self.shortcuts.save(&file);
+        }
+    }
+
     fn save_recent(&self) {
         if let Some(file) = self.platform.recent_file() {
             self.recent.save(&file);
@@ -552,6 +569,7 @@ impl LightFoundryApp {
     }
 
     fn dialogs(&mut self, ctx: &egui::Context) {
+        shortcuts::window(self, ctx);
         if self.pending_recovery.is_some() {
             let mut choice = None;
             egui::Modal::new(egui::Id::new("recovery")).show(ctx, |ui| {
@@ -873,34 +891,16 @@ impl LightFoundryApp {
             return;
         }
         use egui::{Key, Modifiers};
-        // Redo (Ctrl+Shift+Z) is consumed before undo (Ctrl+Z) so the shifted chord never counts as undo.
-        let (redo, undo, all, dup, delete) = ctx.input_mut(|i| {
-            (
-                i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::Z) || i.consume_key(Modifiers::COMMAND, Key::Y),
-                i.consume_key(Modifiers::COMMAND, Key::Z),
-                i.consume_key(Modifiers::COMMAND, Key::A),
-                i.consume_key(Modifiers::COMMAND, Key::D),
-                i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace),
-            )
+        use shortcuts::Action;
+        let (alias_redo, delete) = ctx.input_mut(|i| {
+            (i.consume_key(Modifiers::COMMAND, Key::Y), i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace))
         });
-        if redo {
-            self.run("edit.redo", Value::Null);
-        } else if undo {
-            self.run("edit.undo", Value::Null);
+        let mut pressed = self.shortcuts.pressed(ctx);
+        if alias_redo {
+            pressed.push(Action::Redo);
         }
-        // Ungroup (Ctrl+Shift+G) before group (Ctrl+G), like redo before undo.
-        let (ungroup, group) =
-            ctx.input_mut(|i| (i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::G), i.consume_key(Modifiers::COMMAND, Key::G)));
-        if ungroup {
-            self.run("edit.ungroup", Value::Null);
-        } else if group {
-            self.run("edit.group", Value::Null);
-        }
-        if all {
-            self.run("edit.select_all", Value::Null);
-        }
-        if dup {
-            self.run("edit.duplicate", Value::Null);
+        for action in pressed {
+            self.run(action.command(), Value::Null);
         }
         if delete && self.tool == Tool::Nodes && self.node_sel.is_some() {
             nodes_ui::delete_selected(self);

@@ -270,3 +270,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — overlapping edges.** With "remove duplicates" on, straight edges lying on top of an
   earlier edge (shared sides of touching shapes, a line drawn twice) are cut once; the trimmed shape
   becomes open pieces. Shapes that overlap nothing are untouched; huge or non-finite jobs are skipped.
+- **2026-10-14 — keyboard shortcut editor.** Edit > Keyboard shortcuts… rebinds undo, redo, select
+  all, duplicate, group and ungroup (click, press the new keys, Esc cancels). Chords need Ctrl or Alt
+  (or an F-key); clashes are refused with the name of the other action; bindings persist in
+  `shortcuts.json` (`Platform::shortcuts_file`) and menus show the current keys. Arrows, Delete,
+  Enter and Escape stay fixed.

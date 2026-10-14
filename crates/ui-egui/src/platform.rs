@@ -37,6 +37,11 @@ pub trait Platform {
         None
     }
 
+    /// Where the keyboard shortcut bindings are kept, if this platform has somewhere to keep them.
+    fn shortcuts_file(&self) -> Option<PathBuf> {
+        None
+    }
+
     /// Browser-style hosts cannot hand out file paths: files arrive as bytes after the person has
     /// chosen them ([`request_upload`](Platform::request_upload), then
     /// [`take_upload`](Platform::take_upload)) and leave as downloads.
