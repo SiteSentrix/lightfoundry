@@ -12,7 +12,7 @@ pub struct Host {
 
 impl eframe::App for Host {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if let Some(link) = &self.agent_link {
+        if let Some(link) = &mut self.agent_link {
             link.serve_pending(&mut self.app.session);
         }
         self.app.ui(ui);
