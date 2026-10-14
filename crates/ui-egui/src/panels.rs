@@ -195,6 +195,16 @@ fn presets_section(app: &mut LightFoundryApp, ui: &mut egui::Ui, layer: u32) {
                 }
             });
         }
+        if let Some(file) = app.platform_preset_library() {
+            ui.horizontal(|ui| {
+                if ui.small_button("Save all to my library").on_hover_text("Keep these presets for other projects").clicked() {
+                    app.save_preset_library(&file);
+                }
+                if ui.small_button("Add from my library").clicked() {
+                    app.load_preset_library(&file);
+                }
+            });
+        }
         ui.horizontal(|ui| {
             ui.add(egui::TextEdit::singleline(&mut app.preset_name).hint_text("Preset name").desired_width(120.0));
             if ui.add_enabled(!app.preset_name.trim().is_empty(), egui::Button::new("Save")).clicked()

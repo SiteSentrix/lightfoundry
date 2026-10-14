@@ -22,6 +22,11 @@ pub trait Platform {
     /// Removes the autosave copy (the work was saved or knowingly discarded).
     fn clear_recovery(&self) {}
 
+    /// Where presets shared between projects are kept, if this platform has somewhere to keep them.
+    fn preset_library_file(&self) -> Option<PathBuf> {
+        None
+    }
+
     /// Where the list of recent projects is kept, if this platform has somewhere to keep it.
     fn recent_file(&self) -> Option<PathBuf> {
         None

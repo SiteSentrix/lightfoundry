@@ -849,6 +849,30 @@ mod import_tests {
     }
 
     #[test]
+    fn presets_travel_between_projects_through_export_and_import() {
+        let mut a = Session::new();
+        a.execute("layer.set", &json!({"id": 0, "speed": 321, "max_power": 44})).unwrap();
+        a.execute("preset.save", &json!({"name": "Mine", "layer": 0})).unwrap();
+        let exported = a.execute("preset.export", &Value::Null).unwrap();
+        let mut b = Session::new();
+        let v = b.execute("preset.import", &exported).unwrap();
+        assert_eq!(v["added"], json!(1));
+        assert_eq!(b.doc.presets[0].settings.speed, 321.0);
+        assert_eq!(b.execute("preset.import", &exported).unwrap()["added"], json!(0), "names already present are kept");
+        b.execute("edit.undo", &Value::Null).unwrap();
+        b.execute("edit.undo", &Value::Null).unwrap();
+        assert!(b.doc.presets.is_empty());
+
+        let mut bad = exported.clone();
+        bad["presets"][0]["settings"]["speed"] = json!(0);
+        assert!(b.execute("preset.import", &bad).is_err(), "unusable settings are refused");
+        bad["presets"][0]["name"] = json!("  ");
+        assert!(b.execute("preset.import", &bad).is_err());
+        assert!(b.execute("preset.import", &json!({"presets": "x"})).is_err());
+        assert!(b.execute("preset.import", &json!({"presets": [{"name": "x"}]})).is_err());
+    }
+
+    #[test]
     fn the_number_of_presets_is_capped() {
         let mut s = Session::new();
         for i in 0..lightfoundry_doc::MAX_PRESETS {
