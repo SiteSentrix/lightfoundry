@@ -13,7 +13,7 @@ mod stream;
 #[cfg(feature = "serial")]
 pub mod serial;
 
-pub use link::{CONSOLE_LIMIT, JobState, Link, LinkError, MAX_FEED, MAX_JOG_MM, Snapshot, jog_line};
+pub use link::{CONSOLE_LIMIT, JobState, Link, LinkError, MAX_FEED, MAX_JOG_MM, MAX_TRAVEL_MM, Snapshot, jog_line, jog_to_line};
 pub use sim::SimulatedGrbl;
 pub use status::{MachineState, Status, parse_status};
 pub use stream::{Progress, StreamOptions, StreamReport, stream_program};

@@ -7,7 +7,7 @@ use crate::snap::{self, SnapSettings, SnapTargets};
 use crate::theme::{on_dark, parse_hex};
 use crate::view::View;
 use crate::{LightFoundryApp, Tool};
-use crate::{nodes_ui, timeline_ui};
+use crate::{head_ui, nodes_ui, timeline_ui};
 
 /// Pointer-distance (screen points) within which handles and edges are hit.
 pub(crate) const HIT_PX: f32 = 6.0;
@@ -129,6 +129,7 @@ pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     if app.show_preview {
         draw_preview(app, &painter, &view);
     }
+    head_ui::draw(app, &painter, &view);
     draw_guides(app, &painter, &view, canvas_rect);
     nodes_ui::draw(app, &painter, &view);
     draw_overlays(app, &painter, &view, pointer, offset, &snapper, shift);
@@ -176,6 +177,15 @@ fn interact(
     let shift = ui.input(|i| i.modifiers.shift);
     let tol = f64::from(HIT_PX / view.zoom);
     let mut offset = (0.0, 0.0);
+
+    if app.move_head_mode {
+        if resp.clicked_by(PointerButton::Primary)
+            && let Some(p) = pointer
+        {
+            head_ui::click(app, p);
+        }
+        return offset;
+    }
 
     // The node and pen tools have their own gestures, except for pulling guides out of rulers.
     if matches!(app.tool, Tool::Nodes | Tool::Pen) && !matches!(app.drag, Drag::NewGuide { .. } | Drag::MoveGuide { .. }) {

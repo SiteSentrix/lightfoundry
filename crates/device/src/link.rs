@@ -23,6 +23,8 @@ const JOB_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// Largest single jog step accepted, in mm.
 pub const MAX_JOG_MM: f64 = 1000.0;
 pub const MAX_FEED: f64 = 30_000.0;
+/// Largest absolute jog coordinate accepted, in mm.
+pub const MAX_TRAVEL_MM: f64 = 100_000.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum JobState {
@@ -126,6 +128,11 @@ impl Link {
         self.send_line(&jog_line(dx, dy, feed)?)
     }
 
+    /// Jog to an absolute machine position (`$J=G90 G21 ...`). Coordinates and feed are bounded.
+    pub fn jog_to(&self, x: f64, y: f64, feed: f64) -> Result<(), LinkError> {
+        self.send_line(&jog_to_line(x, y, feed)?)
+    }
+
     /// `$H`: run the homing cycle.
     pub fn home(&self) -> Result<(), LinkError> {
         self.send_line("$H")
@@ -198,6 +205,15 @@ pub fn jog_line(dx: f64, dy: f64, feed: f64) -> Result<String, LinkError> {
     }
     line.push_str(&format!(" F{}", trim_num(feed)));
     Ok(line)
+}
+
+/// Builds an absolute GRBL jog command, refusing non-finite or absurd values.
+pub fn jog_to_line(x: f64, y: f64, feed: f64) -> Result<String, LinkError> {
+    let ok = |v: f64| v.is_finite() && v.abs() <= MAX_TRAVEL_MM;
+    if !(ok(x) && ok(y)) || !(feed.is_finite() && (1.0..=MAX_FEED).contains(&feed)) {
+        return Err(LinkError::Rejected(format!("a jog target must be within ±{MAX_TRAVEL_MM} mm and feed within 1–{MAX_FEED} mm/min")));
+    }
+    Ok(format!("$J=G90 G21 X{} Y{} F{}", trim_num(x), trim_num(y), trim_num(feed)))
 }
 
 fn trim_num(v: f64) -> String {
@@ -526,6 +542,17 @@ mod tests {
             let s = wait_for(&link, "jog to land", |s| position(s) == Some((10.0, -2.5)));
             assert_eq!(s.status.unwrap().state, MachineState::Idle);
             assert!(s.console.iter().any(|l| l == "> $J=G91 G21 X10 Y-2.5 F3000"), "{:?}", s.console);
+        }
+
+        #[test]
+        fn absolute_jogs_land_on_the_target_and_bad_ones_are_refused() {
+            assert_eq!(jog_to_line(10.0, 20.5, 3000.0).unwrap(), "$J=G90 G21 X10 Y20.5 F3000");
+            for (x, y, f) in [(f64::NAN, 0.0, 1000.0), (0.0, f64::INFINITY, 1000.0), (1e9, 0.0, 1000.0), (0.0, 0.0, 0.0), (0.0, 0.0, 1e9)] {
+                assert!(jog_to_line(x, y, f).is_err(), "{x} {y} {f}");
+            }
+            let link = sim_link();
+            link.jog_to(12.0, 7.0, 3000.0).unwrap();
+            wait_for(&link, "the head to arrive", |s| position(s) == Some((12.0, 7.0)));
         }
 
         #[test]
