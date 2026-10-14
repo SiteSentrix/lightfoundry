@@ -945,12 +945,13 @@ fn crop_and_sharpen(app: &mut LightFoundryApp, ui: &mut egui::Ui, id: u64) {
             ui.label("Threshold");
             ui.add(egui::DragValue::new(&mut app.trace_threshold).range(1.0..=254.0).speed(1.0));
         });
+        ui.checkbox(&mut app.trace_smooth, "Smooth curves").on_hover_text("Turn gentle bends into curves; sharp corners stay sharp");
         ui.horizontal(|ui| {
             if ui.button("Trace").on_hover_text("Add outlines that follow the dark areas, on top of the picture").clicked() {
-                app.run("image.trace", json!({ "id": id, "threshold": app.trace_threshold }));
+                app.run("image.trace", json!({ "id": id, "threshold": app.trace_threshold, "smooth": app.trace_smooth }));
             }
             if ui.button("Trace and remove picture").clicked() {
-                app.run("image.trace", json!({ "id": id, "threshold": app.trace_threshold, "keep_image": false }));
+                app.run("image.trace", json!({ "id": id, "threshold": app.trace_threshold, "keep_image": false, "smooth": app.trace_smooth }));
             }
         });
     });

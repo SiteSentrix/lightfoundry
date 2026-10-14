@@ -140,6 +140,7 @@ pub struct LightFoundryApp {
     sharpen_amount: f64,
     resample_scale: f64,
     trace_threshold: f64,
+    trace_smooth: bool,
     preset_name: String,
     resume_line: usize,
     /// What a requested upload is for.
@@ -264,6 +265,7 @@ impl LightFoundryApp {
             sharpen_amount: 1.0,
             resample_scale: 0.5,
             trace_threshold: 128.0,
+            trace_smooth: true,
             preset_name: String::new(),
             resume_line: 1,
             awaiting_upload: None,
