@@ -48,6 +48,66 @@ mod line_tests {
     }
 }
 
+mod kerf_tests {
+    use super::*;
+
+    fn bounds(job: &Job) -> lightfoundry_geom::Rect {
+        lightfoundry_geom::bounds_of_points(job.ops.iter().flat_map(|o| o.moves.iter().map(Move::target))).unwrap()
+    }
+
+    #[test]
+    fn kerf_grows_the_cut_path_around_a_part_and_shrinks_it_inside_a_hole() {
+        let mut doc = Document::default();
+        doc.add_shape(Shape::path("part", 0, rect_path(0.0, 0.0, 40.0, 40.0)));
+        doc.add_shape(Shape::path("hole", 0, rect_path(10.0, 10.0, 20.0, 20.0)));
+        let plain = bounds(&plan(&doc).unwrap());
+        assert_eq!((plain.x0, plain.x1), (0.0, 40.0));
+        doc.layer_mut(0).unwrap().kerf_offset = 0.1;
+        let job = plan(&doc).unwrap();
+        let b = bounds(&job);
+        assert!((b.x0 + 0.1).abs() < 1e-6 && (b.x1 - 40.1).abs() < 1e-6, "outer path moved out by 0.1: {b:?}");
+        // The hole contour is cut first (inner-first) and sits 0.1 mm *inside* the hole.
+        let first = job.ops[0].moves[0].target();
+        assert!(first.x > 10.05 && first.x < 29.95, "{first:?}");
+    }
+
+    #[test]
+    fn negative_kerf_shrinks_parts_and_open_paths_are_untouched() {
+        let mut doc = Document::default();
+        doc.add_shape(Shape::path("part", 0, rect_path(0.0, 0.0, 40.0, 40.0)));
+        doc.add_shape(Shape::path("line", 0, lightfoundry_geom::line_path(Point::new(100.0, 100.0), Point::new(120.0, 100.0))));
+        doc.layer_mut(0).unwrap().kerf_offset = -0.2;
+        let job = plan(&doc).unwrap();
+        let xs: Vec<f64> = job.ops[0].moves.iter().map(|m| m.target().x).collect();
+        assert!(xs.iter().any(|x| (x - 0.2).abs() < 1e-6) && xs.iter().any(|x| (x - 39.8).abs() < 1e-6));
+        assert!(xs.iter().any(|x| (x - 100.0).abs() < 1e-9) && xs.iter().any(|x| (x - 120.0).abs() < 1e-9), "the open line is cut as drawn");
+    }
+
+    #[test]
+    fn a_shape_that_collapses_under_kerf_is_dropped_and_bad_kerf_is_rejected() {
+        let mut doc = Document::default();
+        doc.add_shape(Shape::path("tiny", 0, rect_path(0.0, 0.0, 0.1, 0.1)));
+        doc.layer_mut(0).unwrap().kerf_offset = -1.0;
+        assert!(plan(&doc).unwrap().ops.is_empty());
+        for bad in [f64::NAN, 1e9] {
+            doc.layer_mut(0).unwrap().kerf_offset = bad;
+            assert!(matches!(plan(&doc), Err(PlanError::BadLayerSetting { .. })), "{bad}");
+        }
+    }
+
+    #[test]
+    fn fill_ignores_kerf() {
+        let mut doc = Document::default();
+        doc.add_shape(Shape::path("part", 0, rect_path(0.0, 0.0, 10.0, 10.0)));
+        let layer = doc.layer_mut(0).unwrap();
+        layer.mode = LayerMode::Fill;
+        layer.interval = 1.0;
+        layer.kerf_offset = 0.5;
+        let b = bounds(&plan(&doc).unwrap());
+        assert_eq!((b.x0, b.x1), (0.0, 10.0));
+    }
+}
+
 mod fill_tests {
     use super::*;
 

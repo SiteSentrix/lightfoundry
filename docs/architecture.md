@@ -21,7 +21,7 @@ and that nothing below L6 depends on a UI toolkit. The table lives in `xtask/src
 | L1    | `doc`      | the document: cut layers, shapes (paths and rasters), the machine profile; data + serde only     |
 | L2    | `toolpath` | document to `Job`: ordering, scan fill, raster dithering, time estimate                          |
 | L2    | `text`     | an original single-line stroke font (glyph table + corner-cutting smoothing) and text layout    |
-| L2    | `pathops`  | boolean combine and offset on flattened shapes (wraps `i_overlay`: even-odd regions with holes, validated and bounded inputs) |
+| L1    | `pathops`  | boolean combine and offset on flattened shapes (wraps `i_overlay`: even-odd regions with holes, validated and bounded inputs) |
 | L3    | `svg`      | SVG import (`usvg` resolves shapes, groups, transforms, units)                                   |
 | L3    | `dxf`      | ASCII DXF import written from the public reference                                               |
 | L3    | `gcode`    | `Job` to GRBL G-code with a `Placement` (absolute, or relative to a job anchor); bed-bounds and finiteness checks; framing |
@@ -50,7 +50,7 @@ store local geometry plus an affine transform; world-space outlines are flattene
 
 ## Planning and output
 
-`toolpath::plan` walks output-enabled layers in id order. Per layer: scan fills first, then outlines
+`toolpath::plan` walks output-enabled layers in id order. Per layer: scan fills first, then outlines (closed outlines are first offset by the layer's kerf compensation via `pathops`; open paths are left as drawn)
 (inner shapes first, then nearest neighbour), then images (sampled on a world grid at the layer's
 interval, dithered, emitted as scan rows with zero-power overscan). The result is a `Job` of
 machine-independent `Move`s (`Travel`, `Cut { power % }`). `gcode::generate` maps power to

@@ -11,7 +11,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Cut Settings",
         menu: "Laser",
         shortcut: None,
-        params_doc: "{id, name?, mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, bidirectional?, dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
+        params_doc: "{id, name?, mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, kerf_offset? (mm; closed outlines are offset before cutting, + grows parts and shrinks holes), bidirectional?, dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
         mutates: true,
         run: layer_set,
     },
@@ -37,6 +37,7 @@ struct LayerParams {
     passes: Option<u32>,
     interval: Option<f64>,
     scan_angle: Option<f64>,
+    kerf_offset: Option<f64>,
     bidirectional: Option<bool>,
     dither: Option<Dither>,
     output: Option<bool>,
@@ -60,6 +61,9 @@ fn layer_set(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     }
     if let Some(v) = p.scan_angle {
         layer.scan_angle = in_range("scan_angle", v, -360.0, 360.0)?;
+    }
+    if let Some(v) = p.kerf_offset {
+        layer.kerf_offset = in_range("kerf_offset", v, -50.0, 50.0)?;
     }
     if let Some(v) = p.passes {
         layer.passes = v.clamp(1, 1000);

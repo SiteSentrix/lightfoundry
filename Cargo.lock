@@ -1528,6 +1528,7 @@ dependencies = [
  "kurbo",
  "lightfoundry-doc",
  "lightfoundry-geom",
+ "lightfoundry-pathops",
  "thiserror 2.0.21",
 ]
 

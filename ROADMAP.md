@@ -38,3 +38,6 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   controls. Found and fixed, by using the app, that ellipses and circles were never closed shapes
   (no fill, no booleans, no inner-first ordering); regression tests added at the geometry, planner
   and engine layers.
+- **2026-10-14 — kerf.** Per-layer kerf offset (`layer.set kerf_offset`): closed outlines are offset
+  before cutting so parts grow and holes shrink by the beam compensation; fills and open paths are
+  untouched. `pathops` moved down to layer 1 so the planner can use it.

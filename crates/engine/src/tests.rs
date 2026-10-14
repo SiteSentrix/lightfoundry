@@ -417,6 +417,17 @@ mod job_tests {
     }
 
     #[test]
+    fn kerf_offset_moves_the_generated_cut_path_and_is_validated() {
+        let mut s = square_session(); // 20x10 rect at (10,10), top-left origin
+        s.execute("layer.set", &json!({"id": 0, "kerf_offset": 0.5})).unwrap();
+        let g = s.execute("job.gcode", &json!({"include": true})).unwrap();
+        let text = g["gcode"].as_str().unwrap();
+        assert!(text.contains("X9.5") && text.contains("X30.5"), "the outline is cut 0.5 mm outside the drawn rectangle\n{text}");
+        assert!(s.execute("layer.set", &json!({"id": 0, "kerf_offset": 99})).is_err());
+        assert!(s.execute("layer.set", &json!({"id": 0, "kerf_offset": "wide"})).is_err());
+    }
+
+    #[test]
     fn layer_and_machine_settings_are_validated() {
         let mut s = Session::new();
         for bad in [

@@ -69,6 +69,8 @@ pub enum PlanError {
     RasterTooLarge(usize),
     #[error("job has more than {MAX_MOVES} moves")]
     TooManyMoves,
+    #[error("layer {name}: kerf offset failed: {reason}")]
+    Kerf { name: String, reason: String },
 }
 
 /// Plans every output-enabled layer. Layers are cut in id order; within a layer fills run before lines.
@@ -95,6 +97,19 @@ pub fn plan(doc: &Document) -> Result<Job, PlanError> {
         job.ops.append(&mut ops);
     }
     Ok(job)
+}
+
+/// Offsets closed outlines by the layer's kerf compensation; open paths are left as they are.
+fn apply_kerf(layer: &Layer, lines: &[Polyline]) -> Result<Vec<Polyline>, PlanError> {
+    if layer.kerf_offset == 0.0 {
+        return Ok(lines.to_vec());
+    }
+    let (closed, open): (Vec<&Polyline>, Vec<&Polyline>) = lines.iter().partition(|l| l.closed);
+    let closed: Vec<Polyline> = closed.into_iter().cloned().collect();
+    let mut out = lightfoundry_pathops::offset(&closed, layer.kerf_offset, lightfoundry_pathops::Join::Round)
+        .map_err(|e| PlanError::Kerf { name: layer.name.clone(), reason: e.to_string() })?;
+    out.extend(open.into_iter().cloned());
+    Ok(out)
 }
 
 /// Bounds of everything that will be output (the "frame"), in workspace mm.
@@ -147,12 +162,16 @@ fn validate(layer: &Layer) -> Result<(), PlanError> {
     if !(layer.max_power.is_finite() && layer.min_power.is_finite()) {
         return Err(bad("power"));
     }
+    if !(layer.kerf_offset.is_finite() && layer.kerf_offset.abs() <= 50.0) {
+        return Err(bad("kerf offset"));
+    }
     Ok(())
 }
 
 fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) -> Result<Vec<Op>, PlanError> {
     let mut ops = Vec::new();
     let vector: Vec<Polyline> = shapes.iter().filter(|s| s.vector_path().is_some()).flat_map(|s| s.world_polylines()).collect();
+    let outlines = apply_kerf(layer, &vector)?;
     let power = layer.max_power.clamp(0.0, 100.0);
     let passes = layer.passes.clamp(1, 1000);
     let mk = |kind, moves| Op { layer: layer.id, kind, speed: layer.speed, passes, air_assist: layer.air_assist, moves };
@@ -168,9 +187,9 @@ fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) ->
             ops.push(mk(OpKind::Fill, moves));
         }
     }
-    if matches!(layer.mode, LayerMode::Line | LayerMode::FillAndLine) && !vector.is_empty() {
+    if matches!(layer.mode, LayerMode::Line | LayerMode::FillAndLine) && !outlines.is_empty() {
         let mut moves = Vec::new();
-        for pl in order_polylines(vector, start) {
+        for pl in order_polylines(outlines, start) {
             let Some(first) = pl.points.first() else { continue };
             moves.push(Move::Travel(*first));
             for p in pl.points.iter().skip(1) {
