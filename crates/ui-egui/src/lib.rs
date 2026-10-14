@@ -71,6 +71,9 @@ pub struct LightFoundryApp {
     pub session: Session,
     platform: Box<dyn Platform>,
     tokens: Tokens,
+    theme: theme::ThemeChoice,
+    /// The theme last handed to egui, so it is only changed when the choice changes.
+    applied_theme: Option<theme::ThemeChoice>,
     view: Option<View>,
     tool: Tool,
     drag: canvas::Drag,
@@ -210,6 +213,8 @@ impl LightFoundryApp {
             session,
             platform,
             tokens: Tokens::DARK,
+            theme: theme::ThemeChoice::Auto,
+            applied_theme: None,
             view: None,
             tool: Tool::Select,
             drag: canvas::Drag::None,
@@ -291,6 +296,7 @@ impl LightFoundryApp {
 
     /// Draws one frame. Called from the host's `eframe::App::ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        self.apply_theme(ui.ctx());
         self.poll_link(ui.ctx());
         self.autosave_tick(ui.ctx());
         self.watch_close_and_title(ui.ctx());
@@ -310,6 +316,15 @@ impl LightFoundryApp {
         }
         egui::CentralPanel::default().show(ui, |ui| canvas::show(self, ui));
         self.dialogs(ui.ctx());
+    }
+
+    /// Hands the chosen theme to egui and picks matching canvas colours.
+    fn apply_theme(&mut self, ctx: &egui::Context) {
+        if self.applied_theme != Some(self.theme) {
+            ctx.set_theme(self.theme.preference());
+            self.applied_theme = Some(self.theme);
+        }
+        self.tokens = if ctx.global_style().visuals.dark_mode { Tokens::DARK } else { Tokens::LIGHT };
     }
 
     fn has_modal(&self) -> bool {

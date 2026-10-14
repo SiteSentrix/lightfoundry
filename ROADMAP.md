@@ -258,4 +258,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   per-user templates folder (`Platform::templates_dir`), opens one as a new untitled unsaved project
   (`file.open` with `template: true`), and saves the current project there under a sanitised name
   without touching its own saved state.
+- **2026-10-14 — themes.** View > Theme: follow the system, light or dark. The canvas has matching
+  light and dark token sets, and layer colours are lightened for the dark canvas or darkened (hue
+  kept) for the light one so white and pale layers stay visible.
 

@@ -37,6 +37,13 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 ui.separator();
                 ui.checkbox(&mut app.show_preview, "Toolpath preview");
                 ui.checkbox(&mut app.show_travel, "Show travel moves");
+                ui.menu_button("Theme", |ui| {
+                    for choice in crate::theme::ThemeChoice::ALL {
+                        if ui.radio_value(&mut app.theme, choice, choice.label()).clicked() {
+                            ui.close();
+                        }
+                    }
+                });
                 ui.menu_button("Preview colours", |ui| {
                     for (mode, label) in [
                         (crate::timeline_ui::PreviewColors::Layer, "By layer"),
