@@ -148,4 +148,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — cut selected shapes only.** `Session::job_doc()` (the document, or just the
   selection) feeds generate, estimate, frame and the preview, so job origins anchor to the selection
   too; `job.set_scope` and a Laser-panel checkbox switch it (a session setting, not saved).
+- **2026-10-14 — distribute and star.** `edit.distribute` (even gaps between three or more shapes
+  along an axis, or a fixed gap from the first) with Arrange menu entries, and `shape.star`
+  (3-100 points, inner and outer radius).
 

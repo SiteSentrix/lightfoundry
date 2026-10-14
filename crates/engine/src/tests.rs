@@ -934,6 +934,45 @@ mod import_tests {
     }
 
     #[test]
+    fn distributing_evens_out_the_gaps_and_stars_have_alternating_radii() {
+        let mut s = Session::new();
+        let mut ids = Vec::new();
+        for (x, w) in [(0.0, 10.0), (15.0, 20.0), (90.0, 10.0), (40.0, 5.0)] {
+            ids.push(s.execute("shape.rectangle", &json!({"x": x, "y": 0, "width": w, "height": 5})).unwrap()["id"].as_u64().unwrap());
+        }
+        let v = s.execute("edit.distribute", &json!({"ids": ids, "axis": "horizontal"})).unwrap();
+        // Widths 10+20+10+5 = 45 inside a 100 mm span: three equal gaps of 55/3.
+        assert!((v["gap"].as_f64().unwrap() - 55.0 / 3.0).abs() < 1e-9, "{v}");
+        let mut spans: Vec<(f64, f64)> = ids.iter().map(|id| s.doc.shape(*id).unwrap().world_bounds().unwrap()).map(|b| (b.x0, b.x1)).collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        for pair in spans.windows(2) {
+            assert!((pair[1].0 - pair[0].1 - 55.0 / 3.0).abs() < 1e-9, "{spans:?}");
+        }
+        assert!(spans[0].0.abs() < 1e-9 && (spans[3].1 - 100.0).abs() < 1e-9, "the outermost shapes stay put: {spans:?}");
+
+        s.execute("edit.distribute", &json!({"ids": ids, "axis": "vertical", "gap": 2})).unwrap();
+        let top = s.doc.shape(ids[0]).unwrap().world_bounds().unwrap();
+        assert!(top.y0.abs() < 1e-9);
+        assert!(s.execute("edit.distribute", &json!({"ids": [ids[0], ids[1]], "axis": "horizontal"})).is_err(), "two shapes need a gap");
+        assert!(s.execute("edit.distribute", &json!({"ids": ids, "axis": "horizontal", "gap": 1e9})).is_err());
+        assert!(s.execute("edit.distribute", &json!({"ids": ids, "axis": "diagonal"})).is_err());
+
+        let star = s.execute("shape.star", &json!({"cx": 50, "cy": 50, "outer_radius": 20, "inner_radius": 8, "points": 5})).unwrap()["id"]
+            .as_u64()
+            .unwrap();
+        let b = s.doc.shape(star).unwrap().world_bounds().unwrap();
+        assert!((b.y0 - 30.0).abs() < 1e-9, "one tip points straight up: {b:?}");
+        for bad in [
+            json!({"cx": 0, "cy": 0, "outer_radius": 5, "inner_radius": 8, "points": 5}),
+            json!({"cx": 0, "cy": 0, "outer_radius": 5, "inner_radius": 0, "points": 5}),
+            json!({"cx": 0, "cy": 0, "outer_radius": 5, "inner_radius": 2, "points": 2}),
+            json!({"cx": f64::NAN, "cy": 0, "outer_radius": 5, "inner_radius": 2, "points": 5}),
+        ] {
+            assert!(s.execute("shape.star", &bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

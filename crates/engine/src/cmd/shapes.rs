@@ -45,6 +45,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         mutates: true,
         run: polygon,
     },
+    CommandSpec {
+        id: "shape.star",
+        label: "Star",
+        menu: "Create",
+        shortcut: None,
+        params_doc: "{cx, cy, outer_radius, inner_radius (< outer), points (3..=100), layer?}  (mm)",
+        mutates: true,
+        run: star,
+    },
 ];
 
 #[derive(Deserialize)]
@@ -132,6 +141,38 @@ fn polygon(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     }
     path.close_path();
     add(s, "Polygon", p.layer, path)
+}
+
+#[derive(Deserialize)]
+struct StarParams {
+    cx: f64,
+    cy: f64,
+    outer_radius: f64,
+    inner_radius: f64,
+    points: u32,
+    layer: Option<LayerId>,
+}
+
+fn star(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: StarParams = parse(params)?;
+    finite(&[p.cx, p.cy, p.outer_radius, p.inner_radius])?;
+    if !(p.inner_radius > 0.0 && p.outer_radius > p.inner_radius) || !(3..=100).contains(&p.points) {
+        return Err(EngineError::BadParams("radii must satisfy 0 < inner < outer and points must be between 3 and 100".into()));
+    }
+    let mut path = BezPath::new();
+    for i in 0..p.points * 2 {
+        // One point straight up; tips on even steps, the notches between them on odd ones.
+        let a = TAU * f64::from(i) / f64::from(p.points * 2) - TAU / 4.0;
+        let r = if i % 2 == 0 { p.outer_radius } else { p.inner_radius };
+        let pt = (p.cx + r * a.cos(), p.cy + r * a.sin());
+        if i == 0 {
+            path.move_to(pt);
+        } else {
+            path.line_to(pt);
+        }
+    }
+    path.close_path();
+    add(s, "Star", p.layer, path)
 }
 
 fn add(s: &mut Session, name: &str, layer: Option<LayerId>, path: BezPath) -> Result<Value, EngineError> {
