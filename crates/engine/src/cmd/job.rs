@@ -26,6 +26,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         mutates: true,
         run: set_origin,
     },
+    CommandSpec {
+        id: "job.set_optimize",
+        label: "Cut Order Options",
+        menu: "Laser",
+        shortcut: None,
+        params_doc: "{inner_first?: bool, reduce_travel?: bool, remove_duplicates?: bool}",
+        mutates: true,
+        run: set_optimize,
+    },
     CommandSpec { id: "job.estimate", label: "Estimate Time", menu: "Laser", shortcut: None, params_doc: "{}", mutates: false, run: estimate },
     CommandSpec {
         id: "job.frame",
@@ -79,6 +88,22 @@ fn set_origin(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     o.start_from = p.start_from.unwrap_or(o.start_from);
     o.anchor = p.anchor.unwrap_or(o.anchor);
     Ok(json!({ "start_from": o.start_from, "anchor": o.anchor }))
+}
+
+#[derive(Deserialize)]
+struct SetOptimizeParams {
+    inner_first: Option<bool>,
+    reduce_travel: Option<bool>,
+    remove_duplicates: Option<bool>,
+}
+
+fn set_optimize(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: SetOptimizeParams = parse(params)?;
+    let o = &mut s.doc.optimize;
+    o.inner_first = p.inner_first.unwrap_or(o.inner_first);
+    o.reduce_travel = p.reduce_travel.unwrap_or(o.reduce_travel);
+    o.remove_duplicates = p.remove_duplicates.unwrap_or(o.remove_duplicates);
+    Ok(json!({ "inner_first": o.inner_first, "reduce_travel": o.reduce_travel, "remove_duplicates": o.remove_duplicates }))
 }
 
 #[derive(Deserialize, Default)]

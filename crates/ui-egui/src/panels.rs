@@ -254,6 +254,7 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     });
 
     job_origin(app, ui);
+    cut_order(app, ui);
     test_grid_section(app, ui);
     ui.separator();
     connection(app, ui);
@@ -305,6 +306,22 @@ pub(crate) fn machine_delta(origin: Origin, dx: f64, dy: f64) -> (f64, f64) {
         Origin::TopLeft => (dx, dy),
         Origin::BottomLeft => (dx, -dy),
     }
+}
+
+fn cut_order(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let o = app.session.doc.optimize;
+    ui.collapsing("Cut order", |ui| {
+        for (key, label, tip, on) in [
+            ("inner_first", "Inner shapes first", "Cut holes and nested shapes before the outlines around them", o.inner_first),
+            ("reduce_travel", "Reduce travel", "Go to the nearest outline next instead of following the drawing order", o.reduce_travel),
+            ("remove_duplicates", "Remove duplicate lines", "Skip outlines that lie exactly on top of another one", o.remove_duplicates),
+        ] {
+            let mut v = on;
+            if ui.checkbox(&mut v, label).on_hover_text(tip).changed() {
+                app.run("job.set_optimize", json!({ key: v }));
+            }
+        }
+    });
 }
 
 fn job_origin(app: &mut LightFoundryApp, ui: &mut egui::Ui) {

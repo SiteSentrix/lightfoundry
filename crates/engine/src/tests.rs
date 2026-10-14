@@ -853,6 +853,21 @@ mod job_tests {
     }
 
     #[test]
+    fn cut_order_options_are_one_undo_step_and_change_the_program() {
+        let mut s = square_session();
+        rect(&mut s); // the same rectangle again, exactly on top
+        let count = |s: &mut Session| s.execute("job.gcode", &json!({"include": true})).unwrap()["gcode"].as_str().unwrap().lines().count();
+        let deduplicated = count(&mut s);
+        let v = s.execute("job.set_optimize", &json!({"remove_duplicates": false})).unwrap();
+        assert_eq!(v["remove_duplicates"], json!(false));
+        assert_eq!(v["inner_first"], json!(true), "unmentioned options are left alone");
+        assert!(count(&mut s) > deduplicated, "the copy on top is now cut as well");
+        assert!(s.undo());
+        assert!(s.doc.optimize.remove_duplicates);
+        assert!(s.execute("job.set_optimize", &json!({"inner_first": "yes"})).is_err());
+    }
+
+    #[test]
     fn estimate_and_frame_work() {
         let mut s = square_session();
         let e = s.execute("job.estimate", &Value::Null).unwrap();

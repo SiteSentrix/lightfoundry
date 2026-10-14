@@ -9,7 +9,7 @@ mod tabs;
 mod timeline;
 
 pub use fill::fill_segments;
-pub use order::order_polylines;
+pub use order::{order_polylines, remove_duplicates};
 pub use raster::{Grid, dither, sample_grid};
 pub use timeline::{LayerTime, Moment, OpTime, Timeline, move_seconds};
 
@@ -19,6 +19,8 @@ use thiserror::Error;
 
 /// Cap on raster cells per image, so a hostile document cannot exhaust memory.
 pub const MAX_RASTER_CELLS: usize = 25_000_000;
+/// Duplicate removal is skipped for layers with more outlines than this (it is memory-hungry).
+const MAX_DEDUPLICATED: usize = 200_000;
 /// Cap on total moves in a job.
 pub const MAX_MOVES: usize = 20_000_000;
 
@@ -239,7 +241,10 @@ fn validate(layer: &Layer) -> Result<(), PlanError> {
 
 fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) -> Result<Vec<Op>, PlanError> {
     let mut ops = Vec::new();
-    let vector: Vec<Polyline> = shapes.iter().filter(|s| s.vector_path().is_some()).flat_map(|s| s.world_polylines()).collect();
+    let mut vector: Vec<Polyline> = shapes.iter().filter(|s| s.vector_path().is_some()).flat_map(|s| s.world_polylines()).collect();
+    if doc.optimize.remove_duplicates && vector.len() <= MAX_DEDUPLICATED {
+        vector = remove_duplicates(vector);
+    }
     let outlines = apply_kerf(layer, &vector)?;
     let power = layer.max_power.clamp(0.0, 100.0);
     let passes = layer.passes.clamp(1, 1000);
@@ -258,7 +263,7 @@ fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) ->
     }
     if matches!(layer.mode, LayerMode::Line | LayerMode::FillAndLine) && !outlines.is_empty() {
         let mut moves = Vec::new();
-        let ordered = order_polylines(outlines, start);
+        let ordered = order_polylines(outlines, start, &doc.optimize);
         // Nesting is quadratic; very large jobs skip tabs and leads rather than stall.
         let depths = if ordered.len() <= 4000 { tabs::nesting_depths(&ordered) } else { vec![0; ordered.len()] };
         for (pl, depth) in ordered.iter().zip(depths) {
