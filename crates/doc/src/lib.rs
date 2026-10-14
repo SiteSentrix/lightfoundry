@@ -279,6 +279,31 @@ pub enum Dither {
     Threshold,
     FloydSteinberg,
     Grayscale,
+    /// Error diffusion that spreads only part of the error: crisp highlights, good for line art.
+    Atkinson,
+    /// Wide error diffusion: smoother gradients, slower.
+    Jarvis,
+    /// 8x8 Bayer matrix: a regular, repeatable pattern.
+    Ordered,
+    /// Round dots on a 45 degree screen whose size follows the darkness (newsprint look).
+    Halftone,
+}
+
+impl Dither {
+    pub const ALL: [Dither; 7] =
+        [Dither::Threshold, Dither::FloydSteinberg, Dither::Atkinson, Dither::Jarvis, Dither::Ordered, Dither::Halftone, Dither::Grayscale];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Dither::Threshold => "Threshold",
+            Dither::FloydSteinberg => "Floyd–Steinberg",
+            Dither::Grayscale => "Grayscale",
+            Dither::Atkinson => "Atkinson",
+            Dither::Jarvis => "Jarvis",
+            Dither::Ordered => "Ordered (Bayer)",
+            Dither::Halftone => "Halftone",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -466,6 +491,44 @@ impl RasterImage {
         let expected = (width as usize).checked_mul(height as usize)?;
         (expected == gray.len() && expected > 0).then_some(RasterImage { width, height, gray })
     }
+
+    /// The pixels in columns `x0..x1` and rows `y0..y1`; `None` for an empty or out-of-range box.
+    pub fn crop(&self, x0: u32, y0: u32, x1: u32, y1: u32) -> Option<RasterImage> {
+        if x0 >= x1 || y0 >= y1 || x1 > self.width || y1 > self.height {
+            return None;
+        }
+        let w = self.width as usize;
+        let mut gray = Vec::with_capacity((x1 - x0) as usize * (y1 - y0) as usize);
+        for y in y0 as usize..y1 as usize {
+            gray.extend_from_slice(self.gray.get(y * w + x0 as usize..y * w + x1 as usize)?);
+        }
+        RasterImage::new(x1 - x0, y1 - y0, gray)
+    }
+
+    /// Unsharp mask: adds `amount` times the difference from a 3x3 blur (edges are clamped), which
+    /// makes outlines crisper before dithering. `amount` is limited to 0..=5.
+    pub fn sharpened(&self, amount: f64) -> RasterImage {
+        let amount = if amount.is_finite() { amount.clamp(0.0, 5.0) as f32 } else { 0.0 };
+        let (w, h) = (self.width as usize, self.height as usize);
+        let at = |x: isize, y: isize| -> f32 {
+            let (x, y) = (x.clamp(0, w as isize - 1) as usize, y.clamp(0, h as isize - 1) as usize);
+            f32::from(self.gray.get(y * w + x).copied().unwrap_or(255))
+        };
+        let mut out = Vec::with_capacity(self.gray.len());
+        for y in 0..h as isize {
+            for x in 0..w as isize {
+                let mut sum = 0.0;
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        sum += at(x + dx, y + dy);
+                    }
+                }
+                let centre = at(x, y);
+                out.push((centre + amount * (centre - sum / 9.0)).round().clamp(0.0, 255.0) as u8);
+            }
+        }
+        RasterImage { width: self.width, height: self.height, gray: out }
+    }
 }
 
 /// Serde adapter storing byte buffers as standard base64 strings.
@@ -608,6 +671,27 @@ mod tests {
         v.as_object_mut().unwrap().remove("job_origin");
         let doc: Document = serde_json::from_value(v).unwrap();
         assert_eq!(doc.job_origin, JobOrigin::default());
+    }
+
+    #[test]
+    fn cropping_and_sharpening_images() {
+        let img = RasterImage::new(4, 3, (0..12).collect()).unwrap();
+        let c = img.crop(1, 1, 3, 3).unwrap();
+        assert_eq!((c.width, c.height, c.gray.as_slice()), (2, 2, [5, 6, 9, 10].as_slice()));
+        assert_eq!(img.crop(0, 0, 4, 3).unwrap(), img, "the full box is the same picture");
+        for (x0, y0, x1, y1) in [(2, 0, 2, 3), (3, 0, 1, 3), (0, 0, 5, 3), (0, 0, 4, 4), (0, 2, 4, 2)] {
+            assert!(img.crop(x0, y0, x1, y1).is_none(), "{x0} {y0} {x1} {y1}");
+        }
+        let flat = RasterImage::new(5, 5, vec![100; 25]).unwrap();
+        assert_eq!(flat.sharpened(3.0), flat, "a flat picture has no edges to sharpen");
+        let mut gray = vec![100u8; 25];
+        gray[12] = 150;
+        let spike = RasterImage::new(5, 5, gray).unwrap();
+        assert!(spike.sharpened(2.0).gray[12] > 150, "a bright dot gets brighter");
+        assert_eq!(spike.sharpened(0.0), spike);
+        assert_eq!(spike.sharpened(f64::NAN), spike);
+        assert_eq!(spike.sharpened(1e9), spike.sharpened(5.0), "the amount is limited");
+        assert_eq!(RasterImage::new(1, 1, vec![7]).unwrap().sharpened(2.0).gray, vec![7]);
     }
 
     #[test]

@@ -795,6 +795,59 @@ mod import_tests {
     }
 
     #[test]
+    fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
+        let mut s = Session::new();
+        for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {
+            s.execute("layer.set", &json!({"id": 0, "dither": name})).unwrap();
+        }
+        assert_eq!(s.doc.layer(0).unwrap().dither, lightfoundry_doc::Dither::Halftone);
+        assert!(s.execute("layer.set", &json!({"id": 0, "dither": "stucki"})).is_err());
+    }
+
+    #[test]
+    fn cropping_keeps_the_remaining_picture_in_place_and_sharpening_is_validated() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-crop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("c.png");
+        image::GrayImage::from_fn(20, 10, |x, y| image::Luma([(x * 10 + y) as u8])).save(&path).unwrap();
+        let mut s = Session::new();
+        let id = s.execute("file.import_image", &json!({"path": path, "width": 40, "x": 100, "y": 50})).unwrap()["id"].as_u64().unwrap();
+        let bounds = |s: &Session| s.doc.shape(id).unwrap().world_bounds().unwrap();
+        let before = bounds(&s);
+        let pixel_at = |s: &Session, col: u32, row: u32| match &s.doc.shape(id).unwrap().kind {
+            lightfoundry_doc::ShapeKind::Image { image, .. } => image.gray[(row * image.width + col) as usize],
+            other => panic!("{other:?}"),
+        };
+        let marker = pixel_at(&s, 10, 5);
+
+        let v = s.execute("image.crop", &json!({"left": 0.5, "top": 0.2, "bottom": 0.2})).unwrap();
+        assert!((v["width_mm"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{v}");
+        let after = bounds(&s);
+        assert!((after.x0 - (before.x0 + 20.0)).abs() < 1e-6 && (after.x1 - before.x1).abs() < 1e-6, "{before:?} -> {after:?}");
+        assert!(after.y0 > before.y0 && after.y1 < before.y1);
+        assert_eq!(pixel_at(&s, 0, 3), marker, "the pixel that was at column 10, row 5 is now at column 0, row 3");
+
+        for bad in [
+            json!({"left": 0.6, "right": 0.6}),
+            json!({"top": 1.0}),
+            json!({"left": -0.1}),
+            json!({"left": f64::NAN}),
+            json!({"left": "a"}),
+            json!({"right": 0.99}),
+        ] {
+            assert!(s.execute("image.crop", &bad).is_err(), "{bad}");
+        }
+        s.execute("image.sharpen", &json!({"amount": 2.0})).unwrap();
+        assert!(s.execute("image.sharpen", &json!({"amount": 9})).is_err());
+        assert!(s.execute("image.sharpen", &json!({})).is_err());
+        s.execute("edit.undo", &Value::Null).unwrap();
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(bounds(&s), before, "undo restores the whole picture");
+        s.execute("shape.rectangle", &json!({"width": 5, "height": 5})).unwrap();
+        assert!(s.execute("image.crop", &json!({"left": 0.1})).is_err(), "a rectangle is not an image");
+    }
+
+    #[test]
     fn image_adjustments_are_validated_undoable_and_saved() {
         let dir = std::env::temp_dir().join(format!("lf-engine-adjust-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
