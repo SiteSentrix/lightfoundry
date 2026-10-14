@@ -98,6 +98,24 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         mutates: true,
         run: set_layer,
     },
+    CommandSpec {
+        id: "edit.group",
+        label: "Group",
+        menu: "Arrange",
+        shortcut: Some("Ctrl+G"),
+        params_doc: "{ids?}  — shapes in a group are selected and moved together; existing groups among them merge",
+        mutates: true,
+        run: group,
+    },
+    CommandSpec {
+        id: "edit.ungroup",
+        label: "Ungroup",
+        menu: "Arrange",
+        shortcut: Some("Ctrl+Shift+G"),
+        params_doc: "{ids?}  — dissolves the groups the shapes belong to",
+        mutates: true,
+        run: ungroup,
+    },
     CommandSpec { id: "edit.undo", label: "Undo", menu: "Edit", shortcut: Some("Ctrl+Z"), params_doc: "{}", mutates: false, run: undo },
     CommandSpec { id: "edit.redo", label: "Redo", menu: "Edit", shortcut: Some("Ctrl+Shift+Z"), params_doc: "{}", mutates: false, run: redo },
     CommandSpec {
@@ -119,7 +137,8 @@ struct Ids {
 fn select(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let p: Ids = parse(params)?;
     let ids = p.ids.unwrap_or_default();
-    s.selection = ids.into_iter().filter(|id| s.doc.shape(*id).is_some()).collect();
+    let existing: Vec<ShapeId> = ids.into_iter().filter(|id| s.doc.shape(*id).is_some()).collect();
+    s.selection = s.doc.expand_groups(&existing);
     Ok(json!({ "selected": s.selection }))
 }
 
@@ -153,13 +172,7 @@ fn duplicate(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let p: DuplicateParams = parse(params)?;
     finite(&[p.dx, p.dy])?;
     let ids = targets(s, &p.ids)?;
-    let mut created = Vec::new();
-    for id in ids {
-        if let Some(mut copy) = s.doc.shape(id).cloned() {
-            copy.transform = Affine::translate((p.dx, p.dy)) * copy.transform;
-            created.push(s.doc.add_shape(copy));
-        }
-    }
+    let created = s.doc.duplicate_shapes(&ids, Affine::translate((p.dx, p.dy)));
     s.selection = created.clone();
     Ok(json!({ "ids": created }))
 }
@@ -327,6 +340,39 @@ fn set_layer(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         }
     }
     Ok(json!({ "moved": ids.len() }))
+}
+
+fn group(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let ids = s.doc.expand_groups(&targets(s, &parse::<Ids>(params)?)?);
+    if ids.len() < 2 {
+        return Err(EngineError::BadParams("a group needs at least two shapes".into()));
+    }
+    let gid = s.doc.next_id;
+    s.doc.next_id = s.doc.next_id.saturating_add(1);
+    for id in &ids {
+        if let Some(sh) = s.doc.shape_mut(*id) {
+            sh.group = Some(gid);
+        }
+    }
+    s.selection = ids.clone();
+    Ok(json!({ "group": gid, "shapes": ids.len() }))
+}
+
+fn ungroup(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let ids = s.doc.expand_groups(&targets(s, &parse::<Ids>(params)?)?);
+    let mut freed = 0;
+    for id in &ids {
+        if let Some(sh) = s.doc.shape_mut(*id)
+            && sh.group.take().is_some()
+        {
+            freed += 1;
+        }
+    }
+    if freed == 0 {
+        return Err(EngineError::BadParams("none of the selected shapes is grouped".into()));
+    }
+    s.selection = ids;
+    Ok(json!({ "ungrouped": freed }))
 }
 
 fn undo(s: &mut Session, _: &Value) -> Result<Value, EngineError> {

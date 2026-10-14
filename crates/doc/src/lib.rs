@@ -16,6 +16,7 @@ pub const FLATTEN_TOLERANCE_MM: f64 = 0.02;
 
 pub type ShapeId = u64;
 pub type LayerId = u32;
+pub type GroupId = u64;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Document {
@@ -67,6 +68,37 @@ impl Document {
         let id = shape.id;
         self.shapes.push(shape);
         id
+    }
+
+    /// `ids` plus every other member of any group they belong to, in document order.
+    pub fn expand_groups(&self, ids: &[ShapeId]) -> Vec<ShapeId> {
+        let groups: Vec<GroupId> = ids.iter().filter_map(|id| self.shape(*id)).filter_map(|s| s.group).collect();
+        self.shapes.iter().filter(|s| ids.contains(&s.id) || s.group.is_some_and(|g| groups.contains(&g))).map(|s| s.id).collect()
+    }
+
+    /// Copies `ids` with `m` applied to each transform. Copies of a group form a new group of their
+    /// own (never sharing the original's), so moving a copy does not drag the original along.
+    pub fn duplicate_shapes(&mut self, ids: &[ShapeId], m: Affine) -> Vec<ShapeId> {
+        let mut remap: Vec<(GroupId, GroupId)> = Vec::new();
+        let mut out = Vec::new();
+        for id in ids {
+            let Some(mut copy) = self.shape(*id).cloned() else { continue };
+            copy.transform = m * copy.transform;
+            if let Some(old) = copy.group {
+                let new = match remap.iter().find(|(o, _)| *o == old) {
+                    Some((_, n)) => *n,
+                    None => {
+                        let n = self.next_id;
+                        self.next_id = self.next_id.saturating_add(1);
+                        remap.push((old, n));
+                        n
+                    }
+                };
+                copy.group = Some(new);
+            }
+            out.push(self.add_shape(copy));
+        }
+        out
     }
 
     pub fn remove_shapes(&mut self, ids: &[ShapeId]) {
@@ -239,6 +271,9 @@ pub struct Shape {
     /// Settings that replace the layer's for this shape only (test grids, one-off tweaks).
     #[serde(default)]
     pub cut: Option<CutOverride>,
+    /// Shapes sharing a group id are selected and moved together.
+    #[serde(default)]
+    pub group: Option<GroupId>,
 }
 
 /// Per-shape replacement for some of its layer's cut settings; `None` fields keep the layer's value.
@@ -327,7 +362,7 @@ impl Shape {
     }
 
     pub fn path(name: impl Into<String>, layer: LayerId, path: BezPath) -> Shape {
-        Shape { id: 0, name: name.into(), layer, transform: Affine::IDENTITY, kind: ShapeKind::Path { path }, cut: None }
+        Shape { id: 0, name: name.into(), layer, transform: Affine::IDENTITY, kind: ShapeKind::Path { path }, cut: None, group: None }
     }
 
     /// Flattened outlines in workspace mm. Images yield their bounding rectangle.
@@ -514,6 +549,22 @@ mod tests {
     }
 
     #[test]
+    fn groups_expand_and_duplicates_form_new_groups() {
+        let mut doc = Document::default();
+        let ids: Vec<ShapeId> = (0..3).map(|i| doc.add_shape(Shape::path(format!("s{i}"), 0, rect_path(0.0, 0.0, 1.0, 1.0)))).collect();
+        for id in &ids[..2] {
+            doc.shape_mut(*id).unwrap().group = Some(500);
+        }
+        assert_eq!(doc.expand_groups(&[ids[0]]), vec![ids[0], ids[1]], "a member brings its group");
+        assert_eq!(doc.expand_groups(&[ids[2]]), vec![ids[2]]);
+        let copies = doc.duplicate_shapes(&ids[..2], Affine::translate((10.0, 0.0)));
+        let (g0, g1) = (doc.shape(copies[0]).unwrap().group, doc.shape(copies[1]).unwrap().group);
+        assert!(g0.is_some() && g0 == g1 && g0 != Some(500), "the copies share a fresh group");
+        assert_eq!(doc.expand_groups(&[ids[0]]).len(), 2, "the original group is unchanged");
+        assert!(doc.duplicate_shapes(&[9999], Affine::IDENTITY).is_empty());
+    }
+
+    #[test]
     fn anchors_pick_the_expected_points() {
         let b = Rect::new(10.0, 20.0, 30.0, 60.0);
         assert_eq!(Anchor::TopLeft.point(b), lightfoundry_geom::Point::new(10.0, 20.0));
@@ -577,6 +628,7 @@ mod tests {
                 transform: Affine::IDENTITY,
                 kind: ShapeKind::Image { image, width_mm: 1.0, height_mm: 1.0, adjust: ImageAdjust::default() },
                 cut: None,
+                group: None,
             });
         }
         let json = serde_json::to_string(&doc).unwrap();

@@ -353,6 +353,7 @@ mod image_tests {
             transform: Affine::IDENTITY,
             kind: ShapeKind::Image { image, width_mm: w as f64, height_mm: h as f64, adjust: Default::default() },
             cut: None,
+            group: None,
         });
         doc
     }

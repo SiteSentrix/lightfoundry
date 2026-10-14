@@ -15,7 +15,6 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 9  | Image crop, sharpen, halftone/newsprint dithers, trace to vectors (tone adjustments are done) | Photo engraving results                                  |
 | 10 | Perforation/dashed cuts, ramp, per-layer overscan setting (tabs and lead-in/out are done) | Clean cuts of special materials                                     |
 | 11 | Timeline preview with scrubbing and per-layer time breakdown                         | Catch mistakes before burning                                       |
-| 12 | Groups, layers list with reorder/rename (per-shape cut settings are done)             | Larger projects                                                     |
 | 13 | Recent files; keep several autosave generations; periodic recovery-health check      | Never lose work                                                     |
 | 14 | Material library (named presets; original entries only). Test grids are done        | Reusing settings for a known material                               |
 | 15 | Other controllers (Marlin/Smoothieware dialects first; Ruida is a large project)     | Reach beyond GRBL                                                   |

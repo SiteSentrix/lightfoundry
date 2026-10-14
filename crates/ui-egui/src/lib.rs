@@ -463,6 +463,14 @@ impl LightFoundryApp {
         } else if undo {
             self.run("edit.undo", Value::Null);
         }
+        // Ungroup (Ctrl+Shift+G) before group (Ctrl+G), like redo before undo.
+        let (ungroup, group) =
+            ctx.input_mut(|i| (i.consume_key(Modifiers::COMMAND | Modifiers::SHIFT, Key::G), i.consume_key(Modifiers::COMMAND, Key::G)));
+        if ungroup {
+            self.run("edit.ungroup", Value::Null);
+        } else if group {
+            self.run("edit.group", Value::Null);
+        }
         if all {
             self.run("edit.select_all", Value::Null);
         }

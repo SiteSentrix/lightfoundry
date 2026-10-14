@@ -420,6 +420,7 @@ mod image_tests {
             transform,
             kind: ShapeKind::Image { image, width_mm: 40.0, height_mm: 40.0, adjust: ImageAdjust::default() },
             cut: None,
+            group: None,
         });
         h.app.session.revision += 1;
         id
@@ -482,6 +483,39 @@ mod array_and_radius_tests {
         assert_eq!(h.app.session.doc.shapes.len(), 4);
         h.app.run("arrange.circular", json!({"count": h.app.array_count, "radius": h.app.array_radius}));
         assert_eq!(h.app.session.doc.shapes.len(), 4 * 6, "the whole grid is rotated as one selection");
+    }
+}
+
+mod group_ui_tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_g_groups_and_ctrl_shift_g_ungroups_and_clicking_a_member_selects_all() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 20, "y": 20, "width": 30, "height": 30}));
+        h.app.run("shape.rectangle", json!({"x": 100, "y": 100, "width": 30, "height": 30}));
+        h.app.run("edit.select_all", serde_json::Value::Null);
+        h.frame(vec![]);
+        let key = |modifiers| Event::Key { key: egui::Key::G, physical_key: None, pressed: true, repeat: false, modifiers };
+        h.frame(vec![key(Modifiers::COMMAND)]);
+        h.app.run("edit.select", json!({"ids": []}));
+        h.frame(vec![]);
+        h.click(h.at(35.0, 35.0));
+        assert_eq!(h.app.session.selection.len(), 2, "one click selects the whole group");
+        h.frame(vec![key(Modifiers::COMMAND | Modifiers::SHIFT)]);
+        h.click(h.at(300.0, 300.0));
+        h.click(h.at(35.0, 35.0));
+        assert_eq!(h.app.session.selection.len(), 1, "ungrouped shapes select alone");
+    }
+
+    #[test]
+    fn the_layer_header_renames_and_reorders() {
+        let mut h = Harness::new();
+        h.frame(vec![]);
+        h.app.run("layer.set", json!({"id": 0, "name": "Outline"}));
+        h.app.run("layer.move", json!({"id": 0, "index": 3}));
+        h.frame(vec![]);
+        assert_eq!(h.app.session.doc.layers[3].name, "Outline");
     }
 }
 

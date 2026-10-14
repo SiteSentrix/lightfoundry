@@ -124,14 +124,7 @@ fn selected(s: &Session, ids: &Option<Vec<ShapeId>>) -> Result<Vec<ShapeId>, Eng
     if ids.is_empty() { Err(EngineError::NothingSelected) } else { Ok(ids) }
 }
 
-/// Duplicates every shape in `ids` with `m` applied on top of its transform.
+/// Duplicates every shape in `ids` with `m` applied on top of its transform (groups stay groups).
 fn copy_all(s: &mut Session, ids: &[ShapeId], m: Affine) -> Vec<ShapeId> {
-    let mut out = Vec::new();
-    for id in ids {
-        if let Some(mut copy) = s.doc.shape(*id).cloned() {
-            copy.transform = m * copy.transform;
-            out.push(s.doc.add_shape(copy));
-        }
-    }
-    out
+    s.doc.duplicate_shapes(ids, m)
 }

@@ -11,9 +11,18 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Cut Settings",
         menu: "Laser",
         shortcut: None,
-        params_doc: "{id, name?, mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, kerf_offset? (mm; closed outlines are offset before cutting, + grows parts and shrinks holes), tab_count? (per outer outline), tab_width? (mm), lead_in?/lead_out? (mm, on the scrap side), bidirectional?, dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
+        params_doc: "{id, name?, color? (#rrggbb), mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, kerf_offset? (mm; closed outlines are offset before cutting, + grows parts and shrinks holes), tab_count? (per outer outline), tab_width? (mm), lead_in?/lead_out? (mm, on the scrap side), bidirectional?, dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
         mutates: true,
         run: layer_set,
+    },
+    CommandSpec {
+        id: "layer.move",
+        label: "Reorder Layer",
+        menu: "Laser",
+        shortcut: None,
+        params_doc: "{id, index}  — moves the layer to this position in the list; layers are cut in list order",
+        mutates: true,
+        run: layer_move,
     },
     CommandSpec {
         id: "machine.set",
@@ -30,6 +39,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
 struct LayerParams {
     id: LayerId,
     name: Option<String>,
+    color: Option<String>,
     mode: Option<LayerMode>,
     speed: Option<f64>,
     min_power: Option<f64>,
@@ -87,6 +97,13 @@ fn layer_set(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     if let Some(v) = p.name {
         layer.name = v.chars().take(64).collect();
     }
+    if let Some(v) = p.color {
+        let ok = v.len() == 7 && v.starts_with('#') && v[1..].chars().all(|c| c.is_ascii_hexdigit());
+        if !ok {
+            return Err(EngineError::BadParams("color must look like #rrggbb".into()));
+        }
+        layer.color = v.to_ascii_lowercase();
+    }
     layer.mode = p.mode.unwrap_or(layer.mode);
     layer.dither = p.dither.unwrap_or(layer.dither);
     layer.bidirectional = p.bidirectional.unwrap_or(layer.bidirectional);
@@ -96,6 +113,23 @@ fn layer_set(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         layer.min_power = layer.max_power;
     }
     Ok(json!({ "id": layer.id }))
+}
+
+#[derive(Deserialize)]
+struct MoveLayerParams {
+    id: LayerId,
+    index: usize,
+}
+
+fn layer_move(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: MoveLayerParams = parse(params)?;
+    let from = s.doc.layers.iter().position(|l| l.id == p.id).ok_or_else(|| EngineError::NotFound(format!("layer {} does not exist", p.id)))?;
+    if p.index >= s.doc.layers.len() {
+        return Err(EngineError::BadParams(format!("index must be below {}", s.doc.layers.len())));
+    }
+    let layer = s.doc.layers.remove(from);
+    s.doc.layers.insert(p.index, layer);
+    Ok(json!({ "index": p.index }))
 }
 
 #[derive(Deserialize)]
