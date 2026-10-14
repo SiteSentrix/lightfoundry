@@ -150,8 +150,7 @@ pub(crate) fn plan_image(doc: &Document, layer: &Layer, shape: &Shape) -> Result
     let gray = sample_grid(shape, &Grid { x0: b.x0, y0: b.y0, nx, ny, pitch });
     let intensity = dither(&gray, nx, ny, layer.dither);
 
-    let wanted = layer.overscan.unwrap_or(doc.machine.overscan);
-    let over = if wanted.is_finite() { wanted.clamp(0.0, 50.0) } else { 0.0 };
+    let over = crate::overscan_for(doc, layer, doc.machine.overscan);
     let (min_p, max_p) = (layer.min_power.clamp(0.0, 100.0), layer.max_power.clamp(0.0, 100.0));
     let x_at = |i: usize| b.x0 + i as f64 * pitch;
     // With absolute placement the bed edges are known: a picture flush with an edge gets a shorter

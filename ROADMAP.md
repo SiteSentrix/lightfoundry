@@ -279,3 +279,6 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   controls drawn in code (canvas, layer chips, jog arrows, job-origin cells) carry names, roles and
   selected state so assistive technology can read and operate them; a headless test reads the
   accessibility tree. Not yet tried with a real screen reader.
+- **2026-10-14 — overscan from speed.** Machine > Overscan "from speed" (`machine.set`
+  `overscan_by_speed`) sizes the run-up and run-out of fills and pictures as v²/2a from the layer's
+  speed and the machine acceleration, wherever a layer has no overscan of its own; capped at 50 mm.

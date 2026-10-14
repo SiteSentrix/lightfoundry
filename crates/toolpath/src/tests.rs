@@ -908,6 +908,42 @@ mod overscan_and_ramp_tests {
     }
 
     #[test]
+    fn overscan_can_follow_the_layer_speed_and_the_machine_acceleration() {
+        let mut doc = fill_doc();
+        if let Some(l) = doc.layer_mut(0) {
+            l.speed = 6000.0; // 100 mm/s
+        }
+        doc.machine.acceleration = 1000.0; // 100² / 2000 = 5 mm
+        doc.machine.overscan_by_speed = true;
+        let job = plan(&doc).unwrap();
+        let Move::Travel(start) = job.ops[0].moves[0] else { panic!() };
+        let Move::Cut { to: line_start, .. } = job.ops[0].moves[1] else { panic!() };
+        assert!((line_start.x - start.x).abs() - 5.0 < 1e-9 && (line_start.x - start.x).abs() > 4.99, "{start:?} {line_start:?}");
+        if let Some(l) = doc.layer_mut(0) {
+            l.overscan = Some(0.0);
+        }
+        assert_eq!(
+            plan(&doc).unwrap().ops[0].moves.len(),
+            plan(&{
+                let mut d = doc.clone();
+                d.machine.overscan_by_speed = false;
+                d
+            })
+            .unwrap()
+            .ops[0]
+                .moves
+                .len(),
+            "a layer's own value wins"
+        );
+        for bad in [0.0, f64::NAN, f64::INFINITY] {
+            let mut d = fill_doc();
+            d.machine.overscan_by_speed = true;
+            d.machine.acceleration = bad;
+            assert!(plan(&d).is_ok(), "{bad}");
+        }
+    }
+
+    #[test]
     fn fill_lines_get_a_run_up_and_run_out_with_the_laser_off() {
         let mut doc = fill_doc();
         let plain = plan(&doc).unwrap();

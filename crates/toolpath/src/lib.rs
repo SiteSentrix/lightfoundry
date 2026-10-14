@@ -350,6 +350,21 @@ fn validate(layer: &Layer) -> Result<(), PlanError> {
     Ok(())
 }
 
+/// The run-up and run-out length for a layer: its own value, else (with `overscan_by_speed` and a
+/// known acceleration) the distance needed to reach its speed, else `unset`.
+pub(crate) fn overscan_for(doc: &Document, layer: &Layer, unset: f64) -> f64 {
+    let m = &doc.machine;
+    let wanted = match layer.overscan {
+        Some(o) => o,
+        None if m.overscan_by_speed && m.acceleration.is_finite() && m.acceleration > 0.0 && layer.speed.is_finite() && layer.speed > 0.0 => {
+            let v = layer.speed / 60.0;
+            v * v / (2.0 * m.acceleration)
+        }
+        None => unset,
+    };
+    if wanted.is_finite() { wanted.clamp(0.0, MAX_OVERSCAN_MM) } else { 0.0 }
+}
+
 fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) -> Result<Vec<Op>, PlanError> {
     let mut ops = Vec::new();
     let mut vector: Vec<Polyline> = shapes.iter().filter(|s| s.vector_path().is_some()).flat_map(|s| s.world_polylines()).collect();
@@ -380,7 +395,7 @@ fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) ->
             if segs.is_empty() {
                 continue;
             }
-            let over = layer.overscan.filter(|o| o.is_finite()).map_or(0.0, |o| o.clamp(0.0, MAX_OVERSCAN_MM));
+            let over = overscan_for(doc, layer, 0.0);
             let mut moves = Vec::with_capacity(segs.len() * 2);
             for (a, b) in segs {
                 let len = a.distance(b);

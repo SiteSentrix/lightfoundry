@@ -330,6 +330,12 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 app.run("machine.set", json!({ "acceleration": v }));
             }
             ui.end_row();
+            ui.label("Overscan");
+            let mut by_speed = m.overscan_by_speed;
+            if ui.checkbox(&mut by_speed, "from speed").on_hover_text("Run-up and run-out sized to the layer's speed and the acceleration above").changed() {
+                app.run("machine.set", json!({ "overscan_by_speed": by_speed }));
+            }
+            ui.end_row();
             ui.label("Max S ($30)");
             let mut max_s = m.max_s;
             if committed(&ui.add(egui::DragValue::new(&mut max_s).range(1..=100_000))) && max_s != m.max_s {

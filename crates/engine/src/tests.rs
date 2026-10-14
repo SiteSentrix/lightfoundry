@@ -1302,6 +1302,16 @@ mod import_tests {
     }
 
     #[test]
+    fn overscan_by_speed_is_a_machine_switch_that_undoes() {
+        let mut s = Session::new();
+        s.execute("machine.set", &json!({"overscan_by_speed": true, "acceleration": 500})).unwrap();
+        assert!(s.doc.machine.overscan_by_speed);
+        assert!(s.execute("machine.set", &json!({"overscan_by_speed": "yes"})).is_err());
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert!(!s.doc.machine.overscan_by_speed);
+    }
+
+    #[test]
     fn opening_a_file_as_a_template_leaves_an_untitled_unsaved_project() {
         let dir = std::env::temp_dir().join(format!("lf-engine-template-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
