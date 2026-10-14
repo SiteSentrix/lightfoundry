@@ -318,3 +318,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   translates a template with named places and fills in the values (single pass, values are never
   expanded again); about 30 status and label texts that were built with `format!` use it, and the
   static status messages are translated where they are written.
+- **2026-10-14 — translated engine errors.** Messages from the engine are matched by template
+  (`"shape {id} does not exist"`), their values picked out and put where the translation says, nested
+  messages translated too (`i18n::tr_message`). `cargo xtask messages` scans the sources for
+  `#[error]` texts and `EngineError` constructors into `crates/ui-egui/engine-messages.txt` (about
+  135 templates), `cargo xtask ci` fails if it is stale, and "Save translation template" includes them.

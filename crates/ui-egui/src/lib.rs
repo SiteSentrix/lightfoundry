@@ -733,7 +733,7 @@ impl LightFoundryApp {
     }
 
     pub(crate) fn report_error(&mut self, e: &EngineError) {
-        self.status = Some((e.to_string(), true));
+        self.status = Some((i18n::tr_message(&e.to_string()), true));
     }
 
     pub(crate) fn platform_preset_library(&self) -> Option<PathBuf> {
@@ -860,7 +860,7 @@ impl LightFoundryApp {
                 self.link = Some(if self.platform.inline_link() { Link::connect_inline(t) } else { Link::connect(t) });
                 self.say(tr("Connected"));
             }
-            Err(e) => self.status = Some((trf!("Could not open the machine: {e}", e = e), true)),
+            Err(e) => self.status = Some((trf!("Could not open the machine: {e}", e = i18n::tr_message(&e.to_string())), true)),
         }
     }
 
@@ -894,7 +894,7 @@ impl LightFoundryApp {
         };
         let kept: std::sync::Arc<str> = program.as_str().into();
         if let Err(e) = link.start_job(program) {
-            self.status = Some((e.to_string(), true));
+            self.status = Some((i18n::tr_message(&e.to_string()), true));
         } else {
             self.job_program = Some(kept);
             self.forget_interrupted();
@@ -948,7 +948,7 @@ impl LightFoundryApp {
             return;
         };
         if let Err(e) = f(link) {
-            self.status = Some((e.to_string(), true));
+            self.status = Some((i18n::tr_message(&e.to_string()), true));
         }
     }
 
@@ -979,7 +979,7 @@ impl LightFoundryApp {
                 let attempts = attempts + 1;
                 if attempts >= RECONNECT_ATTEMPTS {
                     self.reconnect = None;
-                    self.status = Some((trf!("Could not reconnect to {port}: {e}", port = port, e = e), true));
+                    self.status = Some((trf!("Could not reconnect to {port}: {e}", port = port, e = i18n::tr_message(&e.to_string())), true));
                 } else {
                     let wait = (self.reconnect_wait * 2u32.saturating_pow(attempts)).min(RECONNECT_MAX_WAIT);
                     self.reconnect = Some(Reconnect { attempts, next: Instant::now() + wait });
@@ -1015,7 +1015,7 @@ impl LightFoundryApp {
             if let JobState::Finished(result) = &snap.job {
                 self.status = Some(match result {
                     Ok(lines) => (trf!("Job finished: {lines} lines", lines = lines), false),
-                    Err(e) => (trf!("Job stopped: {e}", e = e), true),
+                    Err(e) => (trf!("Job stopped: {e}", e = i18n::tr_message(&e.to_string())), true),
                 });
             }
             self.last_job = Some(snap.job.clone());

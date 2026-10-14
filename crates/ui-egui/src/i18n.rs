@@ -29,6 +29,68 @@ pub struct Translation {
     pub name: String,
     pub font: Option<PathBuf>,
     pub strings: HashMap<String, String>,
+    /// Entries whose English text has `{name}` places, for matching messages that carry values.
+    patterns: Vec<Pattern>,
+}
+
+/// A message template such as `shape {id} does not exist`, split into fixed text and named places.
+#[derive(Debug, Clone, PartialEq)]
+struct Pattern {
+    /// Fixed text before each place, then the text after the last one (`names.len() + 1` pieces).
+    literals: Vec<String>,
+    names: Vec<String>,
+    value: String,
+}
+
+impl Pattern {
+    /// `None` when the key has no places. A bare `{}` is named by its position (`1`, `2`, …); a
+    /// format spec after a colon (`{n:?}`) is ignored.
+    fn new(key: &str, value: &str) -> Option<Pattern> {
+        let (mut literals, mut names) = (vec![String::new()], Vec::new());
+        let mut rest = key;
+        while let Some(open) = rest.find(['{', '}']) {
+            let (before, tail) = rest.split_at(open);
+            let current = literals.last_mut()?;
+            current.push_str(before);
+            if tail.starts_with("{{") || tail.starts_with("}}") {
+                current.push_str(&tail[..1]);
+                rest = &tail[2..];
+                continue;
+            }
+            let Some(close) = tail.strip_prefix('{').and_then(|t| t.find('}')) else {
+                current.push_str(&tail[..1]);
+                rest = &tail[1..];
+                continue;
+            };
+            let token = &tail[1..=close];
+            let name = token.split(':').next().unwrap_or("");
+            names.push(if name.is_empty() { (names.len() + 1).to_string() } else { name.to_string() });
+            literals.push(String::new());
+            rest = &tail[close + 2..];
+        }
+        literals.last_mut()?.push_str(rest);
+        (!names.is_empty()).then(|| Pattern { literals, names, value: value.to_string() })
+    }
+
+    /// The text each place stands for, when `message` has this shape.
+    fn captures<'a>(&self, message: &'a str) -> Option<Vec<&'a str>> {
+        let first = self.literals.first()?;
+        let last = self.literals.last()?;
+        let mut rest = message.strip_prefix(first.as_str())?;
+        rest = rest.strip_suffix(last.as_str())?;
+        let mut found = Vec::with_capacity(self.names.len());
+        for literal in self.literals.iter().skip(1).take(self.names.len().saturating_sub(1)) {
+            let at = if literal.is_empty() { 0 } else { rest.find(literal.as_str())? };
+            found.push(&rest[..at]);
+            rest = &rest[at + literal.len()..];
+        }
+        found.push(rest);
+        (found.len() == self.names.len()).then_some(found)
+    }
+
+    fn fixed_len(&self) -> usize {
+        self.literals.iter().map(String::len).sum()
+    }
 }
 
 static ACTIVE: RwLock<Option<Translation>> = RwLock::new(None);
@@ -45,13 +107,46 @@ pub fn tr(english: &str) -> String {
     active.as_ref().and_then(|t| t.strings.get(english)).map_or_else(|| english.to_string(), Clone::clone)
 }
 
+/// Translates a message the program received rather than wrote, such as an engine error: the whole
+/// text if the catalog has it, else the template it matches (`"shape {id} does not exist"`), with the
+/// values filled in and themselves translated (an error that wraps another one translates both).
+/// Nothing is recorded for the template; the list of engine messages ships with the program.
+pub fn tr_message(message: &str) -> String {
+    message_at(message, 0)
+}
+
+fn message_at(message: &str, depth: usize) -> String {
+    let active = ACTIVE.read().unwrap_or_else(|e| e.into_inner());
+    let Some(t) = active.as_ref() else { return message.to_string() };
+    if let Some(v) = t.strings.get(message) {
+        return v.clone();
+    }
+    if depth >= 3 {
+        return message.to_string();
+    }
+    for p in &t.patterns {
+        if let Some(caps) = p.captures(message) {
+            let args: Vec<(&str, String)> = p.names.iter().map(String::as_str).zip(caps.iter().map(|c| message_at(c, depth + 1))).collect();
+            return fill(&p.value, &args);
+        }
+    }
+    message.to_string()
+}
+
+/// Every message template the program's own errors can use, for translators (a list kept up to
+/// date by `cargo xtask messages`).
+pub const ENGINE_MESSAGES: &str = include_str!("../engine-messages.txt");
+
 /// [`tr`] for a text with values in it: the template has `{name}` places, filled from `args`. The
 /// values are inserted as they are (a value that itself contains `{name}` is not filled again), and
 /// a place with no matching argument is left in the text.
 pub fn tr_fill(template: &str, args: &[(&str, String)]) -> String {
-    let text = tr(template);
+    fill(&tr(template), args)
+}
+
+fn fill(text: &str, args: &[(&str, String)]) -> String {
     let mut out = String::with_capacity(text.len() + 16);
-    let mut rest = text.as_str();
+    let mut rest = text;
     while let Some(open) = rest.find('{') {
         out.push_str(&rest[..open]);
         let after = &rest[open + 1..];
@@ -110,7 +205,12 @@ pub fn read_font(path: &Path) -> Result<Vec<u8>, String> {
 /// Every string asked for so far, as a catalog with each string as its own translation.
 pub fn template() -> String {
     let seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
-    let strings: serde_json::Map<String, serde_json::Value> = seen.iter().map(|s| (s.clone(), serde_json::Value::String(s.clone()))).collect();
+    let strings: serde_json::Map<String, serde_json::Value> = seen
+        .iter()
+        .map(String::as_str)
+        .chain(ENGINE_MESSAGES.lines().filter(|l| !l.is_empty()))
+        .map(|s| (s.to_string(), serde_json::Value::String(s.to_string())))
+        .collect();
     serde_json::to_string_pretty(&serde_json::json!({ "name": "", "font": "", "strings": strings })).unwrap_or_default()
 }
 
@@ -134,7 +234,10 @@ pub fn parse(text: &str) -> Result<Translation, String> {
             strings.insert(key.clone(), value.to_string());
         }
     }
-    Ok(Translation { name, font, strings })
+    let mut patterns: Vec<Pattern> = strings.iter().filter_map(|(k, v)| Pattern::new(k, v)).collect();
+    // The more fixed text a template has, the more specific it is: try those first.
+    patterns.sort_by(|a, b| b.fixed_len().cmp(&a.fixed_len()).then_with(|| a.literals.cmp(&b.literals)));
+    Ok(Translation { name, font, strings, patterns })
 }
 
 /// Reads and parses the catalog at `path`.
@@ -172,6 +275,39 @@ mod tests {
         assert_eq!(trf!("i18n-fill {n} items", n = 4), "4 Einträge (i18n-fill)");
         set_active(None);
         assert_eq!(trf!("i18n-fill {n} items", n = 4), "i18n-fill 4 items");
+    }
+
+    #[test]
+    fn engine_messages_are_matched_by_template_and_nested_ones_are_translated_too() {
+        let t = parse(
+            r#"{"strings":{
+                "shape {id} does not exist":"Form {id} gibt es nicht",
+                "layer {} does not exist":"Ebene {1} gibt es nicht",
+                "bad parameters: {0}":"falsche Angaben: {0}",
+                "{name} is not text":"{name} ist kein Text",
+                "nothing is selected":"nichts ausgewählt",
+                "{a} and {b}":"{b} und {a}"
+            }}"#,
+        )
+        .unwrap();
+        set_active(Some(t));
+        assert_eq!(tr_message("shape 12 does not exist"), "Form 12 gibt es nicht");
+        assert_eq!(tr_message("layer 3 does not exist"), "Ebene 3 gibt es nicht");
+        assert_eq!(tr_message("nothing is selected"), "nichts ausgewählt");
+        assert_eq!(tr_message("bad parameters: shape 7 does not exist"), "falsche Angaben: Form 7 gibt es nicht");
+        assert_eq!(tr_message("bad parameters: Box 1 is not text"), "falsche Angaben: Box 1 ist kein Text");
+        assert_eq!(tr_message("x and y"), "y und x", "places can swap");
+        assert_eq!(tr_message("something nobody translated"), "something nobody translated");
+        assert_eq!(tr_message(""), "");
+        assert_eq!(tr_message("shape  does not exist"), "Form  gibt es nicht", "an empty value still matches");
+        set_active(None);
+        assert_eq!(tr_message("shape 12 does not exist"), "shape 12 does not exist");
+    }
+
+    #[test]
+    fn the_shipped_message_list_is_one_template_per_line() {
+        assert!(ENGINE_MESSAGES.lines().count() > 20);
+        assert!(ENGINE_MESSAGES.lines().all(|l| !l.trim().is_empty() && l == l.trim()));
     }
 
     #[test]

@@ -165,6 +165,30 @@ mod translation_tests {
     }
 }
 
+mod engine_message_tests {
+    use super::*;
+
+    #[test]
+    fn errors_from_the_engine_show_in_the_chosen_language_with_their_values() {
+        let dir = temp_dir("engine-messages");
+        let catalog = dir.join("xx.json");
+        std::fs::write(
+            &catalog,
+            r#"{"name":"Testsprache","strings":{"layer {} does not exist":"Ebene {1} fehlt (i18n-engine-test)","bad parameters: {0}":"falsch: {0}","nothing is selected":"nichts gewaehlt (i18n-engine-test)"}}"#,
+        )
+        .unwrap();
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("recovery.lightfoundry"), open_answer: Some(catalog), recent: None });
+        h.app.choose_translation();
+        h.app.run("edit.delete", json!({}));
+        assert!(matches!(&h.app.status, Some((m, true)) if m == "nichts gewaehlt (i18n-engine-test)"), "{:?}", h.app.status);
+        h.app.run("layer.set", json!({"id": 999, "speed": 100}));
+        assert!(matches!(&h.app.status, Some((m, true)) if m.contains("Ebene 999 fehlt") || m.contains("falsch")), "{:?}", h.app.status);
+        h.app.use_english();
+        h.app.run("edit.delete", json!({}));
+        assert!(matches!(&h.app.status, Some((m, true)) if m == "nothing is selected"), "{:?}", h.app.status);
+    }
+}
+
 mod job_position_tests {
     use super::*;
     use crate::job_position::{self, JobPosition};

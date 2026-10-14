@@ -1,0 +1,135 @@
+DXF is larger than {1} MB
+I/O error talking to the machine: {0}
+I/O error: {0}
+SVG is larger than {1} MB
+a batch may hold at most {MAX_BATCH} commands
+a boolean needs at least two shapes
+a coordinate is not a finite number
+a group needs at least two shapes
+a job is running; stop it first
+a move lies far outside the job's declared extent
+a path needs at least {0} nodes
+a path needs between {minimum} and {MAX_NODES} nodes
+a preset needs a name
+a test grid has 1 to {MAX_COLS_ROWS} columns and rows and at most {MAX_CELLS} cells
+an array must make between 1 and {MAX_COPIES} copies
+an open path needs a positive offset distance (it becomes the outline around the line)
+at most {MAX_PRESETS} presets can be kept
+bad parameters: {0}
+batches cannot be nested
+cannot generate G-code: {0}
+cannot open the font {path}: {e}
+cannot plan the job: {0}
+cannot read the font {path}: {e}
+cannot use that font: {0}
+cell size must be 0.5-200 mm and the gap 0-100 mm
+color must look like #rrggbb
+colors must be between 2 and {1}
+could not import: {0}
+could not parse SVG: {0}
+could not read or write the file: {0}
+crop fractions must be between 0 and {MAX_CROP}, and opposite sides must leave some picture
+data_base64 is not valid base64
+device error: {0}
+distributing needs at least three shapes (two with a gap)
+empty image
+feed rate {0} is not a finite positive number
+file error: {0}
+file is larger than {1} MB
+file is not a LightFoundry document
+gap must be a finite number
+give either path or data
+give either path or data_base64
+image is too large
+image raster would need {0} cells (limit {MAX_RASTER_CELLS}); increase the line interval
+index must be below {1}
+internal error (your document was restored): {0}
+invalid document: {0}
+job cancelled
+job contains a non-finite coordinate
+job has more than {MAX_MOVES} moves
+layer {1} does not exist
+layer {label_layer} does not exist
+layer {layer} does not exist
+layer {name}: kerf offset failed: {reason}
+layer {name}: {what} must be a positive finite number
+levels must be between 1 and {MAX_TRACE_LEVELS}
+line {0} is not a motion or setup line this program format can be resumed from
+line {line} contains byte 0x{byte}, which the controller would act on as a real-time command or cannot parse
+line {line} is {len} bytes; GRBL accepts at most {3} per line
+machine {0} must be a positive finite number
+marks must be finite numbers
+max_s must be between 1 and 100000
+no path given and the document has never been saved
+no preset called {name}
+no response from the controller for {0} s
+none of the selected shapes is grouped
+not a LightFoundry file: {0}
+not an ASCII DXF file (binary DXF and DWG are not supported)
+not connected
+nothing in the picture is darker than the threshold
+nothing is selected
+nothing to trace
+numbers must be finite and within ±10,000,000 mm
+offset distance must be a finite number within ±{MAX_OFFSET_MM} mm
+only text needs converting; paths are already editable
+order must be between -1000 and 1000
+point ({x}, {y}) mm is outside the {w}×{h} mm work area
+preset {1} has unusable settings
+radii must be positive
+radii must satisfy 0 < inner < outer and points must be between 3 and 100
+radius must be positive and sides between 3 and 100
+select exactly one image, or pass an id
+select exactly one text object, or pass an id
+shape {1} does not exist
+shape {1} is not text
+shape {id} does not exist
+shape {id} is not an image
+shape {id} is not text
+shapes contain a non-finite or out-of-range coordinate
+sizes must be positive, finite and the shape must have extent in that direction
+spacing must be a finite number between 0 and 10
+start must be two finite numbers
+text height must be between {MIN_HEIGHT_MM} and {MAX_HEIGHT_MM} mm
+text is empty
+text is longer than {MAX_CHARS} characters
+that crop leaves no pixels
+that picture has no colour (grey, or imported by an older version); import it again
+that picture is too large or too detailed to trace
+that text is too large to bend
+that would make the picture too large
+the controller raised ALARM:{0}; clear it (unlock/home) before running again
+the controller rejected line {line} ({text}) with error:{code}
+the file has no ENTITIES section
+the font file is too large
+the image file is too large
+the job is {w}×{h} mm, larger than the {bw}×{bh} mm work area
+the machine entered an alarm state; clear it (unlock/home) before running again
+the marks imply a change of size of {0}x, which is not believable
+the offset leaves nothing (the shapes collapse at that distance)
+the path has no geometry
+the path is too short to follow
+the picture has no ink to trace (it is all paper-white)
+the program has {total} lines; line {line} does not exist
+the program is too long to resume
+the result is empty (the shapes do not overlap that way)
+the text and the path must be different shapes
+the two marks are too close together to give a direction
+there is no node {0} in that sub-path
+there is no segment {0} in that sub-path
+there is no sub-path {0}
+there is nothing to frame
+there is nothing to output
+this file was saved by a newer LightFoundry (format v{0}); update to open it
+too many nodes (limit {MAX_NODES})
+too many points (limit {MAX_POINTS})
+unknown command {0}
+width and height must be positive
+width must be positive
+{1} has no closed outline (open lines and stroke text cannot be combined)
+{1} is an image and cannot be joined
+{1} is an image and cannot be offset
+{1} is an image; booleans need vector shapes
+{1} is not an editable path (text and images must be converted first)
+{name} must be between {lo} and {hi}
+{name} must be within {min}-{max}
