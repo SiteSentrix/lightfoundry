@@ -90,6 +90,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         run: recover,
     },
     CommandSpec {
+        id: "file.export_svg",
+        label: "Save SVG…",
+        menu: "File/Export",
+        shortcut: None,
+        params_doc: "{path?, include? (return the SVG text), selection_only?, include_hidden? (layers with output off)}  — millimetre units, one group per layer coloured like the layer (lines as hairline strokes, fills as fills), pictures embedded as PNG with their tone adjustments applied",
+        mutates: false,
+        run: export_svg,
+    },
+    CommandSpec {
         id: "file.export_gcode",
         label: "Save G-code…",
         menu: "File/Export",
@@ -362,6 +371,30 @@ fn recover(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     // Recovered work was never saved: keep it marked as changed so closing asks first.
     s.dirty = true;
     Ok(json!({ "shapes": shapes }))
+}
+
+#[derive(Deserialize)]
+struct ExportSvgParams {
+    path: Option<PathBuf>,
+    #[serde(default)]
+    include: bool,
+    #[serde(default)]
+    selection_only: bool,
+    #[serde(default)]
+    include_hidden: bool,
+}
+
+fn export_svg(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: ExportSvgParams = parse(params)?;
+    if p.path.is_none() && !p.include {
+        return Err(EngineError::BadParams("give a path, or include: true to get the text".into()));
+    }
+    let only = p.selection_only.then(|| s.selection.clone());
+    let (svg, shapes) = super::svg_export::export(&s.doc, only.as_deref(), p.include_hidden)?;
+    if let Some(path) = &p.path {
+        std::fs::write(path, &svg)?;
+    }
+    Ok(if p.include { json!({ "shapes": shapes, "bytes": svg.len(), "svg": svg }) } else { json!({ "shapes": shapes, "bytes": svg.len() }) })
 }
 
 fn export_gcode(s: &mut Session, params: &Value) -> Result<Value, EngineError> {

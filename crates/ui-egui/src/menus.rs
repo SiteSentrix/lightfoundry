@@ -112,6 +112,20 @@ fn file_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         ui.close();
     }
     ui.separator();
+    if ui.button(tr("Save SVG…")).on_hover_text(tr("For software that takes SVG but not G-code")).clicked() {
+        if app.platform_browser_files() {
+            if let Some(v) = app.run("file.export_svg", json!({ "include": true }))
+                && let Some(text) = v["svg"].as_str()
+            {
+                app.download("design.svg", text.as_bytes(), "image/svg+xml");
+            }
+        } else if let Some(path) = app.pick_save("Save SVG", "design.svg", &["svg"])
+            && app.run("file.export_svg", json!({ "path": path })).is_some()
+        {
+            app.say(tr("SVG saved"));
+        }
+        ui.close();
+    }
     if ui.button(tr("Save G-code…")).clicked() {
         if app.platform_browser_files() {
             if let Some(v) = app.run("job.gcode", json!({ "include": true }))
