@@ -793,6 +793,20 @@ fn crop_and_sharpen(app: &mut LightFoundryApp, ui: &mut egui::Ui, id: u64) {
         });
         ui.weak("Both change the stored picture (Undo brings it back).");
     });
+    ui.collapsing("Trace to vectors", |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Threshold");
+            ui.add(egui::DragValue::new(&mut app.trace_threshold).range(1.0..=254.0).speed(1.0));
+        });
+        ui.horizontal(|ui| {
+            if ui.button("Trace").on_hover_text("Add outlines that follow the dark areas, on top of the picture").clicked() {
+                app.run("image.trace", json!({ "id": id, "threshold": app.trace_threshold }));
+            }
+            if ui.button("Trace and remove picture").clicked() {
+                app.run("image.trace", json!({ "id": id, "threshold": app.trace_threshold, "keep_image": false }));
+            }
+        });
+    });
 }
 
 /// Grid and circular arrays of the current selection.

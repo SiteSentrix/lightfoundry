@@ -740,3 +740,73 @@ mod perforation_tests {
         }
     }
 }
+
+mod trace_tests {
+    use super::*;
+
+    fn picture(rows: &[&str]) -> (usize, usize, Vec<bool>) {
+        let h = rows.len();
+        let w = rows.first().map_or(0, |r| r.len());
+        (w, h, rows.iter().flat_map(|r| r.bytes().map(|b| b == b'#')).collect())
+    }
+
+    fn run(rows: &[&str], tol: f64, min_area: f64) -> Vec<Polyline> {
+        let (w, h, px) = picture(rows);
+        trace(w, h, |x, y| px[y * w + x], tol, min_area).unwrap()
+    }
+
+    fn area(l: &Polyline) -> f64 {
+        let p = &l.points;
+        (0..p.len()).map(|i| p[i].x * p[(i + 1) % p.len()].y - p[(i + 1) % p.len()].x * p[i].y).sum::<f64>() / 2.0
+    }
+
+    #[test]
+    fn a_solid_block_becomes_one_rectangle() {
+        let loops = run(&["....", ".##.", ".##.", "...."], 0.5, 0.0);
+        assert_eq!(loops.len(), 1);
+        assert_eq!(loops[0].points.len(), 4, "{:?}", loops[0].points);
+        assert!((area(&loops[0]).abs() - 4.0).abs() < 1e-9);
+        let b = loops[0].bounds().unwrap();
+        assert_eq!((b.x0, b.y0, b.x1, b.y1), (1.0, 1.0, 3.0, 3.0));
+    }
+
+    #[test]
+    fn a_ring_has_an_outer_loop_and_an_opposite_hole() {
+        let loops = run(&["#####", "#...#", "#...#", "#...#", "#####"], 0.5, 0.0);
+        assert_eq!(loops.len(), 2);
+        let (outer, hole) = if area(&loops[0]).abs() > area(&loops[1]).abs() { (&loops[0], &loops[1]) } else { (&loops[1], &loops[0]) };
+        assert!((area(outer).abs() - 25.0).abs() < 1e-9 && (area(hole).abs() - 9.0).abs() < 1e-9);
+        assert!(area(outer) * area(hole) < 0.0, "the hole runs the other way");
+    }
+
+    #[test]
+    fn separate_blobs_specks_and_diagonal_neighbours() {
+        let loops = run(&["##...#", "##....", ".....#"], 0.5, 0.0);
+        assert_eq!(loops.len(), 3);
+        assert_eq!(run(&["##...#", "##....", ".....#"], 0.5, 2.0).len(), 1, "specks under the minimum area are dropped");
+        let diag = run(&["#.", ".#"], 0.0, 0.0);
+        let total: f64 = diag.iter().map(|l| area(l).abs()).sum();
+        assert!((total - 2.0).abs() < 1e-9, "touching corners lose no pixels: {diag:?}");
+    }
+
+    #[test]
+    fn staircases_simplify_to_a_diagonal_within_the_tolerance() {
+        let rows: Vec<String> = (0..20).map(|y| format!("{}{}", "#".repeat(y + 1), ".".repeat(19 - y))).collect();
+        let refs: Vec<&str> = rows.iter().map(String::as_str).collect();
+        let exact = run(&refs, 0.0, 0.0);
+        let loose = run(&refs, 1.0, 0.0);
+        assert!(loose[0].points.len() < 8 && exact[0].points.len() > 30, "{} vs {}", loose[0].points.len(), exact[0].points.len());
+    }
+
+    #[test]
+    fn empty_oversized_and_hostile_inputs_are_handled() {
+        assert!(trace(0, 5, |_, _| true, 1.0, 0.0).is_none());
+        assert!(trace(5, 0, |_, _| true, 1.0, 0.0).is_none());
+        assert!(trace(5000, 5000, |_, _| true, 1.0, 0.0).is_none(), "25 million pixels is too many");
+        assert!(trace(usize::MAX, 2, |_, _| true, 1.0, 0.0).is_none());
+        assert!(trace(4, 4, |_, _| false, 1.0, 0.0).unwrap().is_empty());
+        assert_eq!(trace(4, 4, |_, _| true, f64::NAN, f64::NAN).unwrap().len(), 1);
+        // A checkerboard is the worst case for edge count and must still finish.
+        assert!(trace(200, 200, |x, y| (x + y) % 2 == 0, 1.0, 0.0).is_some());
+    }
+}

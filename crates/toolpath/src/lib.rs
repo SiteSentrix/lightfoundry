@@ -8,11 +8,13 @@ mod perforate;
 mod raster;
 mod tabs;
 mod timeline;
+mod trace;
 
 pub use fill::fill_segments;
 pub use order::{order_polylines, remove_duplicates};
 pub use raster::{Grid, dither, sample_grid};
 pub use timeline::{LayerTime, Moment, OpTime, Timeline, move_seconds};
+pub use trace::{MAX_TRACE_PIXELS, trace};
 
 use lightfoundry_doc::{Document, Layer, LayerId, LayerMode, Shape, ShapeKind};
 use lightfoundry_geom::{Point, Polyline, Rect, bounds_of_polylines};
