@@ -13,7 +13,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Text",
         menu: "Create",
         shortcut: Some("T"),
-        params_doc: "{text, x, y, height? (cap height mm, default 10), letter_spacing?, line_spacing?, align?: left|center|right, layer?}  (single-line stroke font)",
+        params_doc: "{text, x, y, height? (cap height mm, default 10), letter_spacing?, line_spacing?, align?: left|center|right, layer?}  (single-line stroke font), font? (path to a .ttf/.otf file: draws filled outlines; use a Fill layer to engrave them)",
         mutates: true,
         run: create,
     },
@@ -22,7 +22,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Edit Text",
         menu: "Edit",
         shortcut: None,
-        params_doc: "{id? (default: the selected text), text?, height?, letter_spacing?, line_spacing?, align?}",
+        params_doc: "{id? (default: the selected text), text?, height?, letter_spacing?, line_spacing?, align?, font? (path, or \"\" for the built-in font)}",
         mutates: true,
         run: edit,
     },
@@ -39,6 +39,7 @@ struct CreateParams {
     letter_spacing: Option<f64>,
     line_spacing: Option<f64>,
     align: Option<TextAlign>,
+    font: Option<String>,
     #[serde(default)]
     layer: LayerId,
 }
@@ -52,6 +53,7 @@ fn create(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         letter_spacing: p.letter_spacing.unwrap_or(defaults.letter_spacing),
         line_spacing: p.line_spacing.unwrap_or(defaults.line_spacing),
         align: p.align.unwrap_or(defaults.align),
+        font: p.font.filter(|f| !f.is_empty()),
     };
     let (path, unsupported) = generate(&p.text, &settings)?;
     let name = p.text.lines().next().unwrap_or("Text").chars().take(24).collect::<String>();
@@ -77,6 +79,7 @@ struct EditParams {
     letter_spacing: Option<f64>,
     line_spacing: Option<f64>,
     align: Option<TextAlign>,
+    font: Option<String>,
 }
 
 fn edit(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
@@ -97,6 +100,9 @@ fn edit(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     new_style.letter_spacing = p.letter_spacing.unwrap_or(new_style.letter_spacing);
     new_style.line_spacing = p.line_spacing.unwrap_or(new_style.line_spacing);
     new_style.align = p.align.unwrap_or(new_style.align);
+    if let Some(f) = p.font {
+        new_style.font = (!f.is_empty()).then_some(f);
+    }
     let new_content = p.text.unwrap_or_else(|| content.clone());
     let (new_path, unsupported) = generate(&new_content, &new_style)?;
     *content = new_content;
@@ -119,6 +125,27 @@ pub(super) fn generate(text: &str, s: &TextSettings) -> Result<(lightfoundry_geo
             TextAlign::Right => Align::Right,
         },
     };
-    let l = layout(text, &style).map_err(|e| EngineError::BadParams(e.to_string()))?;
+    let l = match &s.font {
+        Some(path) => {
+            let data = read_font(path)?;
+            lightfoundry_text::layout_outline(&data, text, &style)
+        }
+        None => layout(text, &style),
+    }
+    .map_err(|e| EngineError::BadParams(e.to_string()))?;
     Ok((l.path, l.unsupported))
+}
+
+/// Reads a font file, refusing anything unreasonably large before it is loaded.
+fn read_font(path: &str) -> Result<Vec<u8>, EngineError> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).map_err(|e| EngineError::BadParams(format!("cannot open the font {path}: {e}")))?;
+    let mut data = Vec::new();
+    file.take(lightfoundry_text::MAX_FONT_BYTES as u64 + 1)
+        .read_to_end(&mut data)
+        .map_err(|e| EngineError::BadParams(format!("cannot read the font {path}: {e}")))?;
+    if data.len() > lightfoundry_text::MAX_FONT_BYTES {
+        return Err(EngineError::BadParams("the font file is too large".into()));
+    }
+    Ok(data)
 }

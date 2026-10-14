@@ -1,10 +1,15 @@
 //! Text for laser work: an original single-line ("stroke") font drawn in code, and layout.
 //!
 //! A stroke font traces every letter with one pass of the laser, which is what engraving wants;
-//! outline fonts (for Fill mode) would come from an optional font source later and are not part
-//! of this crate. The glyph shapes below are our own design.
+//! outline fonts (for Fill mode) come from a font file the person supplies, see [`layout_outline`].
+//! The stroke glyph shapes below are our own design.
 
 mod glyphs;
+mod outline;
+
+#[cfg(any(test, feature = "testfont"))]
+pub use outline::testfont;
+pub use outline::{MAX_FONT_BYTES, layout_outline};
 
 use kurbo::{BezPath, Point};
 use thiserror::Error;
@@ -52,6 +57,8 @@ pub enum TextError {
     BadSpacing,
     #[error("text is longer than {MAX_CHARS} characters")]
     TooLong,
+    #[error("cannot use that font: {0}")]
+    BadFont(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
