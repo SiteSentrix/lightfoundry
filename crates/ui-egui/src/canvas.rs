@@ -521,7 +521,14 @@ fn crosses(pts: &[Pos2], clip: egui::Rect) -> bool {
     bounds.intersects(clip)
 }
 
+/// The power and feed ranges of what is being previewed, for colouring.
+struct PreviewRanges {
+    power: (f32, f32),
+    speed: (f32, f32),
+}
+
 fn draw_preview(app: &LightFoundryApp, painter: &egui::Painter, view: &View) {
+    let ranges = PreviewRanges { power: app.preview.power_range, speed: app.preview.speed_range };
     let now = app.player.position.and_then(|t| app.preview.timeline.at(t));
     for seg in &app.preview.segments {
         let travel = seg.power <= 0.0;
@@ -533,8 +540,8 @@ fn draw_preview(app: &LightFoundryApp, painter: &egui::Painter, view: &View) {
                 // The part of the job still to come stays visible, faintly.
                 (Stroke::new(1.0, app.tokens.travel.gamma_multiply(0.25)), seg.b)
             }
-            timeline_ui::Reveal::Full => (preview_stroke(app, seg), seg.b),
-            timeline_ui::Reveal::Partial(f) => (preview_stroke(app, seg), seg.a.lerp(seg.b, f64::from(f))),
+            timeline_ui::Reveal::Full => (preview_stroke(app, seg, &ranges), seg.b),
+            timeline_ui::Reveal::Partial(f) => (preview_stroke(app, seg, &ranges), seg.a.lerp(seg.b, f64::from(f))),
         };
         painter.line_segment([view.to_screen(seg.a), view.to_screen(end)], stroke);
     }
@@ -562,9 +569,19 @@ fn draw_preview(app: &LightFoundryApp, painter: &egui::Painter, view: &View) {
     }
 }
 
-fn preview_stroke(app: &LightFoundryApp, seg: &crate::geometry::PreviewSegment) -> Stroke {
+fn preview_stroke(app: &LightFoundryApp, seg: &crate::geometry::PreviewSegment, ranges: &PreviewRanges) -> Stroke {
     if seg.power <= 0.0 {
         return Stroke::new(1.0, app.tokens.travel);
+    }
+    match app.preview_colors {
+        timeline_ui::PreviewColors::Power => {
+            return Stroke::new(1.0, timeline_ui::heat(timeline_ui::fraction(seg.power, ranges.power.0, ranges.power.1)));
+        }
+        // Slow is hot.
+        timeline_ui::PreviewColors::Speed => {
+            return Stroke::new(1.0, timeline_ui::heat(1.0 - timeline_ui::fraction(seg.speed, ranges.speed.0, ranges.speed.1)));
+        }
+        timeline_ui::PreviewColors::Layer => {}
     }
     let base = app.session.doc.layer(seg.layer).map_or(Color32::WHITE, |l| on_dark(parse_hex(&l.color)));
     Stroke::new(1.0, base.gamma_multiply(0.4 + 0.6 * (seg.power / 100.0).clamp(0.0, 1.0)))

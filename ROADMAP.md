@@ -252,4 +252,6 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — acceleration-aware times.** `Machine::acceleration` (mm/s², from `$120`/`$121`
   with a one-click "use controller's") times each move as a trapezoid starting and ending at rest,
   so short segments cost realistically; used by `job.estimate` and the preview timeline.
+- **2026-10-14 — preview colours.** View > Preview colours: by layer (as before), by power, or by
+  speed (blue to red; slow is hot), scaled to the ranges present in the job.
 

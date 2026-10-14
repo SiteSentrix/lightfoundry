@@ -23,6 +23,36 @@ pub struct Player {
     pub speed: usize,
 }
 
+/// What the preview's colours show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PreviewColors {
+    /// Each layer's own colour, fainter at lower power.
+    #[default]
+    Layer,
+    /// Cold to hot with the laser power.
+    Power,
+    /// Cold to hot with the feed rate (slow is hot: more energy goes into the material).
+    Speed,
+}
+
+/// A cold-to-hot colour for `t` in 0..1: blue, through cyan and yellow, to red. Out-of-range and
+/// non-finite values are clamped.
+pub fn heat(t: f32) -> Color32 {
+    let t = if t.is_finite() { t.clamp(0.0, 1.0) } else { 0.0 };
+    // Four stops spread evenly: blue, cyan, yellow, red.
+    const STOPS: [[f32; 3]; 4] = [[60.0, 90.0, 255.0], [40.0, 220.0, 230.0], [250.0, 220.0, 50.0], [240.0, 50.0, 40.0]];
+    let x = t * 3.0;
+    let i = (x.floor() as usize).min(2);
+    let f = x - i as f32;
+    let mix = |c: usize| (STOPS[i][c] + (STOPS[i + 1][c] - STOPS[i][c]) * f).round() as u8;
+    Color32::from_rgb(mix(0), mix(1), mix(2))
+}
+
+/// Position of `value` within `lo..=hi` as 0..1 (0.5 when the range is empty).
+pub fn fraction(value: f32, lo: f32, hi: f32) -> f32 {
+    if hi > lo && value.is_finite() { ((value - lo) / (hi - lo)).clamp(0.0, 1.0) } else { 0.5 }
+}
+
 /// How much of a preview segment has happened at a given moment.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Reveal {
