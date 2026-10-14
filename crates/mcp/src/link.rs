@@ -12,11 +12,12 @@
 //! Only engine commands cross the link. Starting a job on a machine is a UI action and is not
 //! reachable, and commands that would replace unsaved work are refused ([`Mode::Live`]).
 
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -25,7 +26,7 @@ use std::time::Duration;
 use lightfoundry_engine::Session;
 use serde_json::{Value, json};
 
-use crate::{Line, MAX_MESSAGE_BYTES, Mode, handle_line_in, read_capped_line, write_message};
+use crate::{Line, MAX_MESSAGE_BYTES, Mode, Subscriptions, handle_line_with, read_capped_line, write_message};
 
 /// Agents connected at once.
 const MAX_CLIENTS: usize = 4;
@@ -33,21 +34,37 @@ const MAX_CLIENTS: usize = 4;
 const MAX_HANDSHAKE_BYTES: usize = 512;
 /// How long a new connection may take to present its token.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
-/// How long a request may wait for the app to get to it (a stalled or closed window).
-const REPLY_TIMEOUT: Duration = Duration::from_secs(60);
 /// Requests answered per frame, so a flood cannot freeze the window.
 const MAX_PER_PASS: usize = 16;
 /// Bytes of randomness in the token.
 const TOKEN_BYTES: usize = 32;
 
-struct Request {
-    line: String,
-    reply: Sender<Option<Value>>,
+/// What a connection thread tells the app thread, which owns the session and every connection's state.
+enum Event {
+    /// An agent passed the handshake; everything for it goes out through `out`.
+    Open {
+        id: u64,
+        out: Sender<Value>,
+    },
+    Line {
+        id: u64,
+        line: String,
+    },
+    Close {
+        id: u64,
+    },
+}
+
+/// The app thread's view of one agent.
+struct Connection {
+    out: Sender<Value>,
+    subs: Subscriptions,
 }
 
 /// A running listener, owned by the app. Dropping it closes the port and removes the link file.
 pub struct LinkServer {
-    requests: Receiver<Request>,
+    events: Receiver<Event>,
+    connections: HashMap<u64, Connection>,
     stop: Arc<AtomicBool>,
     addr: SocketAddr,
     link_file: PathBuf,
@@ -62,7 +79,8 @@ impl LinkServer {
         let token = new_token()?;
         write_link_file(link_file, addr.port(), &token)?;
 
-        let (tx, requests) = mpsc::channel();
+        let (tx, events) = mpsc::channel();
+        let next_id = Arc::new(AtomicU64::new(1));
         let stop = Arc::new(AtomicBool::new(false));
         let clients = Arc::new(AtomicUsize::new(0));
         let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(wake);
@@ -77,9 +95,10 @@ impl LinkServer {
                     clients.fetch_sub(1, Ordering::AcqRel);
                     continue; // dropped: too many agents
                 }
-                let (tx, token, wake, count) = (tx.clone(), token.clone(), wake.clone(), clients.clone());
+                let (tx, token, wake, count, id) =
+                    (tx.clone(), token.clone(), wake.clone(), clients.clone(), next_id.fetch_add(1, Ordering::Relaxed));
                 let spawned = thread::Builder::new().name("lightfoundry-link-client".into()).spawn(move || {
-                    if let Err(e) = client(stream, &token, &tx, wake.as_ref()) {
+                    if let Err(e) = client(stream, id, &token, &tx, wake.as_ref()) {
                         log::debug!("agent link closed: {e}");
                     }
                     count.fetch_sub(1, Ordering::AcqRel);
@@ -90,7 +109,7 @@ impl LinkServer {
                 }
             }
         })?;
-        Ok(Self { requests, stop, addr, link_file: link_file.to_path_buf() })
+        Ok(Self { events, connections: HashMap::new(), stop, addr, link_file: link_file.to_path_buf() })
     }
 
     /// Where agents can connect.
@@ -98,15 +117,34 @@ impl LinkServer {
         self.addr
     }
 
-    /// Answers the requests that arrived since the last call (at most a frame's worth), running
-    /// them on `session`. Call from the thread that owns the session. Returns how many were handled.
-    pub fn serve_pending(&self, session: &mut Session) -> usize {
+    /// Handles what arrived since the last call (at most a frame's worth of requests), running it on
+    /// `session`, then tells each agent about watched resources that changed, including by the
+    /// person's own edits. Call every frame from the thread that owns the session. Returns how many
+    /// requests were handled.
+    pub fn serve_pending(&mut self, session: &mut Session) -> usize {
         let mut handled = 0;
         while handled < MAX_PER_PASS {
-            let Ok(request) = self.requests.try_recv() else { break };
-            let reply = handle_line_in(session, request.line.trim(), Mode::Live);
-            let _ = request.reply.send(reply); // the agent may have gone
-            handled += 1;
+            let Ok(event) = self.events.try_recv() else { break };
+            match event {
+                Event::Open { id, out } => {
+                    self.connections.insert(id, Connection { out, subs: Subscriptions::default() });
+                }
+                Event::Close { id } => {
+                    self.connections.remove(&id); // dropping `out` lets the writer finish what is queued
+                }
+                Event::Line { id, line } => {
+                    handled += 1;
+                    let Some(conn) = self.connections.get_mut(&id) else { continue };
+                    if let Some(reply) = handle_line_with(session, line.trim(), Mode::Live, &mut conn.subs) {
+                        let _ = conn.out.send(reply); // the agent may have gone
+                    }
+                }
+            }
+        }
+        for conn in self.connections.values_mut() {
+            for note in conn.subs.changed(session) {
+                let _ = conn.out.send(note);
+            }
         }
         handled
     }
@@ -120,12 +158,13 @@ impl Drop for LinkServer {
     }
 }
 
-/// One agent: checks the token, then forwards each line to the app and writes back the answer.
-fn client(stream: TcpStream, token: &str, tx: &Sender<Request>, wake: &(dyn Fn() + Send + Sync)) -> io::Result<()> {
+/// One agent: checks the token, then forwards each line to the app. Answers and notifications come
+/// back through a writer thread, in the order the app produced them.
+fn client(stream: TcpStream, id: u64, token: &str, tx: &Sender<Event>, wake: &(dyn Fn() + Send + Sync)) -> io::Result<()> {
     stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
     let mut input = BufReader::new(stream.try_clone()?);
-    let mut output = stream;
+    let mut output = stream.try_clone()?;
 
     let mut buf = Vec::new();
     match read_capped_line(&mut input, &mut buf, MAX_HANDSHAKE_BYTES)? {
@@ -138,31 +177,44 @@ fn client(stream: TcpStream, token: &str, tx: &Sender<Request>, wake: &(dyn Fn()
         return Err(io::Error::other("wrong token"));
     }
     write_message(&mut output, &json!({ "ok": true }))?;
-    output.set_read_timeout(None)?;
+    stream.set_read_timeout(None)?;
 
-    loop {
+    let (out, queue) = mpsc::channel::<Value>();
+    thread::Builder::new().name("lightfoundry-link-writer".into()).spawn(move || {
+        for message in queue {
+            if write_message(&mut output, &message).is_err() {
+                break;
+            }
+        }
+        let _ = output.shutdown(Shutdown::Both);
+    })?;
+    let notice = out.clone();
+    send(tx, wake, Event::Open { id, out })?;
+
+    let result = (|| loop {
         buf.clear();
         match read_capped_line(&mut input, &mut buf, MAX_MESSAGE_BYTES)? {
             Line::End => return Ok(()),
             Line::TooLong => {
-                write_message(&mut output, &json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32600, "message": "message too large" } }))?
+                let reply = json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32600, "message": "message too large" } });
+                let _ = notice.send(reply);
             }
             Line::Ok => {
                 let line = String::from_utf8_lossy(&buf).into_owned();
-                if line.trim().is_empty() {
-                    continue;
-                }
-                let (reply, answer) = mpsc::channel();
-                tx.send(Request { line, reply }).map_err(|_| io::Error::other("app closed"))?;
-                wake();
-                match answer.recv_timeout(REPLY_TIMEOUT) {
-                    Ok(Some(value)) => write_message(&mut output, &value)?,
-                    Ok(None) => {} // a notification
-                    Err(_) => return Err(io::Error::other("the app did not answer")),
+                if !line.trim().is_empty() {
+                    send(tx, wake, Event::Line { id, line })?;
                 }
             }
         }
-    }
+    })();
+    let _ = send(tx, wake, Event::Close { id });
+    result
+}
+
+fn send(tx: &Sender<Event>, wake: &(dyn Fn() + Send + Sync), event: Event) -> io::Result<()> {
+    tx.send(event).map_err(|_| io::Error::other("app closed"))?;
+    wake();
+    Ok(())
 }
 
 /// Where the running app and `lightfoundry-cli mcp --connect` agree to meet: the per-user data folder.
@@ -287,11 +339,11 @@ mod tests {
         #[test]
         fn an_agent_edits_the_open_document_through_the_link() {
             let (file, _guard) = scratch("roundtrip");
-            let server = LinkServer::start(&file, || {}).unwrap();
+            let mut server = LinkServer::start(&file, || {}).unwrap();
             let mut session = Session::new();
             let (mut agent, mut lines) = connect(&file);
             writeln!(agent, "{}", json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shape_rectangle","arguments":{"x":5,"y":5,"width":20,"height":10}}})).unwrap();
-            let reply = pump(&server, &mut session, &mut lines);
+            let reply = pump(&mut server, &mut session, &mut lines);
             assert_eq!(reply["id"], json!(1));
             assert_eq!(reply["result"]["isError"], json!(false));
             assert_eq!(session.doc.shapes.len(), 1, "the agent's shape is in the window's document");
@@ -300,7 +352,7 @@ mod tests {
         #[test]
         fn a_wrong_token_is_turned_away_and_changes_nothing() {
             let (file, _guard) = scratch("token");
-            let server = LinkServer::start(&file, || {}).unwrap();
+            let mut server = LinkServer::start(&file, || {}).unwrap();
             let mut s = TcpStream::connect(server.address()).unwrap();
             writeln!(s, r#"{{"token":"nope"}}"#).unwrap();
             let mut answer = String::new();
@@ -313,7 +365,7 @@ mod tests {
         #[test]
         fn hostile_handshakes_are_dropped() {
             let (file, _guard) = scratch("hostile");
-            let server = LinkServer::start(&file, || {}).unwrap();
+            let mut server = LinkServer::start(&file, || {}).unwrap();
             for junk in [vec![b'x'; 4096], b"\xff\xfe\n".to_vec(), b"[]\n".to_vec(), b"{\"token\":7}\n".to_vec(), b"\n".to_vec()] {
                 let mut s = TcpStream::connect(server.address()).unwrap();
                 let _ = s.write_all(&junk);
@@ -328,15 +380,35 @@ mod tests {
         #[test]
         fn commands_that_would_discard_unsaved_work_are_refused_but_others_run() {
             let (file, _guard) = scratch("live");
-            let server = LinkServer::start(&file, || {}).unwrap();
+            let mut server = LinkServer::start(&file, || {}).unwrap();
             let mut session = Session::new();
             session.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap();
             assert!(session.dirty);
             let (mut agent, mut lines) = connect(&file);
             writeln!(agent, "{}", json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"file_new","arguments":{}}})).unwrap();
-            let reply = pump(&server, &mut session, &mut lines);
+            let reply = pump(&mut server, &mut session, &mut lines);
             assert_eq!(reply["result"]["isError"], json!(true));
             assert_eq!(session.doc.shapes.len(), 1, "the person's drawing is still there");
+        }
+
+        #[test]
+        fn a_subscribed_agent_hears_about_the_persons_own_edits() {
+            let (file, _guard) = scratch("subscribe");
+            let mut server = LinkServer::start(&file, || {}).unwrap();
+            let mut session = Session::new();
+            let (mut agent, mut lines) = connect(&file);
+            writeln!(agent, "{}", json!({"jsonrpc":"2.0","id":1,"method":"resources/subscribe","params":{"uri":"lightfoundry://document/summary"}}))
+                .unwrap();
+            assert_eq!(read_one(&mut lines, &mut server, &mut session)["result"], json!({}));
+            // Nothing changed, so nothing is announced.
+            lines.get_ref().set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+            server.serve_pending(&mut session);
+            assert!(lines.read_line(&mut String::new()).is_err());
+            // The person draws something in the window.
+            session.execute("shape.rectangle", &json!({"x": 1, "y": 1, "width": 5, "height": 5})).unwrap();
+            let note = read_one(&mut lines, &mut server, &mut session);
+            assert_eq!(note["method"], json!("notifications/resources/updated"));
+            assert_eq!(note["params"]["uri"], json!("lightfoundry://document/summary"));
         }
 
         #[test]
@@ -371,7 +443,7 @@ mod tests {
         #[test]
         fn the_proxy_relays_a_session_end_to_end() {
             let (file, _guard) = scratch("proxy");
-            let server = LinkServer::start(&file, || {}).unwrap();
+            let mut server = LinkServer::start(&file, || {}).unwrap();
             let done = Arc::new(AtomicBool::new(false));
             let flag = done.clone();
             let path = file.clone();
@@ -434,8 +506,12 @@ mod tests {
         (writer, reader)
     }
 
+    fn read_one(lines: &mut BufReader<TcpStream>, server: &mut LinkServer, session: &mut Session) -> Value {
+        pump(server, session, lines)
+    }
+
     /// Plays the app's frame loop until the agent has its answer.
-    fn pump(server: &LinkServer, session: &mut Session, lines: &mut BufReader<TcpStream>) -> Value {
+    fn pump(server: &mut LinkServer, session: &mut Session, lines: &mut BufReader<TcpStream>) -> Value {
         lines.get_ref().set_read_timeout(Some(Duration::from_millis(20))).unwrap();
         let mut line = String::new();
         for _ in 0..500 {

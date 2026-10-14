@@ -5,6 +5,8 @@
 //! tool named like its id with `.` replaced by `_` (`shape.rectangle` becomes `shape_rectangle`),
 //! plus `document_summary`, a read-only overview of the drawing.
 
+use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::io::{self, BufRead, Write};
 
 use lightfoundry_engine::{Session, commands};
@@ -28,6 +30,7 @@ const INVALID_PARAMS: i64 = -32602;
 /// Reads messages from `input` until it ends, answering on `output`.
 pub fn serve(session: &mut Session, input: &mut impl BufRead, output: &mut impl Write) -> io::Result<()> {
     let mut buf = Vec::new();
+    let mut subs = Subscriptions::default();
     loop {
         buf.clear();
         match read_capped_line(input, &mut buf, MAX_MESSAGE_BYTES)? {
@@ -41,8 +44,11 @@ pub fn serve(session: &mut Session, input: &mut impl BufRead, output: &mut impl 
                 if text.is_empty() {
                     continue;
                 }
-                if let Some(reply) = handle_line(session, text) {
+                if let Some(reply) = handle_line_with(session, text, Mode::Standalone, &mut subs) {
                     write_message(output, &reply)?;
+                }
+                for note in subs.changed(session) {
+                    write_message(output, &note)?;
                 }
             }
         }
@@ -69,6 +75,12 @@ pub fn handle_line(session: &mut Session, line: &str) -> Option<Value> {
 
 /// [`handle_line`] for a server in the given [`Mode`].
 pub fn handle_line_in(session: &mut Session, line: &str, mode: Mode) -> Option<Value> {
+    handle_line_with(session, line, mode, &mut Subscriptions::default())
+}
+
+/// [`handle_line_in`] for a connection that keeps `subs`; send the result of
+/// [`Subscriptions::changed`] after each reply.
+pub fn handle_line_with(session: &mut Session, line: &str, mode: Mode, subs: &mut Subscriptions) -> Option<Value> {
     let Ok(msg) = serde_json::from_str::<Value>(line) else {
         return Some(error_response(&Value::Null, PARSE_ERROR, "invalid JSON"));
     };
@@ -81,7 +93,7 @@ pub fn handle_line_in(session: &mut Session, line: &str, mode: Mode) -> Option<V
         return id.map(|id| error_response(&id, INVALID_REQUEST, "missing method"));
     };
     let params = obj.get("params").cloned().unwrap_or(Value::Null);
-    let result = dispatch(session, method, &params, mode);
+    let result = dispatch(session, method, &params, mode, subs);
     let id = id?; // notifications carry no id and get no reply
     Some(match result {
         Ok(v) => json!({ "jsonrpc": "2.0", "id": id, "result": v }),
@@ -89,13 +101,13 @@ pub fn handle_line_in(session: &mut Session, line: &str, mode: Mode) -> Option<V
     })
 }
 
-fn dispatch(session: &mut Session, method: &str, params: &Value, mode: Mode) -> Result<Value, (i64, String)> {
+fn dispatch(session: &mut Session, method: &str, params: &Value, mode: Mode, subs: &mut Subscriptions) -> Result<Value, (i64, String)> {
     match method {
         "initialize" => {
             let version = params.get("protocolVersion").and_then(Value::as_str).unwrap_or(DEFAULT_PROTOCOL);
             Ok(json!({
                 "protocolVersion": version,
-                "capabilities": { "tools": {}, "resources": {}, "prompts": {} },
+                "capabilities": { "tools": {}, "resources": { "subscribe": true }, "prompts": {} },
                 "serverInfo": { "name": "lightfoundry", "version": env!("CARGO_PKG_VERSION") },
                 "instructions": "Design and export laser jobs. Units are mm, y points down from the bed's top-left corner. Call document_summary to see the drawing; shape_* create shapes, layer_set changes cut settings, job_gcode generates the program (include=true to get the text).",
             }))
@@ -105,6 +117,8 @@ fn dispatch(session: &mut Session, method: &str, params: &Value, mode: Mode) -> 
         "tools/call" => call_tool(session, params, mode),
         "resources/list" => Ok(json!({ "resources": resource_list() })),
         "resources/read" => read_resource(session, params),
+        "resources/subscribe" => subs.subscribe(session, params),
+        "resources/unsubscribe" => subs.unsubscribe(params),
         "prompts/list" => Ok(json!({ "prompts": prompt_list() })),
         "prompts/get" => get_prompt(params),
         m if m.starts_with("notifications/") => Ok(Value::Null),
@@ -221,6 +235,65 @@ fn read_resource(session: &mut Session, params: &Value) -> Result<Value, (i64, S
     Ok(json!({ "contents": [{ "uri": uri, "mimeType": mime, "text": text }] }))
 }
 
+/// Most resources one connection may watch (there are only a few to choose from; this bounds hostile repeats).
+const MAX_SUBSCRIPTIONS: usize = 16;
+
+/// The resources one connection asked to hear about, and what each looked like when last reported
+/// (<https://modelcontextprotocol.io/specification/2025-06-18/server/resources#subscriptions>).
+#[derive(Debug, Default)]
+pub struct Subscriptions {
+    seen: BTreeMap<String, u64>,
+}
+
+impl Subscriptions {
+    /// `notifications/resources/updated` messages for watched resources that changed since the last
+    /// call. A resource counts as changed when its content could differ: the summary also follows the
+    /// selection, the G-code only edits and settings, the command reference never.
+    pub fn changed(&mut self, session: &Session) -> Vec<Value> {
+        let mut out = Vec::new();
+        for (uri, seen) in &mut self.seen {
+            let now = stamp(session, uri);
+            if *seen != now {
+                *seen = now;
+                out.push(json!({ "jsonrpc": "2.0", "method": "notifications/resources/updated", "params": { "uri": uri } }));
+            }
+        }
+        out
+    }
+
+    fn subscribe(&mut self, session: &Session, params: &Value) -> Result<Value, (i64, String)> {
+        let uri = uri_param(params)?;
+        if !resource_list().iter().any(|r| r["uri"] == uri) {
+            return Err((INVALID_PARAMS, format!("unknown resource {uri}")));
+        }
+        if !self.seen.contains_key(uri) && self.seen.len() >= MAX_SUBSCRIPTIONS {
+            return Err((INVALID_PARAMS, "too many subscriptions".into()));
+        }
+        self.seen.insert(uri.to_string(), stamp(session, uri));
+        Ok(json!({}))
+    }
+
+    fn unsubscribe(&mut self, params: &Value) -> Result<Value, (i64, String)> {
+        self.seen.remove(uri_param(params)?);
+        Ok(json!({}))
+    }
+}
+
+fn uri_param(params: &Value) -> Result<&str, (i64, String)> {
+    params.get("uri").and_then(Value::as_str).ok_or((INVALID_PARAMS, "needs a uri".to_string()))
+}
+
+/// A value that differs whenever the resource's content may have.
+fn stamp(session: &Session, uri: &str) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    match uri {
+        DOCUMENT_URI => (session.revision, &session.selection).hash(&mut h),
+        GCODE_URI => session.revision.hash(&mut h),
+        _ => {} // static
+    }
+    h.finish()
+}
+
 /// Prompt templates: (name, description, arguments, text with `{name}` placeholders).
 const PROMPTS: &[(&str, &str, &[&str], &str)] = &[
     (
@@ -326,6 +399,93 @@ mod tests {
 
     fn call(s: &mut Session, name: &str, args: Value) -> Value {
         ask(s, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}))
+    }
+
+    mod subscription_tests {
+        use super::*;
+
+        const DOC: &str = "lightfoundry://document/summary";
+
+        fn send(s: &mut Session, subs: &mut Subscriptions, method: &str, params: Value) -> Value {
+            handle_line_with(s, &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).to_string(), Mode::Standalone, subs).unwrap()
+        }
+
+        #[test]
+        fn the_server_advertises_subscriptions() {
+            let mut s = Session::new();
+            let r = ask(&mut s, json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}));
+            assert_eq!(r["result"]["capabilities"]["resources"]["subscribe"], json!(true));
+        }
+
+        #[test]
+        fn a_watched_resource_is_announced_once_per_change() {
+            let (mut s, mut subs) = (Session::new(), Subscriptions::default());
+            assert_eq!(send(&mut s, &mut subs, "resources/subscribe", json!({"uri": DOC}))["result"], json!({}));
+            assert!(subs.changed(&s).is_empty());
+            s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 4, "height": 4})).unwrap();
+            let notes = subs.changed(&s);
+            assert_eq!(notes.len(), 1);
+            assert_eq!(notes[0]["method"], json!("notifications/resources/updated"));
+            assert_eq!(notes[0]["params"]["uri"], json!(DOC));
+            assert!(subs.changed(&s).is_empty(), "reported once");
+        }
+
+        #[test]
+        fn the_summary_follows_the_selection_but_the_gcode_does_not() {
+            let (mut s, mut subs) = (Session::new(), Subscriptions::default());
+            s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 4, "height": 4})).unwrap();
+            assert!(!s.selection.is_empty(), "a new shape is selected");
+            for uri in [DOC, "lightfoundry://job/gcode", "lightfoundry://reference/commands"] {
+                send(&mut s, &mut subs, "resources/subscribe", json!({"uri": uri}));
+            }
+            s.selection.clear();
+            let uris: Vec<String> = subs.changed(&s).iter().map(|n| n["params"]["uri"].as_str().unwrap().to_string()).collect();
+            assert_eq!(uris, [DOC]);
+            s.execute("shape.rectangle", &json!({"x": 9, "y": 9, "width": 4, "height": 4})).unwrap();
+            let uris: Vec<String> = subs.changed(&s).iter().map(|n| n["params"]["uri"].as_str().unwrap().to_string()).collect();
+            assert_eq!(uris, [DOC, "lightfoundry://job/gcode"], "an edit changes both, never the reference");
+        }
+
+        #[test]
+        fn unsubscribing_stops_the_announcements() {
+            let (mut s, mut subs) = (Session::new(), Subscriptions::default());
+            send(&mut s, &mut subs, "resources/subscribe", json!({"uri": DOC}));
+            send(&mut s, &mut subs, "resources/unsubscribe", json!({"uri": DOC}));
+            s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 4, "height": 4})).unwrap();
+            assert!(subs.changed(&s).is_empty());
+        }
+
+        #[test]
+        fn bad_subscriptions_are_errors_and_the_count_is_capped() {
+            let (mut s, mut subs) = (Session::new(), Subscriptions::default());
+            assert!(send(&mut s, &mut subs, "resources/subscribe", json!({"uri": "file:///etc/passwd"})).get("error").is_some());
+            assert!(send(&mut s, &mut subs, "resources/subscribe", json!({})).get("error").is_some());
+            assert!(send(&mut s, &mut subs, "resources/subscribe", json!({"uri": 7})).get("error").is_some());
+            assert!(send(&mut s, &mut subs, "resources/unsubscribe", json!({})).get("error").is_some());
+            assert_eq!(send(&mut s, &mut subs, "resources/unsubscribe", json!({"uri": "never-subscribed"}))["result"], json!({}));
+            for _ in 0..100 {
+                send(&mut s, &mut subs, "resources/subscribe", json!({"uri": DOC}));
+            }
+            assert_eq!(subs.seen.len(), 1);
+        }
+
+        #[test]
+        fn a_standalone_server_announces_after_the_reply_that_caused_the_change() {
+            let mut s = Session::new();
+            let input = [
+                json!({"jsonrpc": "2.0", "id": 1, "method": "resources/subscribe", "params": {"uri": DOC}}),
+                json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "shape_rectangle", "arguments": {"x": 0, "y": 0, "width": 3, "height": 3}}}),
+            ]
+            .iter()
+            .map(|m| format!("{m}\n"))
+            .collect::<String>();
+            let mut out = Vec::new();
+            serve(&mut s, &mut input.as_bytes(), &mut out).unwrap();
+            let lines: Vec<Value> = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+            assert_eq!(lines.len(), 3);
+            assert_eq!(lines[1]["id"], json!(2));
+            assert_eq!(lines[2]["method"], json!("notifications/resources/updated"));
+        }
     }
 
     mod handshake_tests {

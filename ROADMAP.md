@@ -349,3 +349,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   started by an agent, and `file.new`/`file.open`/`file.recover` are refused while there are unsaved
   changes. Hostile-handshake, wrong-token, file-permission, stale-file and end-to-end tests are in
   `crates/mcp/src/link.rs`.
+- **2026-10-14 — MCP resource subscriptions.** The server advertises `resources.subscribe` and
+  answers `resources/subscribe` / `resources/unsubscribe`, then sends `notifications/resources/updated`
+  (after the reply that caused it) when a watched resource's content may have changed: the document
+  summary on any edit or selection change, the G-code on edits, the command reference never. On the
+  live link the check runs every frame, so the person's own edits in the window are announced too.
+  Unknown URIs are errors and a connection may watch at most 16. Writes to each agent now go through
+  one writer thread per connection, so answers and notifications keep their order.
