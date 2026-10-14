@@ -178,6 +178,13 @@ fn presets_section(app: &mut LightFoundryApp, ui: &mut egui::Ui, layer: u32) {
         if names.is_empty() {
             ui.weak("No presets yet. Set up this layer, name it below and save.");
         }
+        if ui
+            .small_button("Add starter presets")
+            .on_hover_text("Generic first guesses, by operation. Always run a material test grid before trusting them.")
+            .clicked()
+        {
+            app.run("preset.add_starters", json!({}));
+        }
         for name in &names {
             ui.horizontal(|ui| {
                 if ui.button(name).on_hover_text("Apply to this layer").clicked() {

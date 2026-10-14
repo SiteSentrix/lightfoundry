@@ -827,6 +827,28 @@ mod import_tests {
     }
 
     #[test]
+    fn starter_presets_are_added_once_and_apply_like_any_other() {
+        let mut s = Session::new();
+        let v = s.execute("preset.add_starters", &Value::Null).unwrap();
+        let n = v["added"].as_u64().unwrap();
+        assert!(n >= 5 && s.doc.presets.len() as u64 == n);
+        assert_eq!(s.execute("preset.add_starters", &Value::Null).unwrap()["added"], json!(0), "never twice");
+        s.execute("preset.delete", &json!({"name": "Starter: thin cut"})).unwrap();
+        assert_eq!(s.execute("preset.add_starters", &Value::Null).unwrap()["added"], json!(1), "only what is missing comes back");
+        s.execute("preset.apply", &json!({"name": "Starter: thin cut", "layer": 3})).unwrap();
+        let l = s.doc.layer(3).unwrap();
+        assert_eq!((l.mode, l.speed, l.max_power), (lightfoundry_doc::LayerMode::Line, 600.0, 90.0));
+        for p in &s.doc.presets {
+            let l = &p.settings;
+            assert!(
+                l.speed > 0.0 && (0.0..=100.0).contains(&l.max_power) && l.min_power <= l.max_power && l.interval > 0.0 && l.passes >= 1,
+                "{}",
+                p.name
+            );
+        }
+    }
+
+    #[test]
     fn the_number_of_presets_is_capped() {
         let mut s = Session::new();
         for i in 0..lightfoundry_doc::MAX_PRESETS {
