@@ -249,4 +249,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   picture shapes at the right place and size (capped at 64 pictures and 64 MB; an undecodable one is
   counted, not fatal). Text is converted to outlines by `usvg` using the machine's installed fonts,
   which are only loaded when the file contains text (and not in the browser).
+- **2026-10-14 — acceleration-aware times.** `Machine::acceleration` (mm/s², from `$120`/`$121`
+  with a one-click "use controller's") times each move as a trapezoid starting and ending at rest,
+  so short segments cost realistically; used by `job.estimate` and the preview timeline.
 

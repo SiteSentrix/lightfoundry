@@ -1191,7 +1191,11 @@ mod machine_tests {
 
         let settings = h.app.snap.as_ref().map(|s| s.settings.clone()).unwrap();
         let machine = h.app.session.doc.machine.clone();
-        assert_eq!(advice(&settings, &machine), vec![Advice::BedDiffers(200.0, 200.0)], "the simulator's travel is 200 mm, the document's bed 400");
+        assert_eq!(
+            advice(&settings, &machine),
+            vec![Advice::AccelDiffers(10.0), Advice::BedDiffers(200.0, 200.0)],
+            "the simulator's travel is 200 mm, the document's bed 400, and its acceleration 10 mm/s² against none"
+        );
 
         h.app.link_do(|l| l.write_setting(32, 0.0));
         pump(&mut h, "laser mode off", |h| h.app.snap.as_ref().and_then(|s| s.settings.get(&32)).is_some_and(|v| v == "0"));

@@ -101,7 +101,7 @@ impl PreviewCache {
             Err(e) => self.error = Some(e.to_string()),
             Ok(job) => {
                 let rapid = job_doc.machine.rapid_speed;
-                self.timeline = Timeline::new(&job, rapid);
+                self.timeline = Timeline::with_acceleration(&job, rapid, job_doc.machine.acceleration);
                 // The head's real start position is unknown, so the first move draws nothing.
                 let mut at: Option<Point> = None;
                 // Time follows the same path as the timeline model: from the origin, across operations.
@@ -117,7 +117,7 @@ impl PreviewCache {
                             Move::Travel(_) => 0.0,
                             Move::Cut { power, .. } => *power as f32,
                         };
-                        let dt = move_seconds(timed, m, op.speed, rapid);
+                        let dt = move_seconds(timed, m, op.speed, rapid, job_doc.machine.acceleration);
                         if let Some(a) = at {
                             let (t0, t1) = (local as f32, (local + dt) as f32);
                             self.segments.push(PreviewSegment { a, b: m.target(), layer: op.layer, power, op: index as u32, t0, t1 });

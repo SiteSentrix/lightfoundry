@@ -323,6 +323,11 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 app.run("machine.set", json!({ "origin": origin }));
             }
             ui.end_row();
+            ui.label("Acceleration");
+            if let Some(v) = number(ui, m.acceleration, 0.0..=100_000.0, " mm/s²") {
+                app.run("machine.set", json!({ "acceleration": v }));
+            }
+            ui.end_row();
             ui.label("Max S ($30)");
             let mut max_s = m.max_s;
             if committed(&ui.add(egui::DragValue::new(&mut max_s).range(1..=100_000))) && max_s != m.max_s {

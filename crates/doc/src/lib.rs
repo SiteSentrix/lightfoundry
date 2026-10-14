@@ -716,6 +716,9 @@ pub struct Machine {
     /// Rotary attachment: the Y axis turns the workpiece instead of moving the head.
     #[serde(default)]
     pub rotary: Rotary,
+    /// Controller acceleration in mm/s² for time estimates (GRBL `$120`/`$121`); 0 = ignore.
+    #[serde(default)]
+    pub acceleration: f64,
 }
 
 /// A rotary attachment. The controller's Y steps are calibrated for a roller or chuck of
@@ -786,6 +789,7 @@ impl Default for Machine {
             overscan: 2.0,
             dialect: Dialect::Grbl,
             rotary: Rotary::default(),
+            acceleration: 0.0,
         }
     }
 }
