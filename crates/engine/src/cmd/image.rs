@@ -32,7 +32,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Trace Image to Vectors",
         menu: "Edit",
         shortcut: None,
-        params_doc: "{id?, threshold? (0..255, default 128: pixels darker than this are traced, after the image's tone adjustments), tolerance? (pixels, default 1), min_area? (pixels squared, default 4), layer?, keep_image? (default true), smooth? (default false: curves instead of straight steps), levels? (1..8, default 1: that many nested outlines for light-to-dark tonal bands), colors? (2..8: trace that many palette colours separately, each onto the layer whose colour is nearest; needs a coloured picture, imported with this version; ignores threshold, levels and the tone adjustments; paper-white is left out)}  — adds a path shape that follows the dark areas, on top of the picture",
+        params_doc: "{id?, threshold? (0..255, default 128: pixels darker than this are traced, after the image's tone adjustments), tolerance? (pixels, default 1), min_area? (pixels squared, default 4), layer?, keep_image? (default true), smooth? (default false: curves instead of straight steps), fit? (0.05..50 pixels: least-squares cubic curves within that distance of the outline, far fewer nodes than smooth; overrides smooth; use tolerance 1 or more so pixel steps are not read as corners), levels? (1..8, default 1: that many nested outlines for light-to-dark tonal bands), colors? (2..8: trace that many palette colours separately, each onto the layer whose colour is nearest; needs a coloured picture, imported with this version; ignores threshold, levels and the tone adjustments; paper-white is left out)}  — adds a path shape that follows the dark areas, on top of the picture",
         mutates: true,
         run: trace,
     },
@@ -212,6 +212,8 @@ struct TraceParams {
     levels: u32,
     /// Trace each of this many palette colours separately (needs a coloured picture).
     colors: Option<usize>,
+    /// Fit cubic curves through the outlines to within this many pixels (instead of `smooth`).
+    fit: Option<f64>,
 }
 
 fn one() -> u32 {
@@ -235,6 +237,7 @@ fn yes() -> bool {
 }
 
 /// Traces each palette colour of a coloured picture as its own shape, on the nearest layer colour.
+#[allow(clippy::too_many_arguments)]
 fn trace_colors(
     s: &mut Session,
     id: ShapeId,
@@ -242,6 +245,7 @@ fn trace_colors(
     tolerance: f64,
     min_area: f64,
     smooth: bool,
+    fit: Option<f64>,
     keep_image: bool,
 ) -> Result<Value, EngineError> {
     use lightfoundry_doc::LAYER_COLORS;
@@ -271,12 +275,7 @@ fn trace_colors(
         if loops.is_empty() {
             continue;
         }
-        let path = if smooth {
-            let subpaths = loops.iter().map(|l| lightfoundry_geom::nodes::smooth_polyline(&l.points, l.closed, SMOOTH_CORNER_DEG)).collect();
-            lightfoundry_geom::nodes::NodePath { subpaths }.to_bez()
-        } else {
-            super::pathops::polylines_to_path(&loops)
-        };
+        let path = outline_path(&loops, smooth, fit);
         let want = [i32::from(colour[0]), i32::from(colour[1]), i32::from(colour[2])];
         let layer = LAYER_COLORS
             .iter()
@@ -299,6 +298,19 @@ fn trace_colors(
     Ok(json!({ "ids": ids, "outlines": outlines, "colors": q.palette.len() }))
 }
 
+/// The traced loops as a path: straight steps, gently smoothed, or least-squares fitted curves.
+fn outline_path(loops: &[lightfoundry_geom::Polyline], smooth: bool, fit: Option<f64>) -> lightfoundry_geom::BezPath {
+    if let Some(tol) = fit {
+        let subpaths = loops.iter().map(|l| lightfoundry_geom::fit::fit_polyline(&l.points, l.closed, SMOOTH_CORNER_DEG, tol)).collect();
+        lightfoundry_geom::nodes::NodePath { subpaths }.to_bez()
+    } else if smooth {
+        let subpaths = loops.iter().map(|l| lightfoundry_geom::nodes::smooth_polyline(&l.points, l.closed, SMOOTH_CORNER_DEG)).collect();
+        lightfoundry_geom::nodes::NodePath { subpaths }.to_bez()
+    } else {
+        super::pathops::polylines_to_path(loops)
+    }
+}
+
 /// Most tonal bands one trace may make.
 const MAX_TRACE_LEVELS: u32 = 8;
 
@@ -311,11 +323,12 @@ fn trace(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let threshold = in_range("threshold", p.threshold, 0.0, 255.0)?;
     let tolerance = in_range("tolerance", p.tolerance, 0.0, 50.0)?;
     let min_area = in_range("min_area", p.min_area, 0.0, 1e9)?;
+    let fit = p.fit.map(|f| in_range("fit", f, 0.05, 50.0)).transpose()?;
     let shape = s.doc.shape(id).ok_or_else(|| EngineError::NotFound(format!("shape {id} does not exist")))?;
     let ShapeKind::Image { image, width_mm, height_mm, adjust } = &shape.kind else { return Err(not_an_image(id)) };
     let (w, h) = (image.width as usize, image.height as usize);
     if let Some(colors) = p.colors {
-        return trace_colors(s, id, colors, tolerance, min_area, p.smooth, p.keep_image);
+        return trace_colors(s, id, colors, tolerance, min_area, p.smooth, fit, p.keep_image);
     }
     if !(1..=MAX_TRACE_LEVELS).contains(&p.levels) {
         return Err(EngineError::BadParams(format!("levels must be between 1 and {MAX_TRACE_LEVELS}")));
@@ -342,12 +355,7 @@ fn trace(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         if loops.is_empty() {
             continue;
         }
-        let path = if p.smooth {
-            let subpaths = loops.iter().map(|l| lightfoundry_geom::nodes::smooth_polyline(&l.points, l.closed, SMOOTH_CORNER_DEG)).collect();
-            lightfoundry_geom::nodes::NodePath { subpaths }.to_bez()
-        } else {
-            super::pathops::polylines_to_path(&loops)
-        };
+        let path = outline_path(&loops, p.smooth, fit);
         let name = if p.levels == 1 { "Traced".to_string() } else { format!("Traced {k}/{}", p.levels) };
         let mut shape = Shape::path(name, layer, path);
         shape.transform = place;

@@ -305,3 +305,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   the project file validates the sizes). `image.trace` `colors` (2–8) groups the colours (k-means,
   paper-white left out) and traces each onto the layer whose colour is nearest. Pictures imported
   before this change must be imported again to trace by colour.
+- **2026-10-14 — curve fitting for traces.** `image.trace` `fit` (0.05–50 px) fits cubic Béziers by
+  least squares (Schneider's method) through each traced outline, splitting where the fit is worst and
+  keeping sharp bends as corners: a traced disc becomes four curves instead of dozens of nodes.
+  Use `tolerance` of 1 or more so single-pixel steps are not read as corners. Gap 9 is closed.
