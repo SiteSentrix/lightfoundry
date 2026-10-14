@@ -391,8 +391,14 @@ fn to_gray(img: &DynamicImage) -> Result<RasterImage, EngineError> {
         return Err(EngineError::Import("image is too large".into()));
     }
     // Composite over white: transparent pixels must not burn.
-    let gray = la.pixels().map(|px| ((u32::from(px[0]) * u32::from(px[1]) + 255 * (255 - u32::from(px[1]))) / 255) as u8).collect();
-    RasterImage::new(w, h, gray).ok_or_else(|| EngineError::Import("empty image".into()))
+    let over_white = |value: u8, alpha: u8| ((u32::from(value) * u32::from(alpha) + 255 * (255 - u32::from(alpha))) / 255) as u8;
+    let gray = la.pixels().map(|px| over_white(px[0], px[1])).collect();
+    let image = RasterImage::new(w, h, gray).ok_or_else(|| EngineError::Import("empty image".into()))?;
+    let rgba = img.to_rgba8();
+    let rgb = rgba.pixels().flat_map(|px| [over_white(px[0], px[3]), over_white(px[1], px[3]), over_white(px[2], px[3])]).collect();
+    // Grey pictures carry no colour worth keeping.
+    let coloured = rgba.pixels().any(|px| px[0] != px[1] || px[1] != px[2]);
+    Ok(if coloured { image.clone().with_rgb(rgb).unwrap_or(image) } else { image })
 }
 
 fn file_name(path: &Path) -> String {

@@ -300,3 +300,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — tonal-band tracing.** `image.trace` takes `levels` (1–8): that many outlines, each
   around the pixels darker than a share of the threshold, lightest first, so one picture can be
   engraved or cut in nested tones (put the shapes on different layers to give each its own power).
+- **2026-10-14 — pictures keep their colour.** Imported coloured pictures now store RGB beside the
+  grey (older files and grey pictures are unchanged; crop, resample and sharpen keep both in step;
+  the project file validates the sizes). `image.trace` `colors` (2–8) groups the colours (k-means,
+  paper-white left out) and traces each onto the layer whose colour is nearest. Pictures imported
+  before this change must be imported again to trace by colour.

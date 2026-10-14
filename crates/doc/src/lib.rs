@@ -577,17 +577,51 @@ pub struct RasterImage {
     pub height: u32,
     #[serde(with = "base64_bytes")]
     pub gray: Vec<u8>,
+    /// The picture's colours, three bytes (R, G, B) per pixel, when it has any. `gray` is what is
+    /// burned; this is kept for colour-aware tracing. Absent in older files and in grey pictures.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "base64_opt")]
+    pub rgb: Option<Vec<u8>>,
 }
 
 impl RasterImage {
     /// Returns `None` when the buffer length does not match the dimensions.
     pub fn new(width: u32, height: u32, gray: Vec<u8>) -> Option<RasterImage> {
         let expected = (width as usize).checked_mul(height as usize)?;
-        (expected == gray.len() && expected > 0).then_some(RasterImage { width, height, gray })
+        (expected == gray.len() && expected > 0).then_some(RasterImage { width, height, gray, rgb: None })
+    }
+
+    /// The same picture carrying its colours; `None` when `rgb` is not three bytes per pixel.
+    pub fn with_rgb(mut self, rgb: Vec<u8>) -> Option<RasterImage> {
+        (rgb.len() == self.gray.len().checked_mul(3)?).then(|| {
+            self.rgb = Some(rgb);
+            self
+        })
+    }
+
+    /// The colour planes as grey pictures, so every grey operation can be applied to each.
+    fn planes(&self) -> Option<[RasterImage; 3]> {
+        let rgb = self.rgb.as_ref()?;
+        let plane = |c: usize| RasterImage::new(self.width, self.height, rgb.chunks_exact(3).map(|px| px[c]).collect());
+        Some([plane(0)?, plane(1)?, plane(2)?])
+    }
+
+    /// Applies a grey-only operation to the picture and to each colour plane, keeping them in step.
+    fn on_all(&self, op: impl Fn(&RasterImage) -> Option<RasterImage>) -> Option<RasterImage> {
+        let mut out = op(self)?;
+        if let Some([r, g, b]) = self.planes() {
+            let (r, g, b) = (op(&r)?, op(&g)?, op(&b)?);
+            let rgb = r.gray.iter().zip(&g.gray).zip(&b.gray).flat_map(|((r, g), b)| [*r, *g, *b]).collect();
+            out = out.with_rgb(rgb)?;
+        }
+        Some(out)
     }
 
     /// The pixels in columns `x0..x1` and rows `y0..y1`; `None` for an empty or out-of-range box.
     pub fn crop(&self, x0: u32, y0: u32, x1: u32, y1: u32) -> Option<RasterImage> {
+        self.on_all(|p| p.crop_gray(x0, y0, x1, y1))
+    }
+
+    fn crop_gray(&self, x0: u32, y0: u32, x1: u32, y1: u32) -> Option<RasterImage> {
         if x0 >= x1 || y0 >= y1 || x1 > self.width || y1 > self.height {
             return None;
         }
@@ -602,6 +636,10 @@ impl RasterImage {
     /// The picture at `new_w` x `new_h` pixels: areas are averaged when shrinking and bilinearly
     /// interpolated when enlarging. `None` for an empty target or one with over 100 million pixels.
     pub fn resampled(&self, new_w: u32, new_h: u32) -> Option<RasterImage> {
+        self.on_all(|p| p.resampled_gray(new_w, new_h))
+    }
+
+    fn resampled_gray(&self, new_w: u32, new_h: u32) -> Option<RasterImage> {
         const MAX_PIXELS: u64 = 100_000_000;
         if new_w == 0 || new_h == 0 || u64::from(new_w) * u64::from(new_h) > MAX_PIXELS {
             return None;
@@ -645,6 +683,10 @@ impl RasterImage {
     /// Unsharp mask: adds `amount` times the difference from a 3x3 blur (edges are clamped), which
     /// makes outlines crisper before dithering. `amount` is limited to 0..=5.
     pub fn sharpened(&self, amount: f64) -> RasterImage {
+        self.on_all(|p| Some(p.sharpened_gray(amount))).unwrap_or_else(|| self.sharpened_gray(amount))
+    }
+
+    fn sharpened_gray(&self, amount: f64) -> RasterImage {
         let amount = if amount.is_finite() { amount.clamp(0.0, 5.0) as f32 } else { 0.0 };
         let (w, h) = (self.width as usize, self.height as usize);
         let at = |x: isize, y: isize| -> f32 {
@@ -664,7 +706,7 @@ impl RasterImage {
                 out.push((centre + amount * (centre - sum / 9.0)).round().clamp(0.0, 255.0) as u8);
             }
         }
-        RasterImage { width: self.width, height: self.height, gray: out }
+        RasterImage { width: self.width, height: self.height, gray: out, rgb: None }
     }
 }
 
@@ -704,6 +746,24 @@ pub mod base64 {
             }
         }
         Some(out)
+    }
+}
+
+mod base64_opt {
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    pub fn serialize<S: Serializer>(bytes: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
+        match bytes {
+            Some(b) => s.serialize_str(&super::base64::encode(b)),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
+        match Option::<String>::deserialize(d)? {
+            Some(text) => super::base64::decode(&text).map(Some).ok_or_else(|| D::Error::custom("invalid base64")),
+            None => Ok(None),
+        }
     }
 }
 
@@ -948,6 +1008,25 @@ mod tests {
         v.as_object_mut().unwrap().remove("job_origin");
         let doc: Document = serde_json::from_value(v).unwrap();
         assert_eq!(doc.job_origin, JobOrigin::default());
+    }
+
+    #[test]
+    fn colour_follows_the_grey_through_crop_resample_and_sharpen() {
+        // 2x1: red then blue.
+        let img = RasterImage::new(2, 1, vec![76, 29]).unwrap().with_rgb(vec![255, 0, 0, 0, 0, 255]).unwrap();
+        assert!(RasterImage::new(2, 1, vec![1, 2]).unwrap().with_rgb(vec![0; 5]).is_none());
+        let c = img.crop(1, 0, 2, 1).unwrap();
+        assert_eq!((c.gray.as_slice(), c.rgb.as_deref()), ([29].as_slice(), Some([0, 0, 255].as_slice())));
+        let big = img.resampled(4, 2).unwrap();
+        assert_eq!(big.rgb.as_ref().map(Vec::len), Some(4 * 2 * 3));
+        let sharp = img.sharpened(1.0);
+        assert_eq!(sharp.rgb.as_ref().map(Vec::len), Some(6));
+        let json = serde_json::to_string(&img).unwrap();
+        assert_eq!(serde_json::from_str::<RasterImage>(&json).unwrap(), img);
+        let grey = RasterImage::new(2, 1, vec![76, 29]).unwrap();
+        assert!(!serde_json::to_string(&grey).unwrap().contains("rgb"), "grey pictures stay as small as before");
+        let old = r#"{"width":2,"height":1,"gray":"TB0="}"#;
+        assert_eq!(serde_json::from_str::<RasterImage>(old).unwrap().rgb, None);
     }
 
     #[test]
