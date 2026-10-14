@@ -231,6 +231,127 @@ mod override_and_test_grid_tests {
     }
 }
 
+mod node_edit_tests {
+    use super::*;
+
+    fn rect(s: &mut Session) -> u64 {
+        s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 10})).unwrap()["id"].as_u64().unwrap()
+    }
+
+    #[test]
+    fn moving_a_node_reshapes_the_path_in_workspace_coordinates_even_after_the_shape_was_moved() {
+        let mut s = Session::new();
+        let id = rect(&mut s);
+        s.execute("edit.move", &json!({"dx": 100, "dy": 50})).unwrap();
+        s.execute("edit.rotate", &json!({"degrees": 30})).unwrap();
+        // Drag the node nearest the top-left corner to an exact workspace point.
+        let before = s.doc.shape(id).unwrap().world_polylines()[0].points.clone();
+        s.execute("node.move", &json!({"id": id, "index": 0, "x": 90.0, "y": 40.0})).unwrap();
+        let after = s.doc.shape(id).unwrap().world_polylines()[0].points.clone();
+        assert!(after[0].distance(lightfoundry_geom::Point::new(90.0, 40.0)) < 1e-9, "{:?}", after[0]);
+        for i in 1..4 {
+            assert!(after[i].distance(before[i]) < 1e-9, "the other corners did not move");
+        }
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert!(s.doc.shape(id).unwrap().world_polylines()[0].points[0].distance(before[0]) < 1e-9, "one undo step");
+    }
+
+    #[test]
+    fn handles_inserts_deletes_and_conversions_change_the_path_as_asked() {
+        let mut s = Session::new();
+        let id = rect(&mut s);
+        s.execute("node.set_segment", &json!({"id": id, "segment": 0, "curve": true})).unwrap();
+        s.execute("node.move_handle", &json!({"id": id, "index": 0, "side": "out", "x": 20.0, "y": -5.0})).unwrap();
+        let b = s.doc.shape(id).unwrap().world_bounds().unwrap();
+        assert!(b.y0 < 10.0, "the top edge bulges upward: {b:?}");
+        let v = s.execute("node.insert", &json!({"id": id, "segment": 1, "t": 0.5})).unwrap();
+        assert_eq!(v["index"], json!(2));
+        let nodes = |s: &Session| {
+            let lightfoundry_doc::ShapeKind::Path { path } = &s.doc.shape(id).unwrap().kind else { panic!("not a path") };
+            lightfoundry_geom::nodes::NodePath::from_bez(path).unwrap().node_count()
+        };
+        assert_eq!(nodes(&s), 5);
+        s.execute("node.delete", &json!({"id": id, "index": 2})).unwrap();
+        assert_eq!(nodes(&s), 4);
+        s.execute("node.set_smooth", &json!({"id": id, "index": 1, "smooth": true})).unwrap();
+        s.execute("node.set_closed", &json!({"id": id, "closed": false})).unwrap();
+        assert!(!s.doc.shape(id).unwrap().world_polylines()[0].closed);
+    }
+
+    #[test]
+    fn failures_are_atomic_and_explain_themselves() {
+        let mut s = Session::new();
+        let id = rect(&mut s);
+        let before = s.doc.clone();
+        for bad in [
+            json!({"id": id, "index": 99, "x": 1, "y": 1}),
+            json!({"id": id, "subpath": 3, "index": 0, "x": 1, "y": 1}),
+            json!({"id": 9999, "index": 0, "x": 1, "y": 1}),
+            json!({"id": id, "index": 0, "x": "a", "y": 1}),
+            json!({"id": id, "index": 0, "x": 1e300, "y": 1}),
+        ] {
+            assert!(s.execute("node.move", &bad).is_err(), "{bad}");
+        }
+        assert!(s.execute("node.delete", &json!({"id": id, "index": 0})).is_ok(), "four nodes can lose one");
+        assert!(s.execute("node.delete", &json!({"id": id, "index": 0})).is_err(), "but a closed path keeps three");
+        assert!(s.execute("node.insert", &json!({"id": id, "segment": 40})).is_err());
+        assert!(s.execute("node.set_segment", &json!({"id": id, "segment": 40, "curve": true})).is_err());
+        assert_ne!(s.doc, before);
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(s.doc, before, "only the successful delete was an undo step");
+    }
+
+    #[test]
+    fn text_must_be_converted_before_its_nodes_can_be_edited() {
+        let mut s = Session::new();
+        let id = s.execute("text.create", &json!({"text": "AB", "height": 10})).unwrap()["id"].as_u64().unwrap();
+        assert!(s.execute("node.move", &json!({"id": id, "index": 0, "x": 1, "y": 1})).is_err());
+        s.execute("edit.convert_to_path", &json!({})).unwrap();
+        assert!(matches!(s.doc.shape(id).unwrap().kind, lightfoundry_doc::ShapeKind::Path { .. }));
+        let b = s.doc.shape(id).unwrap().world_bounds().unwrap();
+        s.execute("node.move", &json!({"id": id, "index": 0, "x": b.x0 + 5.0, "y": b.y0 + 5.0})).unwrap();
+        assert!(s.execute("edit.convert_to_path", &json!({})).is_err(), "nothing left to convert");
+        let rect_id = rect(&mut s);
+        assert!(s.execute("edit.convert_to_path", &json!({"ids": [rect_id]})).is_err());
+    }
+
+    #[test]
+    fn the_pen_creates_open_and_closed_paths_with_handles() {
+        let mut s = Session::new();
+        let v = s
+            .execute(
+                "path.create",
+                &json!({"nodes": [
+                    {"x": 10, "y": 10, "out": [20, 10], "smooth": true},
+                    {"x": 40, "y": 30, "in": [30, 30]},
+                    {"x": 10, "y": 50},
+                ], "closed": true, "layer": 2}),
+            )
+            .unwrap();
+        let id = v["id"].as_u64().unwrap();
+        let shape = s.doc.shape(id).unwrap();
+        assert_eq!(shape.layer, 2);
+        assert!(shape.world_polylines()[0].closed);
+        assert_eq!(s.selection, vec![id]);
+        let b = shape.world_bounds().unwrap();
+        assert!(b.x0 <= 10.0 && b.x1 >= 40.0 && b.y1 >= 50.0);
+        for bad in [
+            json!({"nodes": [{"x": 1, "y": 1}]}),
+            json!({"nodes": [{"x": 1, "y": 1}, {"x": 2, "y": 2}], "closed": true}),
+            json!({"nodes": [{"x": 1, "y": 1}, {"x": f64::NAN, "y": 2}]}),
+            json!({"nodes": [{"x": 1, "y": 1}, {"x": 2, "y": 2, "out": [1e300, 0]}]}),
+            json!({"nodes": [{"x": 1, "y": 1}, {"x": 2, "y": 2}], "layer": 99}),
+            json!({"nodes": []}),
+        ] {
+            assert!(s.execute("path.create", &bad).is_err(), "{bad}");
+        }
+        assert_eq!(s.doc.shapes.len(), 1);
+        // A straight open two-node path works and engraves as a line.
+        s.execute("path.create", &json!({"nodes": [{"x": 0, "y": 0}, {"x": 5, "y": 5}]})).unwrap();
+        assert!(!s.doc.shapes[1].world_polylines()[0].closed);
+    }
+}
+
 mod group_and_layer_tests {
     use super::*;
 

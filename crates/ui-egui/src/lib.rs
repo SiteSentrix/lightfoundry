@@ -4,6 +4,7 @@
 mod canvas;
 mod geometry;
 mod menus;
+mod nodes_ui;
 mod panels;
 mod platform;
 pub(crate) mod snap;
@@ -33,6 +34,10 @@ pub enum Tool {
     Line,
     Polygon,
     Text,
+    /// Edit the nodes and handles of the selected path.
+    Nodes,
+    /// Draw Bézier paths node by node.
+    Pen,
 }
 
 /// Where Start sends the program.
@@ -75,6 +80,11 @@ pub struct LightFoundryApp {
     snapping: snap::SnapSettings,
     show_rulers: bool,
     guides: Vec<canvas::Guide>,
+    node_sel: Option<nodes_ui::NodeSel>,
+    node_drag: Option<nodes_ui::NodeDrag>,
+    pen: Option<nodes_ui::Pen>,
+    /// Cursor position on the canvas in mm (hover, not only while pressed).
+    hover_world: Option<lightfoundry_geom::Point>,
     /// Where the canvas was drawn last frame (screen points).
     canvas_rect: Option<egui::Rect>,
     /// Alignment lines the last drag locked onto, for drawing: (x, y).
@@ -148,6 +158,10 @@ impl LightFoundryApp {
             snapping: snap::SnapSettings::default(),
             show_rulers: true,
             guides: Vec::new(),
+            node_sel: None,
+            node_drag: None,
+            pen: None,
+            hover_world: None,
             canvas_rect: None,
             snap_lines: (None, None),
             grid_cols: 5,
@@ -490,8 +504,21 @@ impl LightFoundryApp {
         if dup {
             self.run("edit.duplicate", Value::Null);
         }
-        if delete && !self.session.selection.is_empty() {
+        if delete && self.tool == Tool::Nodes && self.node_sel.is_some() {
+            nodes_ui::delete_selected(self);
+        } else if delete && !self.session.selection.is_empty() {
             self.run("edit.delete", Value::Null);
+        }
+        let (enter, escape) = ctx.input_mut(|i| (i.consume_key(Modifiers::NONE, Key::Enter), i.consume_key(Modifiers::NONE, Key::Escape)));
+        if enter && self.pen.is_some() {
+            nodes_ui::finish(self, false);
+        }
+        if escape {
+            if self.pen.is_some() || self.node_drag.is_some() {
+                nodes_ui::cancel(self);
+            } else if self.tool != Tool::Select {
+                self.tool = Tool::Select;
+            }
         }
         let nudge = ctx.input_mut(|i| {
             let step = if i.modifiers.shift { 10.0 } else { 1.0 };

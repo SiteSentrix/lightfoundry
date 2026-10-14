@@ -3,13 +3,14 @@ use lightfoundry_doc::Origin;
 use lightfoundry_geom::{Affine, Point, Rect};
 use serde_json::json;
 
+use crate::nodes_ui;
 use crate::snap::{self, SnapSettings, SnapTargets};
 use crate::theme::{on_dark, parse_hex};
 use crate::view::View;
 use crate::{LightFoundryApp, Tool};
 
 /// Pointer-distance (screen points) within which handles and edges are hit.
-const HIT_PX: f32 = 6.0;
+pub(crate) const HIT_PX: f32 = 6.0;
 /// Smallest shape a drag may create, in mm.
 const MIN_CREATE_MM: f64 = 0.05;
 
@@ -51,7 +52,7 @@ pub struct Guide {
 pub const RULER_PX: f32 = 18.0;
 
 /// Everything snapping needs for one frame.
-struct Snapper {
+pub(crate) struct Snapper {
     settings: SnapSettings,
     /// Targets from everything: used when creating and resizing.
     all: SnapTargets,
@@ -80,7 +81,7 @@ impl Snapper {
         Snapper { settings: app.snapping, all, others, threshold: snap::SNAP_RADIUS_PX / f64::from(view.zoom) }
     }
 
-    fn point(&self, p: Point) -> snap::Snapped {
+    pub(crate) fn point(&self, p: Point) -> snap::Snapped {
         snap::snap_point(p, &self.settings, &self.all, self.threshold)
     }
 }
@@ -115,6 +116,7 @@ pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 
     navigate(ui, &resp, &mut view);
     let hover = resp.hover_pos().map(|p| view.to_world(p));
+    app.hover_world = hover;
     let pointer = resp.interact_pointer_pos().map(|p| view.to_world(p));
     let snapper = Snapper::new(app, &view);
     let shift = ui.input(|i| i.modifiers.shift);
@@ -128,6 +130,7 @@ pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         draw_preview(app, &painter, &view);
     }
     draw_guides(app, &painter, &view, canvas_rect);
+    nodes_ui::draw(app, &painter, &view);
     draw_overlays(app, &painter, &view, pointer, offset, &snapper, shift);
     if app.show_rulers {
         draw_rulers(app, &painter, &view, canvas_rect, hover);
@@ -174,6 +177,15 @@ fn interact(
     let tol = f64::from(HIT_PX / view.zoom);
     let mut offset = (0.0, 0.0);
 
+    // The node and pen tools have their own gestures, except for pulling guides out of rulers.
+    if matches!(app.tool, Tool::Nodes | Tool::Pen) && !matches!(app.drag, Drag::NewGuide { .. } | Drag::MoveGuide { .. }) {
+        let on_ruler =
+            resp.drag_started_by(PointerButton::Primary) && ui.input(|i| i.pointer.press_origin()).is_some_and(|p| in_ruler(app, canvas, p));
+        if !on_ruler {
+            nodes_ui::interact(app, ui, resp, view, pointer, snapper);
+            return offset;
+        }
+    }
     if resp.drag_started_by(PointerButton::Primary) {
         // egui reports the drag once the pointer has travelled past a threshold; the gesture began
         // where the button went down.
@@ -223,7 +235,7 @@ fn interact(
 }
 
 /// Whether a screen position is on a ruler strip.
-fn in_ruler(app: &LightFoundryApp, canvas: egui::Rect, p: Pos2) -> bool {
+pub(crate) fn in_ruler(app: &LightFoundryApp, canvas: egui::Rect, p: Pos2) -> bool {
     app.show_rulers && canvas.contains(p) && (p.x - canvas.min.x < RULER_PX || p.y - canvas.min.y < RULER_PX)
 }
 
@@ -337,7 +349,7 @@ fn create(app: &mut LightFoundryApp, a: Point, b: Point) {
     let (w, h) = ((b.x - a.x).abs(), (b.y - a.y).abs());
     let layer = app.active_layer;
     match app.tool {
-        Tool::Select | Tool::Text => {}
+        Tool::Select | Tool::Text | Tool::Nodes | Tool::Pen => {}
         Tool::Rectangle if w > MIN_CREATE_MM && h > MIN_CREATE_MM => {
             app.run(
                 "shape.rectangle",
@@ -673,6 +685,6 @@ fn draw_create_ghost(app: &LightFoundryApp, painter: &egui::Painter, view: &View
                 .collect();
             painter.add(Shape::closed_line(pts, stroke));
         }
-        Tool::Select | Tool::Text => {}
+        Tool::Select | Tool::Text | Tool::Nodes | Tool::Pen => {}
     }
 }

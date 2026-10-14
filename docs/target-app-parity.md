@@ -8,7 +8,7 @@
 
 | Area                  | Score | Shipped                                                                 | Missing (highlights)                                                                                     |
 |-----------------------|------:|-------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
-| Drawing tools         |  45% | rectangle (rounded), ellipse, line, polygon, editable text (stroke font), grid/circular arrays, groups, join, boolean ops, offset; move, resize, rotate, flip, align | pen/Bézier editing, node edit, outline fonts (Fill-mode text) |
+| Drawing tools         |  55% | rectangle (rounded), ellipse, line, polygon, editable text (stroke font), grid/circular arrays, groups, join, boolean ops, offset, node editing and a pen/Bézier tool; move, resize, rotate, flip, align | outline fonts (Fill-mode text) |
 | Import                |   40% | SVG, DXF (basic entities), raster images with thumbnails and tone adjustments (brightness, contrast, gamma, negative) | AI/PDF/EPS, DXF splines/ellipses/text/blocks, image trace, crop/resize-resample, sharpen, SVG text/images |
 | Layers & cut settings |  55% | 16 layers; line, fill, fill+line, image; speed, power, passes, interval, kerf offset, tabs/bridges, lead-in/out; per-shape settings override; material test grid generator | sub-layers, perforation, ramp, Z offset, per-layer overscan, material library |
 | Toolpath planning     |  40% | inner-first, nearest neighbour, scan fill, dithered raster, kerf, tabs, lead-in/out, estimate | cut-order optimiser options, remove overlaps, start-point choice, cut selected only |

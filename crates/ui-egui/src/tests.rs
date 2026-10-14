@@ -477,6 +477,222 @@ mod image_tests {
     }
 }
 
+mod node_tool_tests {
+    use super::*;
+
+    fn nodes_of(h: &Harness, id: u64) -> lightfoundry_geom::nodes::NodePath {
+        match &h.app.session.doc.shape(id).unwrap().kind {
+            lightfoundry_doc::ShapeKind::Path { path } => lightfoundry_geom::nodes::NodePath::from_bez(path).unwrap(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn with_rect() -> (Harness, u64) {
+        let mut h = Harness::new();
+        h.app.snapping = snap::SnapSettings { grid: None, objects: false };
+        let id = h.app.run("shape.rectangle", json!({"x": 100, "y": 100, "width": 60, "height": 40})).unwrap()["id"].as_u64().unwrap();
+        h.app.tool = Tool::Nodes;
+        h.frame(vec![]);
+        (h, id)
+    }
+
+    fn key(key: egui::Key) -> Event {
+        Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }
+    }
+
+    #[test]
+    fn dragging_a_corner_node_reshapes_the_path_in_one_undo_step() {
+        let (mut h, id) = with_rect();
+        h.drag(h.at(100.0, 100.0), h.at(90.0, 85.0));
+        let np = nodes_of(&h, id);
+        assert!(np.subpaths[0].nodes[0].p.distance(Point::new(90.0, 85.0)) < 0.2, "{:?}", np.subpaths[0].nodes[0].p);
+        assert_eq!(h.app.node_sel.map(|s| s.index), Some(0));
+        h.app.run("edit.undo", serde_json::Value::Null);
+        assert!(nodes_of(&h, id).subpaths[0].nodes[0].p.distance(Point::new(100.0, 100.0)) < 1e-9);
+    }
+
+    #[test]
+    fn handles_of_the_selected_node_can_be_dragged_to_bend_a_curve() {
+        let (mut h, id) = with_rect();
+        h.app.run("node.set_segment", json!({"id": id, "segment": 0, "curve": true}));
+        h.click(h.at(100.0, 100.0)); // select node 0
+        h.frame(vec![]);
+        let handle_tip = nodes_of(&h, id).subpaths[0].nodes[0].p + nodes_of(&h, id).subpaths[0].nodes[0].out_h.unwrap();
+        h.drag(h.at(handle_tip.x, handle_tip.y), h.at(125.0, 80.0));
+        let np = nodes_of(&h, id);
+        let tip = np.subpaths[0].nodes[0].p + np.subpaths[0].nodes[0].out_h.unwrap();
+        assert!(tip.distance(Point::new(125.0, 80.0)) < 0.2, "{tip:?}");
+        assert!(h.app.session.doc.shape(id).unwrap().world_bounds().unwrap().y0 < 100.0, "the edge now bulges");
+    }
+
+    #[test]
+    fn double_clicking_a_segment_adds_a_node_there_and_selects_it() {
+        let (mut h, id) = with_rect();
+        h.click(h.at(130.0, 100.0));
+        h.click(h.at(130.0, 100.0));
+        let np = nodes_of(&h, id);
+        assert_eq!(np.subpaths[0].nodes.len(), 5, "{:?}", h.app.status);
+        assert!(np.subpaths[0].nodes[1].p.distance(Point::new(130.0, 100.0)) < 1.0);
+        assert_eq!(h.app.node_sel.map(|s| s.index), Some(1));
+    }
+
+    #[test]
+    fn delete_removes_the_selected_node_but_the_whole_shape_when_no_node_is_selected() {
+        let (mut h, id) = with_rect();
+        h.click(h.at(160.0, 100.0));
+        assert_eq!(h.app.node_sel.map(|s| s.index), Some(1));
+        h.frame(vec![key(egui::Key::Delete)]);
+        assert_eq!(nodes_of(&h, id).subpaths[0].nodes.len(), 3, "a node, not the shape");
+        h.app.node_sel = None;
+        h.frame(vec![key(egui::Key::Delete)]);
+        assert!(h.app.session.doc.shapes.is_empty(), "no node selected: the shape goes");
+    }
+
+    #[test]
+    fn clicking_empty_space_deselects_the_node_and_clicking_another_shape_edits_that_one() {
+        let (mut h, _) = with_rect();
+        let other = h.app.run("shape.ellipse", json!({"cx": 250, "cy": 250, "rx": 20, "ry": 20})).unwrap()["id"].as_u64().unwrap();
+        h.app.run("edit.select", json!({"ids": [1]}));
+        h.frame(vec![]);
+        h.click(h.at(100.0, 100.0));
+        assert!(h.app.node_sel.is_some());
+        h.click(h.at(300.0, 350.0));
+        assert!(h.app.node_sel.is_none());
+        h.click(h.at(250.0, 230.0));
+        assert_eq!(h.app.session.selection, vec![other], "the ellipse is now the edited path");
+        h.frame(vec![]);
+    }
+
+    #[test]
+    fn node_drags_snap_to_the_grid() {
+        let (mut h, id) = with_rect();
+        h.app.snapping = snap::SnapSettings { grid: Some(5.0), objects: false };
+        h.drag(h.at(100.0, 100.0), h.at(87.0, 83.0));
+        assert!(nodes_of(&h, id).subpaths[0].nodes[0].p.distance(Point::new(85.0, 85.0)) < 1e-9);
+    }
+
+    #[test]
+    fn text_shows_a_convert_button_instead_of_nodes_and_conversion_makes_it_editable() {
+        let mut h = Harness::new();
+        h.app.run("text.create", json!({"text": "HI", "x": 50, "y": 50, "height": 20}));
+        h.app.tool = Tool::Nodes;
+        h.frame(vec![]);
+        assert!(crate::nodes_ui::world_nodes(&h.app).is_none());
+        h.app.run("edit.convert_to_path", json!({}));
+        h.frame(vec![]);
+        assert!(crate::nodes_ui::world_nodes(&h.app).is_some());
+    }
+}
+
+mod pen_tool_tests {
+    use super::*;
+
+    fn pen() -> Harness {
+        let mut h = Harness::new();
+        h.app.snapping = snap::SnapSettings { grid: None, objects: false };
+        h.app.tool = Tool::Pen;
+        h.frame(vec![]);
+        h
+    }
+
+    fn key(key: egui::Key) -> Event {
+        Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }
+    }
+
+    #[test]
+    fn clicking_points_and_then_the_first_one_closes_a_polygon_on_the_active_layer() {
+        let mut h = pen();
+        h.app.active_layer = 5;
+        for (x, y) in [(100.0, 100.0), (180.0, 100.0), (140.0, 170.0)] {
+            h.click(h.at(x, y));
+        }
+        assert!(h.app.session.doc.shapes.is_empty(), "still drawing");
+        assert_eq!(h.app.pen.as_ref().map(|p| p.nodes.len()), Some(3));
+        h.frame(vec![]); // the in-progress path is drawn
+        h.click(h.at(100.0, 100.0));
+        assert!(h.app.pen.is_none());
+        let shape = &h.app.session.doc.shapes[0];
+        assert_eq!(shape.layer, 5);
+        assert!(shape.world_polylines()[0].closed && shape.world_polylines()[0].points.len() == 3);
+    }
+
+    #[test]
+    fn dragging_out_of_a_new_node_makes_a_smooth_node_with_mirrored_handles() {
+        let mut h = pen();
+        h.click(h.at(100.0, 100.0));
+        h.drag(h.at(150.0, 100.0), h.at(180.0, 130.0));
+        h.click(h.at(220.0, 100.0));
+        h.frame(vec![key(egui::Key::Enter)]);
+        let shape = &h.app.session.doc.shapes[0];
+        let lightfoundry_doc::ShapeKind::Path { path } = &shape.kind else { panic!() };
+        let np = lightfoundry_geom::nodes::NodePath::from_bez(path).unwrap();
+        let n = &np.subpaths[0].nodes[1];
+        assert!(n.p.distance(Point::new(150.0, 100.0)) < 0.5);
+        let (i, o) = (n.in_h.unwrap(), n.out_h.unwrap());
+        assert!((o.x - 30.0).abs() < 0.5 && (o.y - 30.0).abs() < 0.5, "{o:?}");
+        assert!((i + o).hypot() < 1e-6, "mirrored: {i:?} {o:?}");
+        assert!(n.smooth && !np.subpaths[0].closed);
+    }
+
+    #[test]
+    fn enter_finishes_double_click_finishes_and_escape_cancels() {
+        let mut h = pen();
+        h.click(h.at(100.0, 100.0));
+        h.click(h.at(160.0, 120.0));
+        h.frame(vec![key(egui::Key::Enter)]);
+        assert_eq!(h.app.session.doc.shapes.len(), 1);
+        h.click(h.at(200.0, 200.0));
+        h.click(h.at(260.0, 220.0));
+        h.time += 1.0;
+        h.click(h.at(300.0, 260.0));
+        h.click(h.at(300.0, 260.0)); // second click of a double click
+        assert_eq!(h.app.session.doc.shapes.len(), 2, "double click finished the open path");
+        assert_eq!(h.app.session.doc.shapes[1].world_polylines()[0].points.len(), 3, "without a duplicate end node");
+        h.click(h.at(100.0, 300.0));
+        h.click(h.at(150.0, 300.0));
+        h.frame(vec![key(egui::Key::Escape)]);
+        assert!(h.app.pen.is_none());
+        assert_eq!(h.app.session.doc.shapes.len(), 2, "cancelled");
+        assert_eq!(h.app.tool, Tool::Pen, "Escape cancelled the path, it did not leave the tool");
+        h.frame(vec![key(egui::Key::Escape)]);
+        assert_eq!(h.app.tool, Tool::Select, "a second Escape leaves the tool");
+    }
+
+    #[test]
+    fn a_single_click_never_makes_a_one_node_path() {
+        let mut h = pen();
+        h.click(h.at(100.0, 100.0));
+        h.frame(vec![key(egui::Key::Enter)]);
+        assert!(h.app.session.doc.shapes.is_empty());
+        assert!(h.app.pen.is_none());
+    }
+
+    #[test]
+    fn pen_paths_snap_and_pen_clicks_on_rulers_make_guides_not_nodes() {
+        let mut h = pen();
+        h.app.snapping = snap::SnapSettings { grid: Some(10.0), objects: false };
+        h.click(h.at(103.0, 98.0));
+        h.click(h.at(147.0, 121.0));
+        h.frame(vec![key(egui::Key::Enter)]);
+        let pts = &h.app.session.doc.shapes[0].world_polylines()[0].points;
+        assert!(pts[0].distance(Point::new(100.0, 100.0)) < 1e-9 && pts[1].distance(Point::new(150.0, 120.0)) < 1e-9, "{pts:?}");
+        let c = h.app.canvas_rect.unwrap();
+        h.drag(c.min + vec2(5.0, 200.0), c.min + vec2(300.0, 200.0));
+        assert_eq!(h.app.guides.len(), 1, "the ruler still produces guides with the pen selected");
+        assert!(h.app.pen.is_none());
+    }
+
+    #[test]
+    fn switching_tools_with_a_path_in_progress_does_not_lose_it() {
+        let mut h = pen();
+        h.click(h.at(100.0, 100.0));
+        h.click(h.at(160.0, 120.0));
+        crate::nodes_ui::finish(&mut h.app, false);
+        h.app.tool = Tool::Select;
+        assert_eq!(h.app.session.doc.shapes.len(), 1);
+    }
+}
+
 mod snapping_tests {
     use super::*;
 

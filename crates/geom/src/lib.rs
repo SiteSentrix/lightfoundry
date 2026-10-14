@@ -1,5 +1,7 @@
 //! Geometry primitives on `kurbo`: polylines, flattening, bounds and hit-testing helpers.
 
+pub mod nodes;
+
 pub use kurbo::{Affine, BezPath, Point, Rect, Vec2};
 
 use kurbo::PathEl;

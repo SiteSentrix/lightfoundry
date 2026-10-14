@@ -15,9 +15,16 @@ pub fn toolbar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         (Tool::Line, "Line"),
         (Tool::Polygon, "Polygon"),
         (Tool::Text, "Text"),
+        (Tool::Nodes, "Nodes"),
+        (Tool::Pen, "Pen"),
     ] {
         if ui.add_sized([72.0, 28.0], egui::Button::new(label).selected(app.tool == tool)).clicked() {
+            if app.tool == Tool::Pen && tool != Tool::Pen {
+                // Switching away completes the path being drawn rather than losing it.
+                crate::nodes_ui::finish(app, false);
+            }
             app.tool = tool;
+            app.node_sel = None;
         }
     }
     if app.tool == Tool::Rectangle {
@@ -37,6 +44,7 @@ pub fn inspector(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("Cuts / Layers").default_open(true).show(ui, |ui| layers(app, ui));
         egui::CollapsingHeader::new("Selection").default_open(true).show(ui, |ui| {
             properties(app, ui);
+            node_section(app, ui);
             text_properties(app, ui);
             image_properties(app, ui);
             shape_operations(app, ui);
@@ -786,6 +794,63 @@ fn layer_header(app: &mut LightFoundryApp, ui: &mut egui::Ui, layer: &lightfound
         }
         if ui.add_enabled(position < last, egui::Button::new("Later")).on_hover_text("Cut this layer later").clicked() {
             app.run("layer.move", json!({ "id": layer.id, "index": position + 1 }));
+        }
+    });
+}
+
+/// Buttons for the selected node while the Nodes tool is active.
+fn node_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    if app.tool != Tool::Nodes {
+        return;
+    }
+    ui.separator();
+    ui.label(egui::RichText::new("Nodes").strong());
+    let Some((shape, np)) = crate::nodes_ui::world_nodes(app) else {
+        let text_selected = app.session.selection.len() == 1
+            && app.session.selection.first().and_then(|id| app.session.doc.shape(*id)).is_some_and(|s| matches!(s.kind, ShapeKind::Text { .. }));
+        if text_selected {
+            ui.weak("Text must be converted to a path before its nodes can be edited.");
+            if ui.button("Convert text to path").clicked() {
+                app.run("edit.convert_to_path", json!({}));
+            }
+        } else {
+            ui.weak("Select one path to edit its nodes.");
+        }
+        return;
+    };
+    ui.weak("Drag nodes and handles. Double-click a line to add a node. Delete removes the selected node.");
+    let Some(sel) = app.node_sel.filter(|s| s.shape == shape) else {
+        ui.weak(format!("{} nodes. Click a node to select it.", np.node_count()));
+        return;
+    };
+    let Some(node) = np.subpaths.get(sel.subpath).and_then(|s| s.nodes.get(sel.index)) else { return };
+    let closed = np.subpaths.get(sel.subpath).is_some_and(|s| s.closed);
+    let segment_is_curve = {
+        let sp = &np.subpaths[sel.subpath];
+        let next = &sp.nodes[(sel.index + 1) % sp.nodes.len()];
+        lightfoundry_geom::nodes::controls(node, next).is_some()
+    };
+    ui.label(format!("Node {} of {}", sel.index + 1, np.subpaths[sel.subpath].nodes.len()));
+    ui.horizontal_wrapped(|ui| {
+        let base = json!({ "id": shape, "subpath": sel.subpath });
+        let with = |extra: serde_json::Value| {
+            let mut v = base.clone();
+            if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
+                o.extend(e.clone());
+            }
+            v
+        };
+        if ui.button("Delete node").clicked() {
+            crate::nodes_ui::delete_selected(app);
+        }
+        if ui.button(if node.smooth { "Make corner" } else { "Make smooth" }).clicked() {
+            app.run("node.set_smooth", with(json!({ "index": sel.index, "smooth": !node.smooth })));
+        }
+        if ui.button(if segment_is_curve { "Next segment: line" } else { "Next segment: curve" }).clicked() {
+            app.run("node.set_segment", with(json!({ "segment": sel.index, "curve": !segment_is_curve })));
+        }
+        if ui.button(if closed { "Open path" } else { "Close path" }).clicked() {
+            app.run("node.set_closed", with(json!({ "closed": !closed })));
         }
     });
 }
