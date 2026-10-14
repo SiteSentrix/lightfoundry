@@ -108,6 +108,127 @@ mod kerf_tests {
     }
 }
 
+mod tab_and_lead_tests {
+    use super::*;
+
+    fn square_doc(size: f64, at: f64) -> Document {
+        let mut doc = Document::default();
+        doc.add_shape(Shape::path("part", 0, rect_path(at, at, size, size)));
+        doc
+    }
+
+    /// Lengths of (powered, unpowered) cut moves in the first op, from each move's predecessor.
+    fn lengths(job: &Job) -> (f64, f64) {
+        let (mut on, mut off) = (0.0, 0.0);
+        let mut at = None;
+        for m in &job.ops[0].moves {
+            if let (Some(a), Move::Cut { to, power }) = (at, m) {
+                let d = Point::distance(a, *to);
+                if *power > 0.0 { on += d } else { off += d }
+            }
+            at = Some(m.target());
+        }
+        (on, off)
+    }
+
+    #[test]
+    fn tabs_leave_gaps_with_the_laser_off_and_keep_cutting_speed() {
+        let mut doc = square_doc(40.0, 10.0);
+        let layer = doc.layer_mut(0).unwrap();
+        layer.tab_count = 4;
+        layer.tab_width = 2.0;
+        let job = plan(&doc).unwrap();
+        let (on, off) = lengths(&job);
+        assert!((off - 8.0).abs() < 1e-6 && (on - 152.0).abs() < 1e-6, "{on} {off}");
+        let gaps = job.ops[0]
+            .moves
+            .windows(2)
+            .filter(|w| matches!(w[1], Move::Cut { power, .. } if power == 0.0) && !matches!(w[0], Move::Cut { power, .. } if power == 0.0))
+            .count();
+        assert_eq!(gaps, 4, "four separate tabs");
+    }
+
+    #[test]
+    fn holes_get_no_tabs_but_outer_outlines_do() {
+        let mut doc = square_doc(60.0, 10.0);
+        doc.add_shape(Shape::path("hole", 0, rect_path(30.0, 30.0, 10.0, 10.0)));
+        let layer = doc.layer_mut(0).unwrap();
+        layer.tab_count = 2;
+        layer.tab_width = 3.0;
+        let (_, off) = lengths(&plan(&doc).unwrap());
+        assert!((off - 6.0).abs() < 1e-6, "two tabs on the outer outline only, got {off}");
+    }
+
+    #[test]
+    fn tabs_that_do_not_fit_leave_the_outline_whole() {
+        let mut doc = square_doc(4.0, 10.0);
+        let layer = doc.layer_mut(0).unwrap();
+        layer.tab_count = 4;
+        layer.tab_width = 3.0;
+        let (on, off) = lengths(&plan(&doc).unwrap());
+        assert_eq!(off, 0.0);
+        assert!((on - 16.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_lead_in_approaches_from_the_scrap_side_and_a_hole_leads_inside_itself() {
+        let mut doc = square_doc(60.0, 10.0);
+        doc.add_shape(Shape::path("hole", 0, rect_path(30.0, 30.0, 10.0, 10.0)));
+        let layer = doc.layer_mut(0).unwrap();
+        layer.lead_in = 4.0;
+        layer.lead_out = 2.0;
+        let job = plan(&doc).unwrap();
+        let moves = &job.ops[0].moves;
+        // Inner-first: the hole is cut first.
+        let (entry, start) = (moves[0].target(), moves[1].target());
+        assert!((entry.distance(start) - 4.0).abs() < 1e-9, "{entry:?} -> {start:?}");
+        assert!(entry.x > 30.0 && entry.x < 40.0 && entry.y > 30.0 && entry.y < 40.0, "the hole's lead-in is inside the hole: {entry:?}");
+        assert!(matches!(moves[0], Move::Travel(_)) && matches!(moves[1], Move::Cut { power, .. } if power > 0.0), "the approach is a powered cut");
+        // The outer outline's lead-in starts outside the 60 mm square.
+        let outer = moves.iter().enumerate().skip(2).find(|(_, m)| matches!(m, Move::Travel(_))).unwrap().0;
+        let entry = moves[outer].target();
+        assert!(entry.x < 10.0 || entry.x > 70.0 || entry.y < 10.0 || entry.y > 70.0, "{entry:?}");
+        // The lead-out leaves the outline again after it has closed.
+        let last = moves.last().unwrap().target();
+        let first_cut = moves[outer + 1].target();
+        assert!((last.distance(first_cut) - 2.0).abs() < 1e-9, "{last:?} vs {first_cut:?}");
+    }
+
+    #[test]
+    fn leads_are_shortened_to_stay_on_the_bed_for_absolute_placement_only() {
+        let mut doc = square_doc(20.0, 0.0); // flush against the bed's top-left corner
+        doc.layer_mut(0).unwrap().lead_in = 5.0;
+        for m in &plan(&doc).unwrap().ops[0].moves {
+            let p = m.target();
+            assert!(p.x >= 0.0 && p.y >= 0.0, "{p:?} is off the bed");
+        }
+        doc.job_origin.start_from = lightfoundry_doc::StartFrom::CurrentPosition;
+        let job = plan(&doc).unwrap();
+        assert!(job.ops[0].moves.iter().any(|m| m.target().y < 0.0 || m.target().x < 0.0), "relative placement keeps the full lead");
+    }
+
+    #[test]
+    fn open_paths_and_fill_are_untouched_and_bad_values_are_rejected() {
+        let mut doc = Document::default();
+        doc.add_shape(Shape::path("line", 0, lightfoundry_geom::line_path(Point::new(10.0, 10.0), Point::new(50.0, 10.0))));
+        let layer = doc.layer_mut(0).unwrap();
+        layer.lead_in = 3.0;
+        layer.tab_count = 3;
+        let job = plan(&doc).unwrap();
+        assert_eq!(job.ops[0].moves.len(), 2, "travel + one cut, no lead, no tabs");
+        for field in 0..3 {
+            let mut bad = doc.clone();
+            let layer = bad.layer_mut(0).unwrap();
+            match field {
+                0 => layer.tab_width = f64::NAN,
+                1 => layer.lead_in = -1.0,
+                _ => layer.lead_out = 1e9,
+            }
+            assert!(matches!(plan(&bad), Err(PlanError::BadLayerSetting { .. })), "field {field}");
+        }
+    }
+}
+
 mod fill_tests {
     use super::*;
 

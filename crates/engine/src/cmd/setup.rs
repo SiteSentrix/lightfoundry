@@ -11,7 +11,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Cut Settings",
         menu: "Laser",
         shortcut: None,
-        params_doc: "{id, name?, mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, kerf_offset? (mm; closed outlines are offset before cutting, + grows parts and shrinks holes), bidirectional?, dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
+        params_doc: "{id, name?, mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, kerf_offset? (mm; closed outlines are offset before cutting, + grows parts and shrinks holes), tab_count? (per outer outline), tab_width? (mm), lead_in?/lead_out? (mm, on the scrap side), bidirectional?, dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
         mutates: true,
         run: layer_set,
     },
@@ -38,6 +38,10 @@ struct LayerParams {
     interval: Option<f64>,
     scan_angle: Option<f64>,
     kerf_offset: Option<f64>,
+    tab_count: Option<u32>,
+    tab_width: Option<f64>,
+    lead_in: Option<f64>,
+    lead_out: Option<f64>,
     bidirectional: Option<bool>,
     dither: Option<Dither>,
     output: Option<bool>,
@@ -64,6 +68,18 @@ fn layer_set(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     }
     if let Some(v) = p.kerf_offset {
         layer.kerf_offset = in_range("kerf_offset", v, -50.0, 50.0)?;
+    }
+    if let Some(v) = p.tab_width {
+        layer.tab_width = in_range("tab_width", v, 0.0, 1000.0)?;
+    }
+    if let Some(v) = p.lead_in {
+        layer.lead_in = in_range("lead_in", v, 0.0, 1000.0)?;
+    }
+    if let Some(v) = p.lead_out {
+        layer.lead_out = in_range("lead_out", v, 0.0, 1000.0)?;
+    }
+    if let Some(v) = p.tab_count {
+        layer.tab_count = v.min(1000);
     }
     if let Some(v) = p.passes {
         layer.passes = v.clamp(1, 1000);

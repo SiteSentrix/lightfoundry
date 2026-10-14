@@ -164,10 +164,26 @@ pub struct Layer {
     /// and inside a hole, so both come out the right size once the beam has taken its width).
     #[serde(default)]
     pub kerf_offset: f64,
+    /// Tabs per outer outline (0 = none): short uncut gaps that keep a part attached to the sheet.
+    #[serde(default)]
+    pub tab_count: u32,
+    /// Width of each tab, mm.
+    #[serde(default = "default_tab_width")]
+    pub tab_width: f64,
+    /// Length of the approach line before a closed outline, on the scrap side, mm.
+    #[serde(default)]
+    pub lead_in: f64,
+    /// Length of the exit line after a closed outline, on the scrap side, mm.
+    #[serde(default)]
+    pub lead_out: f64,
     pub bidirectional: bool,
     pub dither: Dither,
     pub output: bool,
     pub air_assist: bool,
+}
+
+fn default_tab_width() -> f64 {
+    1.0
 }
 
 impl Layer {
@@ -184,6 +200,10 @@ impl Layer {
             interval: 0.1,
             scan_angle: 0.0,
             kerf_offset: 0.0,
+            tab_count: 0,
+            tab_width: default_tab_width(),
+            lead_in: 0.0,
+            lead_out: 0.0,
             bidirectional: true,
             dither: Dither::FloydSteinberg,
             output: true,

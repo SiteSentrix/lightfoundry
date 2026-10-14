@@ -573,6 +573,26 @@ mod job_tests {
     }
 
     #[test]
+    fn tabs_and_leads_reach_the_gcode_and_are_validated() {
+        let mut s = square_session(); // 20x10 rectangle
+        s.execute("layer.set", &json!({"id": 0, "tab_count": 2, "tab_width": 1.5, "lead_in": 3})).unwrap();
+        let g = s.execute("job.gcode", &json!({"include": true})).unwrap();
+        let text = g["gcode"].as_str().unwrap();
+        assert_eq!(text.lines().filter(|l| l.starts_with("G1") && l.contains(" S0")).count(), 2, "one laser-off move per tab\n{text}");
+        assert!(text.contains("G0 X") && text.lines().filter(|l| l.starts_with("G0")).count() >= 2, "the lead-in start is a rapid move");
+        for bad in [
+            json!({"id": 0, "tab_width": -1}),
+            json!({"id": 0, "lead_in": 1e9}),
+            json!({"id": 0, "lead_out": "x"}),
+            json!({"id": 0, "tab_count": -3}),
+        ] {
+            assert!(s.execute("layer.set", &bad).is_err(), "{bad}");
+        }
+        s.execute("layer.set", &json!({"id": 0, "tab_count": 5000})).unwrap();
+        assert_eq!(s.doc.layer(0).unwrap().tab_count, 1000, "counts are capped");
+    }
+
+    #[test]
     fn kerf_offset_moves_the_generated_cut_path_and_is_validated() {
         let mut s = square_session(); // 20x10 rect at (10,10), top-left origin
         s.execute("layer.set", &json!({"id": 0, "kerf_offset": 0.5})).unwrap();

@@ -13,7 +13,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 7  | Rulers, snapping, guides, numeric create dialogs                                     | Precision layout                                                    |
 | 8  | Cut-order options (by layer/group, remove duplicate lines, choose start point)       | Quality and time                                                    |
 | 9  | Image crop, sharpen, halftone/newsprint dithers, trace to vectors (tone adjustments are done) | Photo engraving results                                  |
-| 10 | Lead-in/out, tabs/bridges, perforation, ramp, per-layer overscan                     | Clean cuts, holding parts                                           |
+| 10 | Perforation/dashed cuts, ramp, per-layer overscan setting (tabs and lead-in/out are done) | Clean cuts of special materials                                     |
 | 11 | Timeline preview with scrubbing and per-layer time breakdown                         | Catch mistakes before burning                                       |
 | 12 | Groups, layers list with reorder/rename, per-shape cut settings overrides            | Larger projects                                                     |
 | 13 | Recent files; keep several autosave generations; periodic recovery-health check      | Never lose work                                                     |
