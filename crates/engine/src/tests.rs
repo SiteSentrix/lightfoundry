@@ -1076,6 +1076,34 @@ mod import_tests {
     }
 
     #[test]
+    fn projects_and_pictures_can_travel_as_inline_data() {
+        let mut s = Session::new();
+        s.execute("shape.rectangle", &json!({"width": 12, "height": 7})).unwrap();
+        let v = s.execute("file.project_data", &Value::Null).unwrap();
+        assert!(!s.dirty);
+        let data = v["data_base64"].as_str().unwrap().to_string();
+        let mut other = Session::new();
+        other.execute("file.open", &json!({"data_base64": data})).unwrap();
+        assert_eq!(other.doc.shapes.len(), 1);
+        assert!(other.path.is_none(), "opened from data, so it has no path to save back to");
+        assert!(other.execute("file.open", &json!({"data_base64": "!!!"})).is_err());
+        assert!(other.execute("file.open", &json!({"data_base64": "e30="})).is_err(), "valid base64 of something that is not a project");
+        assert!(other.execute("file.open", &json!({})).is_err());
+
+        let mut png = Vec::new();
+        image::DynamicImage::ImageLuma8(image::GrayImage::from_pixel(8, 4, image::Luma([0])))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let v = other
+            .execute("file.import_image", &json!({"data_base64": lightfoundry_doc::base64::encode(&png), "name": "dot.png", "width": 16}))
+            .unwrap();
+        assert_eq!(v["height_mm"], json!(8.0));
+        assert_eq!(other.doc.shape(v["id"].as_u64().unwrap()).unwrap().name, "dot.png");
+        assert!(other.execute("file.import_image", &json!({"data_base64": "AAAA"})).is_err(), "not a picture");
+        assert!(other.execute("file.import_image", &json!({})).is_err());
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

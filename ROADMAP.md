@@ -190,4 +190,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   no file dialogs or machine link yet (`Platform::machine_available` is false there, since the
   link needs threads). Clocks use `web-time`, which is `std::time` on desktop and works in the
   browser.
+- **2026-10-14 — browser files.** Hosts without file paths now work through `Platform`
+  (`browser_files`, `request_upload` / `take_upload`, `download`); the engine's `file.open` and
+  `file.import_image` accept `data_base64` and `file.project_data` returns the project as data
+  (shared `doc::base64`). The web build opens and imports through the browser's file chooser and
+  saves projects and G-code as downloads; verified in headless Chromium (upload of an SVG, download
+  of a project).
 

@@ -2,6 +2,13 @@ use std::path::PathBuf;
 
 use lightfoundry_device::Transport;
 
+/// A file the person picked in a browser-style host: its name and contents.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Upload {
+    pub name: String,
+    pub bytes: Vec<u8>,
+}
+
 /// What the host operating system provides. Keeping this behind a trait keeps file dialogs and
 /// serial ports out of the UI crate (and lets tests and the web build run without them).
 pub trait Platform {
@@ -19,6 +26,24 @@ pub trait Platform {
     fn recent_file(&self) -> Option<PathBuf> {
         None
     }
+
+    /// Browser-style hosts cannot hand out file paths: files arrive as bytes after the person has
+    /// chosen them ([`request_upload`](Platform::request_upload), then
+    /// [`take_upload`](Platform::take_upload)) and leave as downloads.
+    fn browser_files(&self) -> bool {
+        false
+    }
+
+    /// Asks the person to choose a file with one of these extensions.
+    fn request_upload(&self, _extensions: &[&str]) {}
+
+    /// The file chosen after a request, once it has been read.
+    fn take_upload(&self) -> Option<Upload> {
+        None
+    }
+
+    /// Offers `bytes` to the person as a downloaded file called `name`.
+    fn download(&self, _name: &str, _bytes: &[u8], _mime: &str) {}
 
     /// Whether this platform can run a machine link at all (it needs threads, which the browser
     /// build does not have).

@@ -22,3 +22,4 @@ web-time = { workspace = true }
 
 [dev-dependencies]
 lightfoundry-format = { workspace = true }
+image = { workspace = true }

@@ -585,12 +585,11 @@ impl RasterImage {
 }
 
 /// Serde adapter storing byte buffers as standard base64 strings.
-mod base64_bytes {
-    use serde::{Deserialize, Deserializer, Serializer, de::Error};
-
+/// Base64 (standard alphabet, padded) for embedding binary data in JSON.
+pub mod base64 {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+    pub fn encode(bytes: &[u8]) -> String {
         let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
         for chunk in bytes.chunks(3) {
             let b = [chunk.first().copied().unwrap_or(0), chunk.get(1).copied().unwrap_or(0), chunk.get(2).copied().unwrap_or(0)];
@@ -603,16 +602,16 @@ mod base64_bytes {
                 }
             }
         }
-        s.serialize_str(&out)
+        out
     }
 
-    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
-        let text = String::deserialize(d)?;
+    /// `None` for characters outside the alphabet. Padding and whitespace are ignored.
+    pub fn decode(text: &str) -> Option<Vec<u8>> {
         let mut out = Vec::with_capacity(text.len() / 4 * 3);
         let mut acc = 0u32;
         let mut bits = 0;
-        for c in text.bytes().filter(|c| *c != b'=') {
-            let v = ALPHABET.iter().position(|a| *a == c).ok_or_else(|| D::Error::custom("invalid base64"))? as u32;
+        for c in text.bytes().filter(|c| *c != b'=' && !c.is_ascii_whitespace()) {
+            let v = ALPHABET.iter().position(|a| *a == c)? as u32;
             acc = (acc << 6) | v;
             bits += 6;
             if bits >= 8 {
@@ -620,7 +619,20 @@ mod base64_bytes {
                 out.push(((acc >> bits) & 0xff) as u8);
             }
         }
-        Ok(out)
+        Some(out)
+    }
+}
+
+mod base64_bytes {
+    use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&super::base64::encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(d)?;
+        super::base64::decode(&text).ok_or_else(|| D::Error::custom("invalid base64"))
     }
 }
 
@@ -771,6 +783,16 @@ mod tests {
         assert_eq!(Anchor::Center.point(b), lightfoundry_geom::Point::new(20.0, 40.0));
         assert_eq!(Anchor::BottomRight.point(b), lightfoundry_geom::Point::new(30.0, 60.0));
         assert_eq!(Anchor::ALL.len(), 9);
+    }
+
+    #[test]
+    fn base64_round_trips_and_rejects_junk() {
+        for data in [&b""[..], b"a", b"ab", b"abc", b"abcd", &[0u8, 255, 128, 7, 1, 2][..]] {
+            assert_eq!(base64::decode(&base64::encode(data)).unwrap(), data);
+        }
+        assert_eq!(base64::encode(b"Man"), "TWFu");
+        assert_eq!(base64::decode("TWF u\n"), Some(b"Man".to_vec()), "whitespace is ignored");
+        assert_eq!(base64::decode("TW!u"), None);
     }
 
     #[test]
