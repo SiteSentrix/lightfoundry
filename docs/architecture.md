@@ -7,7 +7,7 @@ How LightFoundry is built today. Rules (clean-room, never-crash, quality gates) 
 
 ## Shape
 
-A Cargo workspace of 11 library crates under `crates/`, two apps under `apps/`, and `xtask`. Pure
+A Cargo workspace of 12 library crates under `crates/`, two apps under `apps/`, and `xtask`. Pure
 Rust. The same engine runs the desktop app and the headless CLI.
 
 ## Layers
@@ -21,6 +21,7 @@ and that nothing below L6 depends on a UI toolkit. The table lives in `xtask/src
 | L1    | `doc`      | the document: cut layers, shapes (paths and rasters), the machine profile; data + serde only     |
 | L2    | `toolpath` | document to `Job`: ordering, scan fill, raster dithering, time estimate                          |
 | L2    | `text`     | an original single-line stroke font (glyph table + corner-cutting smoothing) and text layout    |
+| L2    | `pathops`  | boolean combine and offset on flattened shapes (wraps `i_overlay`: even-odd regions with holes, validated and bounded inputs) |
 | L3    | `svg`      | SVG import (`usvg` resolves shapes, groups, transforms, units)                                   |
 | L3    | `dxf`      | ASCII DXF import written from the public reference                                               |
 | L3    | `gcode`    | `Job` to GRBL G-code with a `Placement` (absolute, or relative to a job anchor); bed-bounds and finiteness checks; framing |

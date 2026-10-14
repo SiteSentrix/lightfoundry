@@ -64,6 +64,20 @@ mod fill_tests {
     }
 
     #[test]
+    fn an_ellipse_fills_with_rows_shorter_near_its_poles() {
+        let mut doc = Document::default();
+        if let Some(l) = doc.layer_mut(0) {
+            l.mode = LayerMode::Fill;
+            l.interval = 1.0;
+        }
+        doc.add_shape(Shape::path("e", 0, ellipse_path(50.0, 50.0, 20.0, 10.0)));
+        let job = plan(&doc).unwrap();
+        let spans: Vec<f64> = job.ops[0].moves.chunks(2).map(|c| c[0].target().distance(c[1].target())).collect();
+        assert_eq!(spans.len(), 20, "one row per mm over a 20 mm tall ellipse");
+        assert!(spans[10] > 39.0 && spans[0] < 15.0, "wide in the middle, narrow at the pole: {spans:?}");
+    }
+
+    #[test]
     fn bidirectional_fill_alternates_direction() {
         let segs = fill_segments(&lightfoundry_geom::flatten(&rect_path(0.0, 0.0, 10.0, 10.0), 0.1), 1.0, 0.0, true);
         assert!(segs[0].0.x < segs[0].1.x);

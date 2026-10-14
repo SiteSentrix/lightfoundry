@@ -33,6 +33,7 @@ pub fn inspector(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("Selection").default_open(true).show(ui, |ui| {
             properties(app, ui);
             text_properties(app, ui);
+            shape_operations(app, ui);
         });
         egui::CollapsingHeader::new("Laser").default_open(true).show(ui, |ui| laser(app, ui));
     });
@@ -562,4 +563,44 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         ui.colored_label(app.tokens.error, w);
     }
     ui.weak("Single-line stroke font: engraves each stroke in one pass (Line mode).");
+}
+
+/// Boolean combine and offset for the current selection.
+fn shape_operations(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let count = app.session.selection.len();
+    if count == 0 {
+        return;
+    }
+    ui.separator();
+    ui.label(egui::RichText::new("Shape operations").strong());
+    ui.add_enabled_ui(count >= 2, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for (label, op, hint) in [
+                ("Union", "union", "Weld the shapes into one outline"),
+                ("Subtract", "difference", "The first selected shape minus the others"),
+                ("Intersect", "intersect", "Keep only the overlap"),
+                ("XOR", "xor", "Keep everything except the overlap"),
+            ] {
+                if ui.button(label).on_hover_text(hint).clicked() {
+                    app.run("path.boolean", json!({ "op": op }));
+                }
+            }
+        });
+    });
+    ui.horizontal(|ui| {
+        ui.label("Offset");
+        ui.add(egui::DragValue::new(&mut app.offset_distance).range(-1000.0..=1000.0).speed(0.1).suffix(" mm"));
+        egui::ComboBox::from_id_salt("offset_join").selected_text(app.offset_join).width(70.0).show_ui(ui, |ui| {
+            for j in ["round", "miter", "bevel"] {
+                ui.selectable_value(&mut app.offset_join, j, j);
+            }
+        });
+    });
+    ui.horizontal(|ui| {
+        if ui.button("Apply offset").on_hover_text("Negative values shrink closed shapes; open lines become an outline around the line").clicked() {
+            let params = json!({ "distance": app.offset_distance, "join": app.offset_join, "keep_originals": app.offset_keep });
+            app.run("path.offset", params);
+        }
+        ui.checkbox(&mut app.offset_keep, "Keep original");
+    });
 }

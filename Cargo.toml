@@ -16,6 +16,7 @@ lightfoundry-geom = { path = "crates/geom" }
 lightfoundry-doc = { path = "crates/doc" }
 lightfoundry-toolpath = { path = "crates/toolpath" }
 lightfoundry-text = { path = "crates/text" }
+lightfoundry-pathops = { path = "crates/pathops" }
 lightfoundry-gcode = { path = "crates/gcode" }
 lightfoundry-svg = { path = "crates/svg" }
 lightfoundry-dxf = { path = "crates/dxf" }

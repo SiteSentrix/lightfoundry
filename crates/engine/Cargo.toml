@@ -13,6 +13,7 @@ lightfoundry-geom = { workspace = true }
 lightfoundry-doc = { workspace = true }
 lightfoundry-toolpath = { workspace = true }
 lightfoundry-text = { workspace = true }
+lightfoundry-pathops = { workspace = true }
 lightfoundry-gcode = { workspace = true }
 lightfoundry-svg = { workspace = true }
 lightfoundry-dxf = { workspace = true }

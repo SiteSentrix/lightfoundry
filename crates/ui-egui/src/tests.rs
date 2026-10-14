@@ -187,6 +187,39 @@ mod text_tool_tests {
     }
 }
 
+mod shape_operation_tests {
+    use super::*;
+
+    fn two_squares(h: &mut Harness) {
+        h.app.run("shape.rectangle", json!({"x": 20, "y": 20, "width": 40, "height": 40}));
+        h.app.run("shape.rectangle", json!({"x": 40, "y": 40, "width": 40, "height": 40}));
+        h.app.run("edit.select_all", serde_json::Value::Null);
+        h.frame(vec![]);
+    }
+
+    #[test]
+    fn menu_and_panel_defaults_drive_the_engine_commands() {
+        let mut h = Harness::new();
+        two_squares(&mut h);
+        h.app.run("path.boolean", json!({"op": "union"}));
+        assert_eq!(h.app.session.doc.shapes.len(), 1);
+        h.app.offset_distance = 3.0;
+        h.app.offset_join = "miter";
+        let params = json!({ "distance": h.app.offset_distance, "join": h.app.offset_join, "keep_originals": h.app.offset_keep });
+        h.app.run("path.offset", params);
+        assert_eq!(h.app.session.doc.shapes.len(), 2, "originals are kept by default");
+        h.frame(vec![]);
+    }
+
+    #[test]
+    fn a_boolean_with_one_shape_selected_reports_instead_of_crashing() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
+        assert!(h.app.run("path.boolean", json!({"op": "union"})).is_none());
+        assert!(matches!(&h.app.status, Some((m, true)) if m.contains("at least two")), "{:?}", h.app.status);
+    }
+}
+
 mod select_tests {
     use super::*;
 
