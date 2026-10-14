@@ -266,6 +266,15 @@ pub struct Layer {
     /// Fill twice, the second time at right angles to the first.
     #[serde(default)]
     pub crosshatch: bool,
+    /// Run-up and run-out beyond the ends of fill lines and picture rows, mm, with the laser off so
+    /// the head is at speed when it starts burning. `None` uses the machine's setting for pictures
+    /// and none for fills.
+    #[serde(default)]
+    pub overscan: Option<f64>,
+    /// Outlines start at the layer's minimum power and rise to full power over this many mm (0 = off),
+    /// which avoids a burn spot where the beam first pierces.
+    #[serde(default)]
+    pub ramp_length: f64,
     /// Z axis height for this layer, mm from the work zero (0 and no step = Z is not touched).
     #[serde(default)]
     pub z_offset: f64,
@@ -304,6 +313,8 @@ impl Layer {
             perf_cut: 0.0,
             perf_gap: 0.0,
             crosshatch: false,
+            overscan: None,
+            ramp_length: 0.0,
             z_offset: 0.0,
             z_per_pass: 0.0,
             bidirectional: true,

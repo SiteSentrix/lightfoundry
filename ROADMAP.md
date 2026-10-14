@@ -204,4 +204,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   EOF on close); the simulator also works there (`set_non_blocking`). Verified in headless Chromium
   against a scripted fake device (connect, status polling, G-code generated and streamed to the
   end). Real hardware through a browser is untested, like the desktop link.
+- **2026-10-14 — overscan and power ramp.** Layers have `overscan` (laser-off run-up and run-out
+  beyond fill lines, kept inside the bed with absolute placement; also overrides the machine's
+  setting for pictures) and `ramp_length` (outline power rises from the layer's minimum to full
+  over that distance in half-millimetre steps, so the pierce point does not scorch).
 

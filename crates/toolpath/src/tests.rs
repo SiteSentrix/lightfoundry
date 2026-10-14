@@ -831,3 +831,110 @@ mod trace_tests {
         assert!(trace(200, 200, |x, y| (x + y) % 2 == 0, 1.0, 0.0).is_some());
     }
 }
+
+mod overscan_and_ramp_tests {
+    use super::*;
+
+    fn fill_doc() -> Document {
+        let mut doc = rect_doc(40.0, 20.0, LayerMode::Fill);
+        if let Some(l) = doc.layer_mut(0) {
+            l.interval = 5.0;
+        }
+        doc
+    }
+
+    #[test]
+    fn fill_lines_get_a_run_up_and_run_out_with_the_laser_off() {
+        let mut doc = fill_doc();
+        let plain = plan(&doc).unwrap();
+        if let Some(l) = doc.layer_mut(0) {
+            l.overscan = Some(3.0);
+        }
+        let with = plan(&doc).unwrap();
+        let (a, b) = (&plain.ops[0].moves, &with.ops[0].moves);
+        assert_eq!(b.len(), a.len() * 2, "two extra moves per scan line");
+        // First line: travel to 3 mm before the start, then a silent run-up, the burn, a silent run-out.
+        let Move::Travel(start) = b[0] else { panic!("{:?}", b[0]) };
+        let Move::Travel(line_start) = a[0] else { panic!("{:?}", a[0]) };
+        assert!((line_start.x - start.x - 3.0).abs() < 1e-9 || (start.x - line_start.x - 3.0).abs() < 1e-9, "{start:?} vs {line_start:?}");
+        assert!(matches!(b[1], Move::Cut { power, .. } if power == 0.0));
+        assert!(matches!(b[2], Move::Cut { power, .. } if power > 0.0));
+        assert!(matches!(b[3], Move::Cut { power, .. } if power == 0.0));
+        let burned = |m: &[Move]| estimate(&Job { ops: vec![Op { moves: m.to_vec(), ..plain.ops[0].clone() }] }, 6000.0).cut_mm;
+        assert!(burned(b) > burned(a), "the run-up and run-out are travelled at feed speed");
+    }
+
+    #[test]
+    fn overscan_never_leaves_the_bed_with_absolute_placement_and_a_layer_value_beats_the_machine() {
+        let mut doc = rect_doc(40.0, 20.0, LayerMode::Fill);
+        doc.shapes[0].transform = Affine::translate((-9.9, 0.0)); // the rectangle now starts at x = 0.1
+        if let Some(l) = doc.layer_mut(0) {
+            l.interval = 5.0;
+            l.overscan = Some(10.0);
+        }
+        for op in plan(&doc).unwrap().ops {
+            for m in op.moves {
+                let p = m.target();
+                assert!(p.x >= -1e-9 && p.x <= doc.machine.bed_width + 1e-9, "{p:?}");
+            }
+        }
+        let mut img = rect_doc(1.0, 1.0, LayerMode::Fill);
+        img.machine.overscan = 7.0;
+        if let Some(l) = img.layer_mut(0) {
+            l.overscan = Some(0.0);
+        }
+        assert_eq!(img.layer(0).unwrap().overscan, Some(0.0));
+        let mut bad = fill_doc();
+        for v in [f64::NAN, -1.0, 500.0] {
+            if let Some(l) = bad.layer_mut(0) {
+                l.overscan = Some(v);
+            }
+            assert!(matches!(plan(&bad), Err(PlanError::BadLayerSetting { .. })), "{v}");
+        }
+    }
+
+    #[test]
+    fn a_ramp_raises_power_from_the_minimum_over_the_ramp_length() {
+        let mut doc = rect_doc(40.0, 20.0, LayerMode::Line);
+        if let Some(l) = doc.layer_mut(0) {
+            l.min_power = 10.0;
+            l.max_power = 50.0;
+            l.ramp_length = 10.0;
+        }
+        let moves = plan(&doc).unwrap().ops.remove(0).moves;
+        let powers: Vec<f64> = moves.iter().filter_map(|m| if let Move::Cut { power, .. } = m { Some(*power) } else { None }).collect();
+        assert!(powers[0] > 10.0 && powers[0] < 15.0, "starts near the minimum: {}", powers[0]);
+        assert!(powers.windows(2).take(15).all(|w| w[1] >= w[0]), "rises steadily");
+        assert!(powers.iter().any(|p| (*p - 50.0).abs() < 1e-9), "reaches full power");
+        assert!(powers.iter().all(|p| *p <= 50.0 + 1e-9 && *p >= 10.0 - 1e-9));
+        // Same path, same length.
+        let mut flat = doc.clone();
+        if let Some(l) = flat.layer_mut(0) {
+            l.ramp_length = 0.0;
+        }
+        let (a, b) = (estimate(&plan(&doc).unwrap(), 6000.0), estimate(&plan(&flat).unwrap(), 6000.0));
+        assert!((a.cut_mm - b.cut_mm).abs() < 1e-6, "{} vs {}", a.cut_mm, b.cut_mm);
+    }
+
+    #[test]
+    fn ramps_handle_short_paths_zero_length_edges_and_bad_values() {
+        let mut doc = rect_doc(2.0, 2.0, LayerMode::Line);
+        if let Some(l) = doc.layer_mut(0) {
+            l.ramp_length = 100.0; // longer than the whole outline
+        }
+        let moves = plan(&doc).unwrap().ops.remove(0).moves;
+        assert!(moves.iter().all(|m| matches!(m, Move::Travel(_) | Move::Cut { .. })));
+        for v in [f64::NAN, -1.0, 5000.0] {
+            if let Some(l) = doc.layer_mut(0) {
+                l.ramp_length = v;
+            }
+            assert!(matches!(plan(&doc), Err(PlanError::BadLayerSetting { .. })), "{v}");
+        }
+        if let Some(l) = doc.layer_mut(0) {
+            l.ramp_length = 5.0;
+            l.min_power = 90.0;
+            l.max_power = 20.0; // minimum above maximum: no ramp, no panic
+        }
+        assert!(plan(&doc).is_ok());
+    }
+}
