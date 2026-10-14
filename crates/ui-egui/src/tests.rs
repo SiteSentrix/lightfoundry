@@ -1080,6 +1080,33 @@ mod machine_tests {
     }
 
     #[test]
+    fn the_head_shows_on_the_canvas_and_a_click_sends_it_there() {
+        use crate::head_ui::{head_world, machine_to_world, world_to_machine};
+        let mut h = connected();
+        h.app.run("machine.set", json!({"origin": "bottom_left", "bed_height": 200}));
+        let m = h.app.session.doc.machine.clone();
+        assert_eq!(machine_to_world(&m, 10.0, 20.0), Point::new(10.0, 180.0));
+        assert_eq!(world_to_machine(&m, Point::new(10.0, 180.0)), Some((10.0, 20.0)));
+        for off in [Point::new(-1.0, 5.0), Point::new(5.0, 201.0), Point::new(f64::NAN, 5.0), Point::new(401.0, 5.0)] {
+            assert_eq!(world_to_machine(&m, off), None, "{off:?}");
+        }
+        pump(&mut h, "status", |h| head_world(&h.app).is_some());
+
+        h.app.move_head_mode = true;
+        h.click(h.at(60.0, 150.0));
+        pump(&mut h, "the head to arrive", |h| position(h).is_some_and(|(x, y)| (x - 60.0).abs() < 1e-6 && (y - 50.0).abs() < 1e-6));
+        let p = head_world(&h.app).unwrap();
+        assert!(p.distance(Point::new(60.0, 150.0)) < 1e-6, "{p:?}");
+
+        h.click(h.at(60.0, 250.0)); // below the bed: refused, the head stays
+        assert!(matches!(&h.app.status, Some((m, true)) if m.contains("outside")), "{:?}", h.app.status);
+        h.frame(vec![Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+        assert!(!h.app.move_head_mode, "Escape leaves the mode");
+        h.app.run("job.set_origin", json!({"start_from": "user_origin"}));
+        assert_eq!(head_world(&h.app), None, "no mapping without absolute coordinates");
+    }
+
+    #[test]
     fn controller_settings_are_read_edited_and_checked_against_the_document() {
         use crate::settings_ui::{Advice, advice};
         let mut h = connected();

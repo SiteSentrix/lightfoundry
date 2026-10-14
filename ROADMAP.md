@@ -122,3 +122,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — presets.** `Document::presets` (named snapshots of a layer's cut settings, capped at
   200, saved with the project) and `preset.save` / `preset.apply` / `preset.delete`; applying keeps
   the layer's name, colour and output switch. Presets section in the layer panel.
+- **2026-10-14 — head on the canvas.** With absolute start the connected machine's position is drawn
+  on the bed (a ring and cross), and "Click the canvas to move the laser there" sends a bounded
+  absolute `$J=G90 G21` jog (`Link::jog_to`); points off the bed are refused, Escape or
+  disconnecting leaves the mode, and nothing is sent while a job runs.
+

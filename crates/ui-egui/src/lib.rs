@@ -3,6 +3,7 @@
 
 mod canvas;
 mod geometry;
+mod head_ui;
 mod menus;
 mod nodes_ui;
 mod panels;
@@ -117,6 +118,8 @@ pub struct LightFoundryApp {
     crop_pct: [f64; 4],
     sharpen_amount: f64,
     preset_name: String,
+    /// While on, a click on the canvas sends the laser head there.
+    move_head_mode: bool,
     /// The project path last added to the recent list.
     recorded_path: Option<PathBuf>,
     allow_close: bool,
@@ -199,6 +202,7 @@ impl LightFoundryApp {
             crop_pct: [0.0; 4],
             sharpen_amount: 1.0,
             preset_name: String::new(),
+            move_head_mode: false,
             recorded_path: None,
             allow_close: false,
             last_title: String::new(),
@@ -473,6 +477,7 @@ impl LightFoundryApp {
     /// Dropping the link cancels any running job (soft reset) before the connection closes.
     pub(crate) fn disconnect(&mut self) {
         self.link = None;
+        self.move_head_mode = false;
         self.snap = None;
         self.last_job = None;
         self.say("Disconnected");
@@ -570,7 +575,9 @@ impl LightFoundryApp {
             nodes_ui::finish(self, false);
         }
         if escape {
-            if self.pen.is_some() || self.node_drag.is_some() {
+            if self.move_head_mode {
+                self.move_head_mode = false;
+            } else if self.pen.is_some() || self.node_drag.is_some() {
                 nodes_ui::cancel(self);
             } else if self.tool != Tool::Select {
                 self.tool = Tool::Select;

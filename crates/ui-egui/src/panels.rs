@@ -495,6 +495,10 @@ fn jog_pad(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ui.label("Speed");
             ui.add(egui::DragValue::new(&mut app.jog_feed).range(10.0..=30_000.0).suffix(" mm/min"));
         });
+        let mut here = app.move_head_mode;
+        if ui.checkbox(&mut here, "Click the canvas to move the laser there").changed() {
+            app.move_head_mode = here;
+        }
         let step = app.jog_step;
         let jog = |app: &mut LightFoundryApp, wx: f64, wy: f64| {
             let (dx, dy) = machine_delta(origin, wx * step, wy * step);
