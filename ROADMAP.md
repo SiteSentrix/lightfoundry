@@ -231,4 +231,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   shapes (Ctrl+G groups) before starting the next, within each layer; `Optimize::start` sets where
   ordering begins instead of the bed's origin. Both are in the Cut order section and
   `job.set_optimize`.
+- **2026-10-14 — MCP resources and prompts.** The server now answers `resources/list` and
+  `resources/read` (document summary, the G-code the job would run now, the command reference) and
+  `prompts/list` / `prompts/get` (design from a description, prepare for cutting, explain the job).
 
