@@ -1321,6 +1321,21 @@ mod import_tests {
     }
 
     #[test]
+    fn cut_order_is_validated_applies_to_the_selection_and_undoes() {
+        let mut s = Session::new();
+        let a = s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 10, "height": 10})).unwrap()["id"].as_u64().unwrap();
+        s.execute("shape.set_order", &json!({"order": 3})).unwrap();
+        assert_eq!(s.doc.shape(a).unwrap().order, 3);
+        for bad in [json!({"order": 5000}), json!({"order": -1001}), json!({"order": "x"}), json!({})] {
+            assert!(s.execute("shape.set_order", &bad).is_err(), "{bad}");
+        }
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(s.doc.shape(a).unwrap().order, 0);
+        s.selection.clear();
+        assert!(s.execute("shape.set_order", &json!({"order": 1})).is_err(), "nothing selected");
+    }
+
+    #[test]
     fn vertical_text_is_a_toggle_that_changes_the_shape_and_undoes() {
         let mut s = Session::new();
         let id = s.execute("text.create", &json!({"text": "ABC", "height": 10})).unwrap()["id"].as_u64().unwrap();

@@ -209,6 +209,7 @@ fn import_svg(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
             kind: ShapeKind::Image { image: Arc::new(raster), width_mm: img.width_mm, height_mm: img.height_mm, adjust: Default::default() },
             cut: None,
             group: None,
+            order: 0,
         };
         ids.push(s.doc.add_shape(shape));
     }
@@ -330,6 +331,7 @@ fn import_image(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         kind: ShapeKind::Image { image: Arc::new(raster), width_mm, height_mm: width_mm * aspect, adjust: Default::default() },
         cut: None,
         group: None,
+        order: 0,
     };
     let id = s.doc.add_shape(shape);
     s.selection = vec![id];

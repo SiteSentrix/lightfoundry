@@ -102,44 +102,48 @@ pub fn plan(doc: &Document) -> Result<Job, PlanError> {
     };
     for layer in doc.layers.iter().filter(|l| l.output) {
         validate(layer)?;
-        let shapes: Vec<&Shape> = doc.shapes.iter().filter(|s| s.layer == layer.id).collect();
-        if shapes.is_empty() {
-            continue;
-        }
-        // Shapes with their own cut settings are planned separately, in order of first appearance;
-        // everything else uses the layer as it is.
-        let mut groups: Vec<(Option<lightfoundry_doc::CutOverride>, Vec<&Shape>)> = Vec::new();
-        for shape in shapes {
-            let key = shape.cut.filter(|c| !c.is_empty());
-            match groups.iter_mut().find(|(k, _)| *k == key) {
-                Some((_, v)) => v.push(shape),
-                None => groups.push((key, vec![shape])),
+        let all: Vec<&Shape> = doc.shapes.iter().filter(|s| s.layer == layer.id).collect();
+        // Lower cut priorities are finished before higher ones (all shapes default to 0).
+        let mut tiers: Vec<i32> = all.iter().map(|s| s.order).collect();
+        tiers.sort_unstable();
+        tiers.dedup();
+        for tier in tiers {
+            let shapes: Vec<&Shape> = all.iter().copied().filter(|s| s.order == tier).collect();
+            // Shapes with their own cut settings are planned separately, in order of first appearance;
+            // everything else uses the layer as it is.
+            let mut groups: Vec<(Option<lightfoundry_doc::CutOverride>, Vec<&Shape>)> = Vec::new();
+            for shape in shapes {
+                let key = shape.cut.filter(|c| !c.is_empty());
+                match groups.iter_mut().find(|(k, _)| *k == key) {
+                    Some((_, v)) => v.push(shape),
+                    None => groups.push((key, vec![shape])),
+                }
             }
-        }
-        groups.sort_by_key(|(k, _)| k.is_some()); // stable: plain shapes first
-        for (key, group) in groups {
-            let effective = key.map(|c| c.apply(layer));
-            let layer_for_group = match &effective {
-                Some(l) => {
-                    validate(l)?;
-                    l
-                }
-                None => layer,
-            };
-            // With "by group", each group of shapes is finished before the next one starts.
-            let buckets: Vec<Vec<&Shape>> = if doc.optimize.by_group { split_by_group(&group) } else { vec![group] };
-            for bucket in buckets {
-                let mut ops = plan_layer(doc, layer_for_group, &bucket, at)?;
-                for op in &mut ops {
-                    total = total.saturating_add(op.moves.len());
-                    if let Some(last) = op.moves.last() {
-                        at = last.target();
+            groups.sort_by_key(|(k, _)| k.is_some()); // stable: plain shapes first
+            for (key, group) in groups {
+                let effective = key.map(|c| c.apply(layer));
+                let layer_for_group = match &effective {
+                    Some(l) => {
+                        validate(l)?;
+                        l
                     }
+                    None => layer,
+                };
+                // With "by group", each group of shapes is finished before the next one starts.
+                let buckets: Vec<Vec<&Shape>> = if doc.optimize.by_group { split_by_group(&group) } else { vec![group] };
+                for bucket in buckets {
+                    let mut ops = plan_layer(doc, layer_for_group, &bucket, at)?;
+                    for op in &mut ops {
+                        total = total.saturating_add(op.moves.len());
+                        if let Some(last) = op.moves.last() {
+                            at = last.target();
+                        }
+                    }
+                    if total > MAX_MOVES {
+                        return Err(PlanError::TooManyMoves);
+                    }
+                    job.ops.append(&mut ops);
                 }
-                if total > MAX_MOVES {
-                    return Err(PlanError::TooManyMoves);
-                }
-                job.ops.append(&mut ops);
             }
         }
     }

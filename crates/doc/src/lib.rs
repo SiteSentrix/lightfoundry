@@ -401,6 +401,9 @@ pub struct Shape {
     /// Shapes sharing a group id are selected and moved together.
     #[serde(default)]
     pub group: Option<GroupId>,
+    /// Cut priority within its layer: lower numbers are cut first, ties keep the drawing order.
+    #[serde(default)]
+    pub order: i32,
 }
 
 /// Per-shape replacement for some of its layer's cut settings; `None` fields keep the layer's value.
@@ -499,7 +502,7 @@ impl Shape {
     }
 
     pub fn path(name: impl Into<String>, layer: LayerId, path: BezPath) -> Shape {
-        Shape { id: 0, name: name.into(), layer, transform: Affine::IDENTITY, kind: ShapeKind::Path { path }, cut: None, group: None }
+        Shape { id: 0, name: name.into(), layer, transform: Affine::IDENTITY, kind: ShapeKind::Path { path }, cut: None, group: None, order: 0 }
     }
 
     /// Flattened outlines in workspace mm. Images yield their bounding rectangle.
@@ -1035,6 +1038,7 @@ mod tests {
                 kind: ShapeKind::Image { image, width_mm: 1.0, height_mm: 1.0, adjust: ImageAdjust::default() },
                 cut: None,
                 group: None,
+                order: 0,
             });
         }
         let json = serde_json::to_string(&doc).unwrap();

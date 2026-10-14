@@ -499,6 +499,7 @@ mod image_tests {
             kind: ShapeKind::Image { image, width_mm: 40.0, height_mm: 40.0, adjust: ImageAdjust::default() },
             cut: None,
             group: None,
+            order: 0,
         });
         h.app.session.revision += 1;
         id

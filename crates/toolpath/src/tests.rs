@@ -354,6 +354,7 @@ mod image_tests {
             kind: ShapeKind::Image { image, width_mm: w as f64, height_mm: h as f64, adjust: Default::default() },
             cut: None,
             group: None,
+            order: 0,
         });
         doc
     }
@@ -688,6 +689,24 @@ mod order_option_tests {
         doc.add_shape(Shape::path("copy", 0, rect_path(10.0, 10.0, 20.0, 20.0)));
         let moves = plan(&doc).unwrap().ops.iter().map(|o| o.moves.len()).sum::<usize>();
         assert!(moves > 0, "the square is still engraved");
+    }
+
+    #[test]
+    fn a_lower_cut_priority_is_finished_first_whatever_the_drawing_order() {
+        let mut doc = rect_doc(10.0, 10.0, LayerMode::Line);
+        let mut second = doc.shapes[0].clone();
+        second.transform = lightfoundry_geom::Affine::translate((50.0, 0.0));
+        let late = doc.add_shape(second);
+        let first_x = |doc: &Document| match plan(doc).unwrap().ops[0].moves[0] {
+            Move::Travel(p) => p.x,
+            m => panic!("{m:?}"),
+        };
+        let drawn_first = first_x(&doc);
+        assert!(drawn_first < 20.0, "{drawn_first}");
+        doc.shape_mut(late).unwrap().order = -1;
+        assert!(first_x(&doc) > 40.0, "the later shape goes first");
+        doc.shape_mut(late).unwrap().order = 5;
+        assert!(first_x(&doc) < 20.0);
     }
 
     #[test]

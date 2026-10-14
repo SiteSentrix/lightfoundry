@@ -294,3 +294,6 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   acknowledges lines when buffered, not when run. A clean finish removes it; otherwise the next start
   shows "A job was interrupted… restart from line N" in the Laser panel, and "Use this line" fills
   Run from line once the same design's G-code is generated (matched by a fingerprint).
+- **2026-10-14 — per-shape cut priority.** `shape.set_order` (Laser menu; "Cut order" in the shape
+  inspector) gives shapes a priority within their layer: lower numbers are finished first, ties keep
+  the drawing order; saved in the project (older files read as 0).
