@@ -74,7 +74,13 @@ fn file_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     }
     ui.separator();
     if ui.button("Save G-code…").clicked() {
-        if let Some(path) = app.pick_save("Save G-code", "job.gcode", &["gcode", "nc"])
+        if app.platform_browser_files() {
+            if let Some(v) = app.run("job.gcode", json!({ "include": true }))
+                && let Some(text) = v["gcode"].as_str()
+            {
+                app.download("job.gcode", text.as_bytes(), "text/plain");
+            }
+        } else if let Some(path) = app.pick_save("Save G-code", "job.gcode", &["gcode", "nc"])
             && app.run("file.export_gcode", json!({ "path": path })).is_some()
         {
             app.say("G-code saved");
@@ -225,6 +231,14 @@ fn item(ui: &mut egui::Ui, label: &str, shortcut: &str) -> bool {
 
 /// Saves (asking for a path when needed). Returns whether the document was saved.
 pub(crate) fn save(app: &mut LightFoundryApp, always_ask: bool) -> bool {
+    if app.platform_browser_files() {
+        let Some(v) = app.run("file.project_data", Value::Null) else { return false };
+        let bytes = v["data_base64"].as_str().and_then(lightfoundry_doc::base64::decode).unwrap_or_default();
+        let name =
+            app.session.path.as_ref().and_then(|p| p.file_name()).map_or("project.lightfoundry".to_string(), |n| n.to_string_lossy().into_owned());
+        app.download(&name, &bytes, "application/json");
+        return true;
+    }
     let path = if always_ask || app.session.path.is_none() { app.pick_save("Save project", "project.lightfoundry", &["lightfoundry"]) } else { None };
     let params = path.map_or(Value::Null, |p| json!({ "path": p }));
     if (always_ask && params.is_null()) || (app.session.path.is_none() && params.is_null()) {
@@ -238,6 +252,15 @@ pub(crate) fn save(app: &mut LightFoundryApp, always_ask: bool) -> bool {
 }
 
 fn import(app: &mut LightFoundryApp, command: &str, title: &str, exts: &[&str]) {
+    if app.platform_browser_files() {
+        let kind = match command {
+            "file.import_svg" => crate::UploadKind::Svg,
+            "file.import_dxf" => crate::UploadKind::Dxf,
+            _ => crate::UploadKind::Image,
+        };
+        app.begin_upload(kind);
+        return;
+    }
     if let Some(path) = app.pick_open(title, exts)
         && app.run(command, json!({ "path": path })).is_some()
     {

@@ -1608,3 +1608,124 @@ mod register_ui_tests {
         assert!(partial.complete().is_none());
     }
 }
+
+mod browser_file_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use lightfoundry_device::Transport;
+
+    use super::*;
+    use crate::{PendingAction, Upload};
+
+    #[derive(Default)]
+    struct Shared {
+        /// The file the "person" will choose next.
+        next: Option<Upload>,
+        requested: Vec<Vec<String>>,
+        downloads: Vec<(String, Vec<u8>)>,
+    }
+
+    struct Browser(Rc<RefCell<Shared>>);
+
+    impl Platform for Browser {
+        fn pick_open(&self, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        fn pick_save(&self, _: &str, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        fn browser_files(&self) -> bool {
+            true
+        }
+
+        fn request_upload(&self, extensions: &[&str]) {
+            self.0.borrow_mut().requested.push(extensions.iter().map(|e| (*e).to_string()).collect());
+        }
+
+        fn take_upload(&self) -> Option<Upload> {
+            self.0.borrow_mut().next.take()
+        }
+
+        fn download(&self, name: &str, bytes: &[u8], _: &str) {
+            self.0.borrow_mut().downloads.push((name.to_string(), bytes.to_vec()));
+        }
+
+        fn serial_ports(&self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn open_serial(&self, _: &str) -> Result<Box<dyn Transport + Send>, String> {
+            Err("none".into())
+        }
+    }
+
+    fn browser() -> (Harness, Rc<RefCell<Shared>>) {
+        let shared = Rc::new(RefCell::new(Shared::default()));
+        let mut h = Harness {
+            ctx: egui::Context::default(),
+            app: LightFoundryApp::new(Session::new(), Box::new(Browser(Rc::clone(&shared)))),
+            time: 0.0,
+            modifiers: Modifiers::NONE,
+            sent_modifiers: Modifiers::NONE,
+        };
+        h.frame(vec![]);
+        (h, shared)
+    }
+
+    #[test]
+    fn saving_downloads_the_project_and_opening_an_upload_restores_it() {
+        let (mut h, shared) = browser();
+        h.app.run("shape.rectangle", json!({"x": 5, "y": 6, "width": 20, "height": 10}));
+        assert!(crate::menus::save(&mut h.app, false));
+        let (name, bytes) = shared.borrow().downloads[0].clone();
+        assert_eq!(name, "project.lightfoundry");
+        assert!(!h.app.session.dirty, "a downloaded project counts as saved");
+        let doc = lightfoundry_format::from_bytes(&bytes).unwrap();
+        assert_eq!(doc.shapes.len(), 1);
+
+        h.app.run("file.new", serde_json::Value::Null);
+        shared.borrow_mut().next = Some(Upload { name: "x.lightfoundry".into(), bytes });
+        h.app.request(PendingAction::Open);
+        assert_eq!(shared.borrow().requested.last().unwrap(), &vec!["lightfoundry".to_string()]);
+        h.frame(vec![]);
+        assert_eq!(h.app.session.doc.shapes.len(), 1);
+        assert!(h.app.awaiting_upload.is_none());
+    }
+
+    #[test]
+    fn imports_take_uploaded_svg_dxf_and_pictures_and_wait_until_a_file_arrives() {
+        let (mut h, shared) = browser();
+        h.app.begin_upload(crate::UploadKind::Svg);
+        h.frame(vec![]);
+        assert!(h.app.awaiting_upload.is_some(), "nothing chosen yet");
+        shared.borrow_mut().next = Some(Upload {
+            name: "a.svg".into(),
+            bytes: br#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm"><rect width="20" height="10"/></svg>"#.to_vec(),
+        });
+        h.frame(vec![]);
+        assert_eq!(h.app.session.doc.shapes.len(), 1);
+
+        let mut png = Vec::new();
+        image::DynamicImage::ImageLuma8(image::GrayImage::from_pixel(4, 4, image::Luma([0])))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        h.app.begin_upload(crate::UploadKind::Image);
+        shared.borrow_mut().next = Some(Upload { name: "dot.png".into(), bytes: png });
+        h.frame(vec![]);
+        assert_eq!(h.app.session.doc.shapes.len(), 2);
+
+        // Junk is reported, not fatal, and does not leave the app waiting.
+        h.app.begin_upload(crate::UploadKind::Dxf);
+        shared.borrow_mut().next = Some(Upload { name: "bad.dxf".into(), bytes: vec![0xff, 0xfe, 0] });
+        h.frame(vec![]);
+        assert!(h.app.awaiting_upload.is_none());
+        h.app.begin_upload(crate::UploadKind::Project);
+        shared.borrow_mut().next = Some(Upload { name: "bad.lightfoundry".into(), bytes: b"{}".to_vec() });
+        h.frame(vec![]);
+        assert!(matches!(&h.app.status, Some((_, true))), "{:?}", h.app.status);
+        assert_eq!(h.app.session.doc.shapes.len(), 2, "a failed open leaves the document alone");
+    }
+}

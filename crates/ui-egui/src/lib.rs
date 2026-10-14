@@ -16,7 +16,7 @@ mod theme;
 mod timeline_ui;
 mod view;
 
-pub use platform::{NoPlatform, Platform};
+pub use platform::{NoPlatform, Platform, Upload};
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -134,6 +134,8 @@ pub struct LightFoundryApp {
     trace_threshold: f64,
     preset_name: String,
     resume_line: usize,
+    /// What a requested upload is for.
+    awaiting_upload: Option<UploadKind>,
     marks: register_ui::Marks,
     auto_reconnect: bool,
     reconnect: Option<Reconnect>,
@@ -147,6 +149,26 @@ pub struct LightFoundryApp {
     recorded_path: Option<PathBuf>,
     allow_close: bool,
     last_title: String,
+}
+
+/// What a file chosen in a browser-style host is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UploadKind {
+    Project,
+    Svg,
+    Dxf,
+    Image,
+}
+
+impl UploadKind {
+    fn extensions(self) -> &'static [&'static str] {
+        match self {
+            UploadKind::Project => &["lightfoundry"],
+            UploadKind::Svg => &["svg"],
+            UploadKind::Dxf => &["dxf"],
+            UploadKind::Image => &["png", "jpg", "jpeg", "bmp", "gif", "webp"],
+        }
+    }
 }
 
 /// Actions that would discard unsaved changes.
@@ -227,6 +249,7 @@ impl LightFoundryApp {
             trace_threshold: 128.0,
             preset_name: String::new(),
             resume_line: 1,
+            awaiting_upload: None,
             marks: register_ui::Marks::default(),
             auto_reconnect: true,
             reconnect: None,
@@ -245,6 +268,7 @@ impl LightFoundryApp {
         self.autosave_tick(ui.ctx());
         self.watch_close_and_title(ui.ctx());
         self.track_recent();
+        self.poll_upload(ui.ctx());
         if !self.has_modal() {
             self.handle_shortcuts(ui.ctx());
         }
@@ -308,6 +332,46 @@ impl LightFoundryApp {
         }
     }
 
+    /// Asks a browser-style host for a file; [`poll_upload`](Self::poll_upload) applies it.
+    pub(crate) fn begin_upload(&mut self, kind: UploadKind) {
+        self.awaiting_upload = Some(kind);
+        self.platform.request_upload(kind.extensions());
+    }
+
+    fn poll_upload(&mut self, ctx: &egui::Context) {
+        let Some(kind) = self.awaiting_upload else { return };
+        let Some(upload) = self.platform.take_upload() else {
+            ctx.request_repaint_after(Duration::from_millis(200));
+            return;
+        };
+        self.awaiting_upload = None;
+        let data = lightfoundry_doc::base64::encode(&upload.bytes);
+        let name = upload.name;
+        let ok = match kind {
+            UploadKind::Project => {
+                let ok = self.run("file.open", serde_json::json!({ "data_base64": data })).is_some();
+                if ok {
+                    self.platform.clear_recovery();
+                    self.autosave_revision = None;
+                    self.view = None;
+                }
+                ok
+            }
+            UploadKind::Svg => self.run("file.import_svg", serde_json::json!({ "data": String::from_utf8_lossy(&upload.bytes) })).is_some(),
+            UploadKind::Dxf => self.run("file.import_dxf", serde_json::json!({ "data": String::from_utf8_lossy(&upload.bytes) })).is_some(),
+            UploadKind::Image => self.run("file.import_image", serde_json::json!({ "data_base64": data, "name": name })).is_some(),
+        };
+        if ok {
+            self.say(format!("Opened {name}"));
+        }
+    }
+
+    /// Hands a finished file to the person as a download.
+    pub(crate) fn download(&mut self, name: &str, bytes: &[u8], mime: &str) {
+        self.platform.download(name, bytes, mime);
+        self.say(format!("Downloaded {name}"));
+    }
+
     /// Adds the project to the recent list whenever the document's path changes (open, save as).
     fn track_recent(&mut self) {
         if self.session.path == self.recorded_path {
@@ -348,6 +412,7 @@ impl LightFoundryApp {
                 self.autosave_revision = None;
                 self.view = None;
             }
+            PendingAction::Open if self.platform.browser_files() => self.begin_upload(UploadKind::Project),
             PendingAction::Open => {
                 if let Some(path) = self.platform.pick_open("Open project", &["lightfoundry"]) {
                     self.run("file.open", serde_json::json!({ "path": path }));
@@ -475,6 +540,10 @@ impl LightFoundryApp {
 
     pub(crate) fn report_error(&mut self, e: &EngineError) {
         self.status = Some((e.to_string(), true));
+    }
+
+    pub(crate) fn platform_browser_files(&self) -> bool {
+        self.platform.browser_files()
     }
 
     pub(crate) fn pick_open(&self, title: &str, exts: &[&str]) -> Option<PathBuf> {

@@ -17,7 +17,24 @@ const DEFAULT_MM_PER_PX: f64 = 0.1;
 
 pub(super) const COMMANDS: &[CommandSpec] = &[
     CommandSpec { id: "file.new", label: "New", menu: "File", shortcut: Some("Ctrl+N"), params_doc: "{}", mutates: false, run: new },
-    CommandSpec { id: "file.open", label: "Open…", menu: "File", shortcut: Some("Ctrl+O"), params_doc: "{path}", mutates: false, run: open },
+    CommandSpec {
+        id: "file.open",
+        label: "Open…",
+        menu: "File",
+        shortcut: Some("Ctrl+O"),
+        params_doc: "{path | data_base64}  — data_base64 is the contents of a .lightfoundry file",
+        mutates: false,
+        run: open,
+    },
+    CommandSpec {
+        id: "file.project_data",
+        label: "Project as Data",
+        menu: "",
+        shortcut: None,
+        params_doc: "{}  — returns the project file's contents as data_base64 and marks the document saved (for hosts that download it, like the browser)",
+        mutates: false,
+        run: project_data,
+    },
     CommandSpec {
         id: "file.save",
         label: "Save",
@@ -50,7 +67,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Import Image…",
         menu: "File/Import",
         shortcut: None,
-        params_doc: "{path, x?, y?, width? (mm), layer?}",
+        params_doc: "{path | data_base64 (+ name?), x?, y?, width? (mm), layer?}",
         mutates: true,
         run: import_image,
     },
@@ -94,12 +111,35 @@ struct PathParams {
     path: PathBuf,
 }
 
+/// Largest image file read, in bytes.
+const MAX_IMAGE_FILE_BYTES: u64 = 256 * 1024 * 1024;
+
+#[derive(Deserialize)]
+struct OpenParams {
+    path: Option<PathBuf>,
+    data_base64: Option<String>,
+}
+
 fn open(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
-    let p: PathParams = parse(params)?;
-    let doc = lightfoundry_format::load(&p.path)?;
+    let p: OpenParams = parse(params)?;
+    let (doc, path) = match (p.path, p.data_base64) {
+        (Some(path), _) => (lightfoundry_format::load(&path)?, Some(path)),
+        (None, Some(data)) => (lightfoundry_format::from_bytes(&decode_data(&data)?)?, None),
+        (None, None) => return Err(EngineError::BadParams("give either path or data_base64".into())),
+    };
     let shapes = doc.shapes.len();
-    s.replace_document(doc, Some(p.path));
+    s.replace_document(doc, path);
     Ok(json!({ "shapes": shapes }))
+}
+
+fn project_data(s: &mut Session, _: &Value) -> Result<Value, EngineError> {
+    let bytes = lightfoundry_format::to_bytes(&s.doc)?;
+    s.dirty = false;
+    Ok(json!({ "data_base64": lightfoundry_doc::base64::encode(&bytes), "bytes": bytes.len() }))
+}
+
+fn decode_data(data: &str) -> Result<Vec<u8>, EngineError> {
+    lightfoundry_doc::base64::decode(data).ok_or_else(|| EngineError::BadParams("data_base64 is not valid base64".into()))
 }
 
 #[derive(Deserialize, Default)]
@@ -215,7 +255,9 @@ fn import_dxf(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
 
 #[derive(Deserialize)]
 struct ImageParams {
-    path: PathBuf,
+    path: Option<PathBuf>,
+    data_base64: Option<String>,
+    name: Option<String>,
     #[serde(default)]
     x: f64,
     #[serde(default)]
@@ -228,7 +270,23 @@ struct ImageParams {
 fn import_image(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let p: ImageParams = parse(params)?;
     finite(&[p.x, p.y])?;
-    let mut reader = ImageReader::open(&p.path)?.with_guessed_format()?;
+    let (mut reader, name) = match (&p.path, &p.data_base64) {
+        (Some(path), _) => {
+            if std::fs::metadata(path)?.len() > MAX_IMAGE_FILE_BYTES {
+                return Err(EngineError::Import("the image file is too large".into()));
+            }
+            (ImageReader::new(std::io::Cursor::new(std::fs::read(path)?)).with_guessed_format()?, file_name(path))
+        }
+        (None, Some(data)) => {
+            if data.len() > MAX_IMAGE_FILE_BYTES as usize * 4 / 3 + 16 {
+                return Err(EngineError::Import("the image file is too large".into()));
+            }
+            let bytes = decode_data(data)?;
+            let name = p.name.clone().map_or_else(|| "image".to_string(), |n| n.chars().take(80).collect());
+            (ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?, name)
+        }
+        (None, None) => return Err(EngineError::BadParams("give either path or data_base64".into())),
+    };
     let mut limits = Limits::default();
     limits.max_alloc = Some(MAX_IMAGE_PIXELS * 8);
     reader.limits(limits);
@@ -240,7 +298,6 @@ fn import_image(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         Some(_) => return Err(EngineError::BadParams("width must be positive".into())),
         None => f64::from(raster.width) * DEFAULT_MM_PER_PX,
     };
-    let name = file_name(&p.path);
     let shape = Shape {
         id: 0,
         name,

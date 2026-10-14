@@ -1564,6 +1564,7 @@ name = "lightfoundry-ui-egui"
 version = "0.1.0"
 dependencies = [
  "egui",
+ "image",
  "kurbo",
  "lightfoundry-device",
  "lightfoundry-doc",
@@ -1581,6 +1582,7 @@ name = "lightfoundry-web"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "js-sys",
  "lightfoundry-device",
  "lightfoundry-engine",
  "lightfoundry-ui-egui",
