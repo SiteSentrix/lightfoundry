@@ -17,6 +17,39 @@ pub fn dither(gray: &[f32], w: usize, h: usize, mode: Dither) -> Vec<f32> {
                 *o = if *g < 128.0 { 1.0 } else { 0.0 };
             }
         }
+        Dither::Atkinson => diffuse(gray, w, h, &mut out, &ATKINSON, 8.0),
+        Dither::Jarvis => diffuse(gray, w, h, &mut out, &JARVIS, 48.0),
+        Dither::Ordered => {
+            let matrix = bayer8();
+            for y in 0..h {
+                for x in 0..w {
+                    let i = y * w + x;
+                    let (Some(o), Some(g)) = (out.get_mut(i), gray.get(i)) else { continue };
+                    let level = (f32::from(matrix[(y % 8) * 8 + x % 8]) + 0.5) / 64.0 * 255.0;
+                    *o = if *g < level { 1.0 } else { 0.0 };
+                }
+            }
+        }
+        Dither::Halftone => {
+            // A 45 degree screen: two crossed cosines make a dot that grows from the cell centre.
+            // The spot function is not uniformly distributed, so the darkness is mapped through its
+            // quantiles; that makes the share of burned pixels follow the picture's tone.
+            let cell = HALFTONE_CELL_PX;
+            let k = std::f32::consts::TAU / cell;
+            let r = std::f32::consts::FRAC_1_SQRT_2;
+            let quantiles = spot_quantiles();
+            for y in 0..h {
+                for x in 0..w {
+                    let i = y * w + x;
+                    let (Some(o), Some(g)) = (out.get_mut(i), gray.get(i)) else { continue };
+                    let (u, v) = ((x + y) as f32 * r, (x as f32 - y as f32) * r);
+                    let level = spot((u * k).cos(), (v * k).cos());
+                    let darkness = (1.0 - *g / 255.0).clamp(0.0, 1.0);
+                    let cut = quantiles[(darkness * (QUANTILES - 1) as f32).round() as usize];
+                    *o = if darkness >= 1.0 || level < cut { 1.0 } else { 0.0 };
+                }
+            }
+        }
         Dither::FloydSteinberg => {
             let mut buf = gray.to_vec();
             for y in 0..h {
@@ -155,4 +188,94 @@ pub(crate) fn plan_image(doc: &Document, layer: &Layer, shape: &Shape) -> Result
         }
     }
     Ok(moves)
+}
+
+/// Steps in the halftone quantile table.
+const QUANTILES: usize = 256;
+
+fn spot(cos_a: f32, cos_b: f32) -> f32 {
+    0.5 + (cos_a + cos_b) * 0.25
+}
+
+/// Values of the spot function at which a given share (index / 255) of a cell lies below.
+fn spot_quantiles() -> [f32; QUANTILES] {
+    const N: usize = 64;
+    let mut values: Vec<f32> = Vec::with_capacity(N * N);
+    for i in 0..N {
+        for j in 0..N {
+            let a = (i as f32 + 0.5) / N as f32 * std::f32::consts::TAU;
+            let b = (j as f32 + 0.5) / N as f32 * std::f32::consts::TAU;
+            values.push(spot(a.cos(), b.cos()));
+        }
+    }
+    values.sort_by(f32::total_cmp);
+    let mut table = [0.0f32; QUANTILES];
+    for (q, slot) in table.iter_mut().enumerate() {
+        let idx = (q * (values.len() - 1)) / (QUANTILES - 1);
+        *slot = values.get(idx).copied().unwrap_or(1.0);
+    }
+    table
+}
+
+/// Halftone cell size in image pixels.
+const HALFTONE_CELL_PX: f32 = 6.0;
+
+/// Error-diffusion kernels as `(dx, dy, weight)`, with the divisor passed separately.
+const ATKINSON: [(isize, usize, f32); 6] = [(1, 0, 1.0), (2, 0, 1.0), (-1, 1, 1.0), (0, 1, 1.0), (1, 1, 1.0), (0, 2, 1.0)];
+const JARVIS: [(isize, usize, f32); 12] = [
+    (1, 0, 7.0),
+    (2, 0, 5.0),
+    (-2, 1, 3.0),
+    (-1, 1, 5.0),
+    (0, 1, 7.0),
+    (1, 1, 5.0),
+    (2, 1, 3.0),
+    (-2, 2, 1.0),
+    (-1, 2, 3.0),
+    (0, 2, 5.0),
+    (1, 2, 3.0),
+    (2, 2, 1.0),
+];
+
+/// Thresholds each pixel and pushes the error onto its neighbours with the given kernel.
+fn diffuse(gray: &[f32], w: usize, h: usize, out: &mut [f32], kernel: &[(isize, usize, f32)], divisor: f32) {
+    let mut buf = gray.to_vec();
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            let old = buf.get(i).copied().unwrap_or(255.0);
+            let new = if old < 128.0 { 0.0 } else { 255.0 };
+            if let Some(o) = out.get_mut(i) {
+                *o = if new == 0.0 { 1.0 } else { 0.0 };
+            }
+            let err = old - new;
+            for &(dx, dy, weight) in kernel {
+                let nx = x as isize + dx;
+                if nx < 0 || nx as usize >= w || y + dy >= h {
+                    continue;
+                }
+                if let Some(c) = buf.get_mut((y + dy) * w + nx as usize) {
+                    *c += err * weight / divisor;
+                }
+            }
+        }
+    }
+}
+
+/// The 8x8 Bayer index matrix (0..=63), built by the usual recursive doubling.
+fn bayer8() -> [u8; 64] {
+    let mut m = [0u8; 64];
+    for y in 0..8usize {
+        for x in 0..8usize {
+            // Interleave the bits of (x ^ y) and y, reversed: the classic closed form.
+            let (mut v, mut xor, mut yy) = (0u8, x ^ y, y);
+            for _ in 0..3 {
+                v = (v << 2) | (((yy & 1) as u8) << 1) | ((xor & 1) as u8);
+                yy >>= 1;
+                xor >>= 1;
+            }
+            m[y * 8 + x] = v;
+        }
+    }
+    m
 }

@@ -470,6 +470,22 @@ mod image_tests {
     }
 
     #[test]
+    fn the_crop_and_sharpen_section_renders_for_a_selected_image_and_the_thumbnail_follows_a_crop() {
+        let mut h = Harness::new();
+        let id = add_gradient(&mut h, Affine::translate((20.0, 20.0)));
+        h.app.run("edit.select", json!({"ids": [id]}));
+        h.app.crop_pct = [25.0, 0.0, 25.0, 50.0];
+        h.frame(vec![]);
+        h.frame(vec![]);
+        let key = h.app.thumbs.cached_key(id);
+        h.app.run("image.crop", json!({"id": id, "left": 0.25, "right": 0.25, "bottom": 0.5}));
+        h.frame(vec![]);
+        assert_ne!(h.app.thumbs.cached_key(id), key, "a cropped picture gets a new thumbnail");
+        let b = h.app.session.doc.shape(id).unwrap().world_bounds().unwrap();
+        assert!((b.x1 - b.x0 - 20.0).abs() < 1e-6 && (b.y1 - b.y0 - 20.0).abs() < 1e-6, "{b:?}");
+    }
+
+    #[test]
     fn rotated_and_flipped_images_render_and_are_selectable() {
         let mut h = Harness::new();
         let id = add_gradient(&mut h, Affine::translate((80.0, 80.0)) * Affine::rotate(0.7) * Affine::scale_non_uniform(-1.0, 1.0));

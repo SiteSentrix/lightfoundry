@@ -140,17 +140,11 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 
         ui.label("Image");
         let mut dither = layer.dither;
-        egui::ComboBox::from_id_salt("dither")
-            .selected_text(match dither {
-                Dither::Threshold => "Threshold",
-                Dither::FloydSteinberg => "Floyd–Steinberg",
-                Dither::Grayscale => "Grayscale",
-            })
-            .show_ui(ui, |ui| {
-                ui.selectable_value(&mut dither, Dither::Threshold, "Threshold");
-                ui.selectable_value(&mut dither, Dither::FloydSteinberg, "Floyd–Steinberg");
-                ui.selectable_value(&mut dither, Dither::Grayscale, "Grayscale");
-            });
+        egui::ComboBox::from_id_salt("dither").selected_text(dither.label()).show_ui(ui, |ui| {
+            for d in Dither::ALL {
+                ui.selectable_value(&mut dither, d, d.label());
+            }
+        });
         if dither != layer.dither {
             app.run("layer.set", json!({ "id": layer.id, "dither": dither }));
         }
@@ -695,7 +689,34 @@ fn image_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     if let Some(params) = commit {
         app.run("image.adjust", params);
     }
+    crop_and_sharpen(app, ui, id);
     ui.weak("The dither mode for engraving is set on the layer (Cuts / Layers).");
+}
+
+fn crop_and_sharpen(app: &mut LightFoundryApp, ui: &mut egui::Ui, id: u64) {
+    ui.collapsing("Crop and sharpen", |ui| {
+        egui::Grid::new("image_crop").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+            for (label, slot) in ["Cut off left", "Cut off top", "Cut off right", "Cut off bottom"].into_iter().zip(app.crop_pct.iter_mut()) {
+                ui.label(label);
+                ui.add(egui::DragValue::new(slot).range(0.0..=95.0).speed(0.5).suffix(" %").max_decimals(1));
+                ui.end_row();
+            }
+        });
+        let [left, top, right, bottom] = app.crop_pct.map(|p| p / 100.0);
+        let fits = left + right < 1.0 && top + bottom < 1.0;
+        if ui.add_enabled(fits && app.crop_pct.iter().any(|p| *p > 0.0), egui::Button::new("Crop")).clicked()
+            && app.run("image.crop", json!({ "id": id, "left": left, "top": top, "right": right, "bottom": bottom })).is_some()
+        {
+            app.crop_pct = [0.0; 4];
+        }
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut app.sharpen_amount).range(0.0..=5.0).speed(0.05).max_decimals(2));
+            if ui.button("Sharpen").clicked() {
+                app.run("image.sharpen", json!({ "id": id, "amount": app.sharpen_amount }));
+            }
+        });
+        ui.weak("Both change the stored picture (Undo brings it back).");
+    });
 }
 
 /// Grid and circular arrays of the current selection.

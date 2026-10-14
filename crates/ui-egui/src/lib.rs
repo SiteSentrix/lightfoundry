@@ -113,6 +113,9 @@ pub struct LightFoundryApp {
     /// An action waiting for "save changes?" to be answered.
     pending_action: Option<PendingAction>,
     recent: recent::Recent,
+    /// Percentages to cut off the left, top, right and bottom of the selected image.
+    crop_pct: [f64; 4],
+    sharpen_amount: f64,
     /// The project path last added to the recent list.
     recorded_path: Option<PathBuf>,
     allow_close: bool,
@@ -192,6 +195,8 @@ impl LightFoundryApp {
             pending_recovery,
             pending_action: None,
             recent,
+            crop_pct: [0.0; 4],
+            sharpen_amount: 1.0,
             recorded_path: None,
             allow_close: false,
             last_title: String::new(),

@@ -108,4 +108,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   removal compares outlines after rounding to 0.1 µm, either direction and any start vertex, and
   applies to fills too (two identical shapes would otherwise cancel under even-odd). Laser panel
   gets a Cut order section.
+- **2026-10-14 — image crop, sharpen and more dithers.** `image.crop` (fractions per side; the
+  remaining picture stays where it was) and `image.sharpen` (3x3 unsharp mask) edit the stored
+  pixels and are undoable; Atkinson, Jarvis, ordered (8x8 Bayer) and halftone (45 degree dot
+  screen mapped through the spot function's quantiles so tone is preserved) join threshold,
+  Floyd-Steinberg and grayscale. Image inspector gets a Crop and sharpen section.
 

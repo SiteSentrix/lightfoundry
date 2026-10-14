@@ -456,6 +456,48 @@ mod image_tests {
         let mean: f32 = out.iter().sum::<f32>() / out.len() as f32;
         assert!((mean - 0.5).abs() < 0.05, "{mean}");
     }
+
+    #[test]
+    fn every_dither_mode_keeps_the_overall_tone_and_the_extremes() {
+        use lightfoundry_doc::Dither;
+        for mode in Dither::ALL {
+            if mode == Dither::Threshold {
+                continue; // a threshold has no tone to keep, only the extremes below
+            }
+            for (level, expected) in [(64.0f32, 0.75f32), (128.0, 0.5), (192.0, 0.25)] {
+                let out = dither(&vec![level; 120 * 120], 120, 120, mode);
+                let mean: f32 = out.iter().sum::<f32>() / out.len() as f32;
+                let tolerance = if mode == Dither::Atkinson { 0.25 } else { 0.06 }; // Atkinson drops a quarter of the error on purpose
+                assert!((mean - expected).abs() < tolerance, "{mode:?} at {level}: {mean}");
+            }
+            let white = dither(&vec![255.0; 40 * 40], 40, 40, mode);
+            let black = dither(&vec![0.0; 40 * 40], 40, 40, mode);
+            assert!(white.iter().all(|v| *v == 0.0), "{mode:?}: white burns nothing");
+            assert!(black.iter().all(|v| *v == 1.0), "{mode:?}: black burns everything");
+        }
+    }
+
+    #[test]
+    fn dithers_survive_odd_sizes_and_mismatched_buffers() {
+        use lightfoundry_doc::Dither;
+        for mode in Dither::ALL {
+            assert!(dither(&[], 0, 0, mode).is_empty());
+            assert_eq!(dither(&[10.0], 1, 1, mode).len(), 1);
+            assert_eq!(dither(&[10.0; 5], 3, 3, mode).len(), 5, "{mode:?}: a short buffer must not index out of range");
+            assert_eq!(dither(&[99.0; 7 * 3], 7, 3, mode).len(), 21);
+        }
+    }
+
+    #[test]
+    fn the_bayer_ordered_pattern_is_regular_and_a_halftone_forms_dots() {
+        use lightfoundry_doc::Dither;
+        let g = vec![128.0f32; 16 * 16];
+        let out = dither(&g, 16, 16, Dither::Ordered);
+        assert_eq!(out[..8], out[8..16], "the 8-pixel tile repeats");
+        let half = dither(&vec![128.0; 48 * 48], 48, 48, Dither::Halftone);
+        let rows_with_both = (0..48).filter(|y| half[y * 48..(y + 1) * 48].contains(&1.0) && half[y * 48..(y + 1) * 48].contains(&0.0)).count();
+        assert!(rows_with_both > 40, "dots, not a solid fill: {rows_with_both}");
+    }
 }
 
 mod validation_tests {
