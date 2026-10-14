@@ -1945,3 +1945,36 @@ mod autosave_generation_tests {
         assert!(!matches!(&h.app.status, Some((m, true)) if m.contains("backup")));
     }
 }
+
+mod preset_library_tests {
+    use super::*;
+
+    #[test]
+    fn the_library_merges_both_ways_and_survives_damaged_files() {
+        let dir = temp_dir("library");
+        let file = dir.join("deep").join("presets.json");
+        let mut h = Harness::new();
+        h.app.run("layer.set", json!({"id": 0, "speed": 250}));
+        h.app.run("preset.save", json!({"name": "A", "layer": 0}));
+        h.app.save_preset_library(&file);
+        h.app.run("preset.save", json!({"name": "B", "layer": 0}));
+        h.app.save_preset_library(&file);
+        let stored: Vec<serde_json::Value> = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(stored.len(), 2, "saving again only adds what is new");
+
+        let mut other = Harness::new();
+        other.app.load_preset_library(&file);
+        assert_eq!(other.app.session.doc.presets.len(), 2);
+        assert_eq!(other.app.session.doc.presets[0].settings.speed, 250.0);
+
+        for bad in [&b"not json"[..], b"{\"a\":1}", b"[1,2,3]", b"[{\"name\":\"x\"}]"] {
+            std::fs::write(&file, bad).unwrap();
+            let mut h = Harness::new();
+            h.app.load_preset_library(&file); // reports, never panics
+            assert!(h.app.session.doc.presets.is_empty());
+        }
+        let mut h = Harness::new();
+        h.app.load_preset_library(&dir.join("missing.json"));
+        assert!(matches!(&h.app.status, Some((m, false)) if m.contains("empty")), "{:?}", h.app.status);
+    }
+}

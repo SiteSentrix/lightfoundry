@@ -575,6 +575,43 @@ impl LightFoundryApp {
         self.status = Some((e.to_string(), true));
     }
 
+    pub(crate) fn platform_preset_library(&self) -> Option<PathBuf> {
+        self.platform.preset_library_file()
+    }
+
+    /// Merges the project's presets into the shared library file (names already there are kept).
+    pub(crate) fn save_preset_library(&mut self, file: &std::path::Path) {
+        let Some(v) = self.run("preset.export", Value::Null) else { return };
+        let mut library = read_library(file);
+        let known: Vec<String> = library.iter().filter_map(|p| p["name"].as_str().map(String::from)).collect();
+        let mut added = 0;
+        for preset in v["presets"].as_array().cloned().unwrap_or_default() {
+            if preset["name"].as_str().is_some_and(|n| !known.iter().any(|k| k == n)) {
+                library.push(preset);
+                added += 1;
+            }
+        }
+        if let Some(parent) = file.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match serde_json::to_string_pretty(&library).map(|text| std::fs::write(file, text)) {
+            Ok(Ok(())) => self.say(format!("{added} preset(s) added to your library")),
+            _ => self.status = Some(("Could not write the preset library".into(), true)),
+        }
+    }
+
+    /// Adds the library's presets to the project.
+    pub(crate) fn load_preset_library(&mut self, file: &std::path::Path) {
+        let library = read_library(file);
+        if library.is_empty() {
+            self.say("Your preset library is empty");
+            return;
+        }
+        if let Some(v) = self.run("preset.import", serde_json::json!({ "presets": library })) {
+            self.say(format!("{} preset(s) added from your library", v["added"]));
+        }
+    }
+
     pub(crate) fn platform_browser_files(&self) -> bool {
         self.platform.browser_files()
     }
@@ -842,4 +879,13 @@ pub(crate) enum Answer {
 pub(crate) fn window_title(session: &Session) -> String {
     let name = session.path.as_ref().and_then(|p| p.file_name()).map_or("Untitled".to_string(), |n| n.to_string_lossy().into_owned());
     format!("{}{name} — LightFoundry", if session.dirty { "*" } else { "" })
+}
+
+/// The presets in a library file; a missing, oversized or damaged file is an empty library.
+fn read_library(file: &std::path::Path) -> Vec<Value> {
+    const MAX_BYTES: u64 = 8 * 1024 * 1024;
+    if std::fs::metadata(file).map_or(true, |m| m.len() > MAX_BYTES) {
+        return Vec::new();
+    }
+    std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str::<Vec<Value>>(&t).ok()).unwrap_or_default()
 }

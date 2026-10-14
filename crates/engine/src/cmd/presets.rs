@@ -36,6 +36,24 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         mutates: true,
         run: add_starters,
     },
+    CommandSpec {
+        id: "preset.export",
+        label: "Export Presets",
+        menu: "",
+        shortcut: None,
+        params_doc: "{}  — returns every preset in the project as {presets: [...]}, for keeping in a library shared between projects",
+        mutates: false,
+        run: export,
+    },
+    CommandSpec {
+        id: "preset.import",
+        label: "Import Presets",
+        menu: "",
+        shortcut: None,
+        params_doc: "{presets: [...]}  — adds presets from a library; names already in the project are kept as they are",
+        mutates: true,
+        run: import,
+    },
     CommandSpec { id: "preset.delete", label: "Delete Preset", menu: "Laser", shortcut: None, params_doc: "{name}", mutates: true, run: delete },
 ];
 
@@ -122,6 +140,39 @@ fn add_starters(s: &mut Session, _: &Value) -> Result<Value, EngineError> {
         settings.passes = *passes;
         settings.interval = *interval;
         s.doc.presets.push(Preset { name: (*name).to_string(), settings });
+        added += 1;
+    }
+    Ok(json!({ "added": added, "count": s.doc.presets.len() }))
+}
+
+fn export(s: &mut Session, _: &Value) -> Result<Value, EngineError> {
+    Ok(json!({ "presets": s.doc.presets }))
+}
+
+#[derive(Deserialize)]
+struct ImportParams {
+    presets: Vec<Preset>,
+}
+
+fn import(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: ImportParams = parse(params)?;
+    let mut added = 0;
+    for mut preset in p.presets {
+        preset.name = clean(&preset.name)?;
+        if s.doc.presets.iter().any(|x| x.name == preset.name) {
+            continue;
+        }
+        if s.doc.presets.len() >= MAX_PRESETS {
+            return Err(EngineError::BadParams(format!("at most {MAX_PRESETS} presets can be kept")));
+        }
+        // A library entry could come from anywhere: refuse settings the planner would reject.
+        let l = &preset.settings;
+        let ok =
+            l.speed.is_finite() && l.speed > 0.0 && l.interval.is_finite() && l.interval > 0.0 && l.min_power.is_finite() && l.max_power.is_finite();
+        if !ok {
+            return Err(EngineError::BadParams(format!("preset {} has unusable settings", preset.name)));
+        }
+        s.doc.presets.push(preset);
         added += 1;
     }
     Ok(json!({ "added": added, "count": s.doc.presets.len() }))

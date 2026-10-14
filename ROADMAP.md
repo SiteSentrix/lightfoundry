@@ -234,4 +234,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — MCP resources and prompts.** The server now answers `resources/list` and
   `resources/read` (document summary, the G-code the job would run now, the command reference) and
   `prompts/list` / `prompts/get` (design from a description, prepare for cutting, explain the job).
+- **2026-10-14 — shared preset library.** `preset.export` / `preset.import` (validated, names
+  already present kept) and a per-user `presets.json` (via `Platform::preset_library_file`): the
+  Presets section can save the project's presets to the library and add the library's to a project.
 
