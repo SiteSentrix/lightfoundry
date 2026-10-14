@@ -589,6 +589,9 @@ fn shape_operations(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             }
         });
     });
+    if ui.button("Join paths").on_hover_text("Chain open lines whose ends meet into paths, closing loops").clicked() {
+        app.run("path.join", json!({}));
+    }
     ui.horizontal(|ui| {
         ui.label("Offset");
         ui.add(egui::DragValue::new(&mut app.offset_distance).range(-1000.0..=1000.0).speed(0.1).suffix(" mm"));

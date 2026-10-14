@@ -52,3 +52,6 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   title with an unsaved marker. Found by killing the app with `kill -9`: egui only repaints on
   input, so an idle window never autosaved; a repaint is now scheduled while there are unsaved
   changes (with a regression test).
+- **2026-10-14 — join.** `pathops::join` chains open polylines whose ends meet (grid-hashed, closes
+  loops, bounded) and `path.join` applies it per layer. DXF import joins loose segments by default
+  (`join: false` to keep them), so outlines drawn as separate LINEs become closed, fillable shapes.
