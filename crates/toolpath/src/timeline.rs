@@ -46,23 +46,37 @@ pub struct Moment {
     pub into_pass: f64,
 }
 
-/// Seconds the head takes to reach `m` from `from`.
-pub fn move_seconds(from: Point, m: &Move, speed: f64, rapid_speed: f64) -> f64 {
+/// Seconds the head takes to reach `m` from `from`. With an `acceleration` (mm/s²) each move is
+/// timed as starting and ending at rest (speeding up and slowing down at that rate), which is
+/// pessimistic for long smooth curves but realistic for short segments; 0 means instant speed changes.
+pub fn move_seconds(from: Point, m: &Move, speed: f64, rapid_speed: f64, acceleration: f64) -> f64 {
     let d = from.distance(m.target());
     let rapid = if rapid_speed.is_finite() && rapid_speed > 0.0 { rapid_speed } else { DEFAULT_RAPID };
-    match m {
-        Move::Travel(_) => d / (rapid / 60.0),
-        Move::Cut { .. } => d / (speed.max(1.0) / 60.0),
+    let feed = match m {
+        Move::Travel(_) => rapid,
+        Move::Cut { .. } => speed.max(1.0),
+    };
+    let v = feed / 60.0; // mm/s
+    if !(acceleration.is_finite() && acceleration > 0.0) {
+        return d / v;
     }
+    // Trapezoid: reach `v` and hold it, or (on short moves) never get there.
+    let ramp = v * v / acceleration; // distance to speed up and slow down together
+    if d >= ramp { d / v + v / acceleration } else { 2.0 * (d / acceleration).sqrt() }
 }
 
 impl Timeline {
     pub fn new(job: &Job, rapid_speed: f64) -> Timeline {
+        Timeline::with_acceleration(job, rapid_speed, 0.0)
+    }
+
+    /// Like [`new`](Timeline::new), with the machine's acceleration in mm/s² (0 = ignore it).
+    pub fn with_acceleration(job: &Job, rapid_speed: f64, acceleration: f64) -> Timeline {
         let mut t = Timeline::default();
         // The head's real starting position is unknown; the job is taken to begin at the origin.
         let mut at = Point::ORIGIN;
         for op in &job.ops {
-            let (pass_seconds, cut_mm, travel_mm) = one_pass(op, &mut at, rapid_speed);
+            let (pass_seconds, cut_mm, travel_mm) = one_pass(op, &mut at, rapid_speed, acceleration);
             let passes = op.passes.max(1);
             t.ops.push(OpTime { layer: op.layer, start: t.total, pass_seconds, passes, cut_mm, travel_mm });
             t.total += pass_seconds * f64::from(passes);
@@ -112,11 +126,11 @@ impl Timeline {
     }
 }
 
-fn one_pass(op: &Op, at: &mut Point, rapid_speed: f64) -> (f64, f64, f64) {
+fn one_pass(op: &Op, at: &mut Point, rapid_speed: f64, acceleration: f64) -> (f64, f64, f64) {
     let (mut seconds, mut cut, mut travel) = (0.0, 0.0, 0.0);
     for m in &op.moves {
         let d = at.distance(m.target());
-        seconds += move_seconds(*at, m, op.speed, rapid_speed);
+        seconds += move_seconds(*at, m, op.speed, rapid_speed, acceleration);
         match m {
             Move::Travel(_) => travel += d,
             Move::Cut { .. } => cut += d,

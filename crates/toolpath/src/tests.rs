@@ -534,6 +534,30 @@ mod timeline_tests {
     use super::*;
 
     #[test]
+    fn acceleration_makes_short_moves_slower_per_millimetre_than_long_ones() {
+        let cut = |x: f64| Move::Cut { to: Point::new(x, 0.0), power: 50.0 };
+        let (speed, accel) = (3000.0, 500.0); // 50 mm/s, 500 mm/s²: 2.5 mm to reach speed
+        let none = |d: f64| move_seconds(Point::ORIGIN, &cut(d), speed, 6000.0, 0.0);
+        let with = |d: f64| move_seconds(Point::ORIGIN, &cut(d), speed, 6000.0, accel);
+        assert!((none(100.0) - 2.0).abs() < 1e-12);
+        assert!((with(100.0) - (2.0 + 0.1)).abs() < 1e-9, "a long move adds the time to speed up and slow down: {}", with(100.0));
+        assert!((with(1.0) - 2.0 * (1.0_f64 / 500.0).sqrt()).abs() < 1e-12, "a 1 mm move never reaches speed");
+        assert!(with(1.0) / 1.0 > with(100.0) / 100.0, "short moves cost more per millimetre");
+        assert!(with(1e-9) < 1e-3 && with(0.0) == 0.0);
+        for bad in [f64::NAN, -5.0, f64::INFINITY] {
+            assert_eq!(move_seconds(Point::ORIGIN, &cut(100.0), speed, 6000.0, bad), none(100.0), "{bad} is ignored");
+        }
+    }
+
+    #[test]
+    fn a_job_with_acceleration_takes_longer_but_cuts_the_same_distance() {
+        let job = plan(&two_layer_doc(1)).unwrap();
+        let (plain, accel) = (Timeline::new(&job, 6000.0), Timeline::with_acceleration(&job, 6000.0, 200.0));
+        assert!(accel.total > plain.total);
+        assert!((accel.cut_mm() - plain.cut_mm()).abs() < 1e-9);
+    }
+
+    #[test]
     fn totals_match_the_estimate_and_layers_add_up() {
         let job = plan(&two_layer_doc(2)).unwrap();
         let t = Timeline::new(&job, 6000.0);
@@ -817,6 +841,15 @@ mod trace_tests {
         let exact = run(&refs, 0.0, 0.0);
         let loose = run(&refs, 1.0, 0.0);
         assert!(loose[0].points.len() < 8 && exact[0].points.len() > 30, "{} vs {}", loose[0].points.len(), exact[0].points.len());
+    }
+
+    #[test]
+    fn tracing_gives_the_same_answer_every_time() {
+        let rows = ["..####..", ".######.", "########", "########", ".######.", "..####..", "#......#", ".#....#."];
+        let first = run(&rows, 1.0, 0.0);
+        for _ in 0..20 {
+            assert_eq!(run(&rows, 1.0, 0.0), first);
+        }
     }
 
     #[test]

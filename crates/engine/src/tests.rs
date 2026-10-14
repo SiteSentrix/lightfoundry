@@ -1287,6 +1287,21 @@ mod import_tests {
     }
 
     #[test]
+    fn acceleration_is_a_validated_machine_setting_that_lengthens_the_estimate() {
+        let mut s = Session::new();
+        s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 30, "height": 20})).unwrap();
+        let secs = |s: &mut Session| s.execute("job.estimate", &Value::Null).unwrap()["seconds"].as_f64().unwrap();
+        let plain = secs(&mut s);
+        s.execute("machine.set", &json!({"acceleration": 100})).unwrap();
+        assert!(secs(&mut s) > plain);
+        for bad in [json!({"acceleration": -1}), json!({"acceleration": 1e9}), json!({"acceleration": "fast"})] {
+            assert!(s.execute("machine.set", &bad).is_err(), "{bad}");
+        }
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(secs(&mut s), plain);
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

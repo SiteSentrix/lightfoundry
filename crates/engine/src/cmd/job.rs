@@ -184,7 +184,7 @@ fn gcode(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
 
 fn estimate(s: &mut Session, _: &Value) -> Result<Value, EngineError> {
     let job = lightfoundry_toolpath::plan(&s.job_doc())?;
-    let t = lightfoundry_toolpath::Timeline::new(&job, s.doc.machine.rapid_speed);
+    let t = lightfoundry_toolpath::Timeline::with_acceleration(&job, s.doc.machine.rapid_speed, s.doc.machine.acceleration);
     let layers: Vec<Value> = t
         .layers()
         .iter()

@@ -61,7 +61,9 @@ pub fn trace(w: usize, h: usize, inside: impl Fn(usize, usize) -> bool, toleranc
     }
 
     let mut loops = Vec::new();
-    let starts: Vec<(i32, i32)> = out_edges.keys().copied().collect();
+    // A fixed order (top row first) keeps the result the same from run to run.
+    let mut starts: Vec<(i32, i32)> = out_edges.keys().copied().collect();
+    starts.sort_by_key(|&(x, y)| (y, x));
     for start in starts {
         while let Some(d0) = out_edges.get(&start).and_then(|e| e.iter().position(|b| *b)) {
             let mut ring = Vec::new();

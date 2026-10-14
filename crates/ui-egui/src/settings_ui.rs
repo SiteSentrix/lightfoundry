@@ -16,6 +16,8 @@ pub enum Advice {
     LaserModeOff,
     /// `$30` differs from the document's S max, so power percentages would come out wrong.
     SMaxDiffers(u32),
+    /// `$120`/`$121` (accelerations) differ from what time estimates use.
+    AccelDiffers(f64),
     /// `$130`/`$131` differ from the document's bed size.
     BedDiffers(f64, f64),
 }
@@ -32,6 +34,12 @@ pub fn advice(settings: &BTreeMap<u32, String>, machine: &Machine) -> Vec<Advice
         && (s - f64::from(machine.max_s)).abs() > 0.5
     {
         out.push(Advice::SMaxDiffers(s.round() as u32));
+    }
+    if let (Some(x), Some(y)) = (num(120), num(121)) {
+        let slower = x.min(y);
+        if slower >= 1.0 && (slower - machine.acceleration).abs() > 0.5 {
+            out.push(Advice::AccelDiffers(slower));
+        }
     }
     if let (Some(w), Some(h)) = (num(130), num(131))
         && w >= 1.0
@@ -94,6 +102,12 @@ fn advice_row(app: &mut LightFoundryApp, ui: &mut egui::Ui, a: Advice, busy: boo
             ui.label(format!("Controller S max is {s}; the document uses {}.", app.session.doc.machine.max_s));
             if ui.button("Use controller's").clicked() {
                 app.run("machine.set", json!({ "max_s": s }));
+            }
+        }
+        Advice::AccelDiffers(a) => {
+            ui.label(format!("Controller acceleration is {a} mm/s²; time estimates use {}.", app.session.doc.machine.acceleration));
+            if ui.button("Use controller's").clicked() {
+                app.run("machine.set", json!({ "acceleration": a }));
             }
         }
         Advice::BedDiffers(w, h) => {
