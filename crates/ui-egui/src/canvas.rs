@@ -195,7 +195,10 @@ fn create(app: &mut LightFoundryApp, a: Point, b: Point) {
     match app.tool {
         Tool::Select | Tool::Text => {}
         Tool::Rectangle if w > MIN_CREATE_MM && h > MIN_CREATE_MM => {
-            app.run("shape.rectangle", json!({ "x": a.x.min(b.x), "y": a.y.min(b.y), "width": w, "height": h, "layer": layer }));
+            app.run(
+                "shape.rectangle",
+                json!({ "x": a.x.min(b.x), "y": a.y.min(b.y), "width": w, "height": h, "radius": app.corner_radius, "layer": layer }),
+            );
         }
         Tool::Ellipse if w > MIN_CREATE_MM && h > MIN_CREATE_MM => {
             app.run("shape.ellipse", json!({ "cx": (a.x + b.x) / 2.0, "cy": (a.y + b.y) / 2.0, "rx": w / 2.0, "ry": h / 2.0, "layer": layer }));

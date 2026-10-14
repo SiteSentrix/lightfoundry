@@ -163,6 +163,20 @@ pub fn ellipse_path(cx: f64, cy: f64, rx: f64, ry: f64) -> BezPath {
     path
 }
 
+/// Rectangle with rounded corners (radius clamped to half the shorter side), closed.
+pub fn rounded_rect_path(x: f64, y: f64, w: f64, h: f64, radius: f64) -> BezPath {
+    use kurbo::Shape;
+    let r = if radius.is_finite() { radius.clamp(0.0, w.abs().min(h.abs()) / 2.0) } else { 0.0 };
+    if r <= 0.0 {
+        return rect_path(x, y, w, h);
+    }
+    let mut path = kurbo::RoundedRect::new(x, y, x + w, y + h, r).to_path(0.01);
+    if !matches!(path.elements().last(), Some(kurbo::PathEl::ClosePath)) {
+        path.close_path();
+    }
+    path
+}
+
 pub fn line_path(a: Point, b: Point) -> BezPath {
     let mut p = BezPath::new();
     p.move_to(a);
@@ -199,6 +213,21 @@ mod tests {
             assert_eq!(lines.len(), 1);
             assert!(lines[0].closed, "an ellipse must be a closed polyline");
             assert!(lines[0].contains(Point::new(5.0, 5.0)) && !lines[0].contains(Point::new(5.0, 9.0)));
+        }
+
+        #[test]
+        fn rounded_rectangles_are_closed_clamped_and_cut_the_corners() {
+            let sharp = flatten(&rect_path(0.0, 0.0, 20.0, 10.0), 0.01);
+            let round = flatten(&rounded_rect_path(0.0, 0.0, 20.0, 10.0, 3.0), 0.01);
+            assert!(round[0].closed);
+            assert!(round[0].length() < sharp[0].length(), "corners are shorter than the right angle");
+            assert!(!round[0].contains(Point::new(0.1, 0.1)) && round[0].contains(Point::new(10.0, 5.0)));
+            // A radius larger than half the short side becomes a stadium, not a mess.
+            let huge = flatten(&rounded_rect_path(0.0, 0.0, 20.0, 10.0, 99.0), 0.01);
+            let b = bounds_of_polylines(&huge).unwrap();
+            assert!((b.width() - 20.0).abs() < 1e-6 && (b.height() - 10.0).abs() < 1e-6);
+            assert_eq!(flatten(&rounded_rect_path(0.0, 0.0, 5.0, 5.0, f64::NAN), 0.01)[0].points.len(), 4);
+            assert_eq!(flatten(&rounded_rect_path(0.0, 0.0, 5.0, 5.0, -2.0), 0.01)[0].points.len(), 4);
         }
 
         #[test]

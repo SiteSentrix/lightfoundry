@@ -1,5 +1,6 @@
 //! The command registry. One `CommandSpec` per user-visible action; modules group them by menu.
 
+mod arrange;
 mod edit;
 mod file;
 mod image;
@@ -36,6 +37,7 @@ pub fn commands() -> impl Iterator<Item = &'static CommandSpec> {
         .iter()
         .chain(text::COMMANDS)
         .chain(pathops::COMMANDS)
+        .chain(arrange::COMMANDS)
         .chain(edit::COMMANDS)
         .chain(setup::COMMANDS)
         .chain(file::COMMANDS)

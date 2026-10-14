@@ -456,6 +456,34 @@ mod image_tests {
     }
 }
 
+mod array_and_radius_tests {
+    use super::*;
+
+    #[test]
+    fn the_rectangle_tool_uses_the_corner_radius() {
+        let mut h = Harness::new();
+        h.app.tool = Tool::Rectangle;
+        h.app.corner_radius = 6.0;
+        h.drag(h.at(50.0, 50.0), h.at(110.0, 100.0));
+        let shape = &h.app.session.doc.shapes[0];
+        assert_eq!(shape.name, "Rounded rectangle", "{:?}", h.app.status);
+        assert!(!shape.world_polylines()[0].contains(Point::new(50.2, 50.2)), "the corner is cut away");
+    }
+
+    #[test]
+    fn the_array_section_drives_both_array_commands() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
+        h.frame(vec![]); // renders the Array section
+        h.app.array_columns = 2;
+        h.app.array_rows = 2;
+        h.app.run("arrange.grid", json!({"columns": h.app.array_columns, "rows": h.app.array_rows}));
+        assert_eq!(h.app.session.doc.shapes.len(), 4);
+        h.app.run("arrange.circular", json!({"count": h.app.array_count, "radius": h.app.array_radius}));
+        assert_eq!(h.app.session.doc.shapes.len(), 4 * 6, "the whole grid is rotated as one selection");
+    }
+}
+
 mod shape_operation_tests {
     use super::*;
 

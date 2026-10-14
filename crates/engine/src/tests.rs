@@ -129,6 +129,92 @@ mod edit_tests {
     }
 }
 
+mod array_tests {
+    use super::*;
+
+    fn square(s: &mut Session) -> u64 {
+        s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap()["id"].as_u64().unwrap()
+    }
+
+    #[test]
+    fn a_grid_array_lays_copies_out_by_size_plus_gap() {
+        let mut s = Session::new();
+        square(&mut s);
+        let v = s.execute("arrange.grid", &json!({"columns": 3, "rows": 2, "gap_x": 4, "gap_y": 6})).unwrap();
+        assert_eq!(v["count"], json!(6));
+        assert_eq!(s.doc.shapes.len(), 6);
+        let b = s.doc.bounds_of(&s.selection).unwrap();
+        assert_eq!((b.x0, b.y0, b.x1, b.y1), (0.0, 0.0, 38.0, 26.0), "3 squares + 2 gaps wide, 2 squares + 1 gap tall");
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(s.doc.shapes.len(), 1, "one undo step");
+    }
+
+    #[test]
+    fn a_circular_array_spaces_copies_evenly_and_keeps_the_radius() {
+        let mut s = Session::new();
+        square(&mut s);
+        s.execute("arrange.circular", &json!({"count": 4, "radius": 50})).unwrap();
+        assert_eq!(s.doc.shapes.len(), 4);
+        // Array centre is 50 mm below the square's centre (5,5): (5,55). Every copy's centre is 50 mm from it.
+        let centre = lightfoundry_geom::Point::new(5.0, 55.0);
+        for sh in &s.doc.shapes {
+            let c = sh.world_bounds().unwrap().center();
+            assert!((c.distance(centre) - 50.0).abs() < 1e-6, "{c:?}");
+        }
+        let top = s.doc.shapes.iter().map(|sh| sh.world_bounds().unwrap().center().y).fold(f64::INFINITY, f64::min);
+        assert!((top - 5.0).abs() < 1e-6, "the original stays where it was");
+    }
+
+    #[test]
+    fn an_arc_array_runs_from_the_original_to_the_end_of_the_sweep() {
+        let mut s = Session::new();
+        square(&mut s);
+        s.execute("arrange.circular", &json!({"count": 3, "radius": 40, "angle": 90})).unwrap();
+        let centres: Vec<_> = s.doc.shapes.iter().map(|sh| sh.world_bounds().unwrap().center()).collect();
+        let array_centre = lightfoundry_geom::Point::new(5.0, 45.0);
+        let last = centres[2];
+        let angle = (centres[0] - array_centre).atan2() - (last - array_centre).atan2();
+        assert!((angle.abs() - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "{angle}");
+    }
+
+    #[test]
+    fn arrays_apply_to_whole_selections_and_are_bounded() {
+        let mut s = Session::new();
+        let a = square(&mut s);
+        let b = s.execute("shape.ellipse", &json!({"cx": 30, "cy": 5, "rx": 5, "ry": 5})).unwrap()["id"].as_u64().unwrap();
+        s.execute("arrange.grid", &json!({"ids": [a, b], "columns": 2, "rows": 1})).unwrap();
+        assert_eq!(s.doc.shapes.len(), 4, "both shapes are copied together");
+        for bad in [
+            json!({"columns": 0, "rows": 3}),
+            json!({"columns": 200, "rows": 200}),
+            json!({"columns": 2, "rows": 2, "gap_x": 1e12}),
+            json!({"columns": -1, "rows": 1}),
+        ] {
+            assert!(s.execute("arrange.grid", &bad).is_err(), "{bad}");
+        }
+        for bad in [json!({"count": 0}), json!({"count": 100000}), json!({"count": 3, "radius": "x"}), json!({"count": 3, "angle": null})] {
+            assert!(s.execute("arrange.circular", &bad).is_err(), "{bad}");
+        }
+        assert_eq!(s.doc.shapes.len(), 4, "failures leave the document unchanged or add nothing");
+        let mut empty = Session::new();
+        assert!(empty.execute("arrange.grid", &json!({"columns": 2, "rows": 2})).is_err());
+    }
+
+    #[test]
+    fn rounded_rectangles_come_from_the_radius_parameter() {
+        let mut s = Session::new();
+        s.execute("shape.rectangle", &json!({"width": 40, "height": 20, "radius": 5})).unwrap();
+        let shape = &s.doc.shapes[0];
+        assert_eq!(shape.name, "Rounded rectangle");
+        assert!(shape.world_polylines()[0].closed && shape.world_polylines()[0].points.len() > 8);
+        assert!(
+            s.execute("shape.rectangle", &json!({"width": 4, "height": 4, "radius": f64::NAN})).is_err(),
+            "NaN becomes null, which is not a number"
+        );
+        assert!(s.execute("shape.rectangle", &json!({"width": 4, "height": 4, "radius": 1e12})).is_err());
+    }
+}
+
 mod path_ops_tests {
     use super::*;
 

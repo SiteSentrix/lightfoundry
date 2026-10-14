@@ -1,7 +1,7 @@
 use std::f64::consts::TAU;
 
 use lightfoundry_doc::{LayerId, Shape};
-use lightfoundry_geom::{BezPath, Point, ellipse_path, line_path, rect_path};
+use lightfoundry_geom::{BezPath, Point, ellipse_path, line_path, rect_path, rounded_rect_path};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -14,7 +14,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Rectangle",
         menu: "Create",
         shortcut: Some("R"),
-        params_doc: "{x, y, width, height, layer?}  (mm)",
+        params_doc: "{x, y, width, height, radius? (corner radius), layer?}  (mm)",
         mutates: true,
         run: rectangle,
     },
@@ -55,16 +55,20 @@ struct RectParams {
     y: f64,
     width: f64,
     height: f64,
+    /// Corner radius in mm (clamped to half the shorter side).
+    #[serde(default)]
+    radius: f64,
     layer: Option<LayerId>,
 }
 
 fn rectangle(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let p: RectParams = parse(params)?;
-    finite(&[p.x, p.y, p.width, p.height])?;
+    finite(&[p.x, p.y, p.width, p.height, p.radius])?;
     if p.width <= 0.0 || p.height <= 0.0 {
         return Err(EngineError::BadParams("width and height must be positive".into()));
     }
-    add(s, "Rectangle", p.layer, rect_path(p.x, p.y, p.width, p.height))
+    let path = if p.radius > 0.0 { rounded_rect_path(p.x, p.y, p.width, p.height, p.radius) } else { rect_path(p.x, p.y, p.width, p.height) };
+    add(s, if p.radius > 0.0 { "Rounded rectangle" } else { "Rectangle" }, p.layer, path)
 }
 
 #[derive(Deserialize)]
