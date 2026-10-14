@@ -3,6 +3,7 @@
 mod assets;
 mod cleanroom;
 mod layers;
+mod messages;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -14,6 +15,7 @@ commands:
   layers     enforce the crate dependency layering
   cleanroom  fail on LightBurn-authored files, text or fixtures
   assets     check that every file under assets/ has a row in ATTRIBUTION.md
+  messages   rewrite the list of engine messages for translators (--check: fail if out of date)
   ci         fmt --check, clippy -D warnings, test, layers, cleanroom, assets (stops at the first failure)
 ";
 
@@ -22,6 +24,7 @@ fn main() -> ExitCode {
         Some("layers") => layers::run(&root()),
         Some("cleanroom") => cleanroom::run(&root()),
         Some("assets") => assets::run(&root()),
+        Some("messages") => messages::run(&root(), std::env::args().nth(2).as_deref() == Some("--check")),
         Some("ci") => ci(),
         _ => Err(USAGE.to_string()),
     };
@@ -53,6 +56,8 @@ fn ci() -> Result<(), String> {
     cleanroom::run(&root())?;
     eprintln!("==> assets");
     assets::run(&root())?;
+    eprintln!("==> messages");
+    messages::run(&root(), true)?;
     eprintln!("ci: all checks passed");
     Ok(())
 }

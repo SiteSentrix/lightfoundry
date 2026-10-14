@@ -29,10 +29,30 @@ A translation is a JSON file:
 
 Limits: 4 MB per file, 20,000 strings, 2,000 characters per text, 32 MB per font.
 
+## Messages from the engine
+
+Errors and some results come from the engine in English, with values in them ("shape 12 does not
+exist"). They are translated by template: put the template in `strings` with its places named, and
+the values are picked out of the message and put where your text says.
+
+```json
+"shape {id} does not exist": "Form {id} gibt es nicht",
+"layer {1} does not exist": "Ebene {1} gibt es nicht",
+"bad parameters: {0}": "falsche Angaben: {0}"
+```
+
+- Places are written as in the list of messages: a name (`{id}`), a number (`{0}`), or, where the
+  source had a bare `{}`, its position (`{1}`, `{2}`, …). Use the same names in your text, in any order.
+- A message that wraps another ("bad parameters: …") translates both: the inner message is
+  translated by its own entry.
+- **Save translation template** already includes all of these (about 135, from
+  `crates/ui-egui/engine-messages.txt`, which `cargo xtask messages` keeps in step with the source and
+  `cargo xtask ci` checks).
+- Where two templates could match, the one with more fixed text wins.
+
 ## What is covered
 
-Menus, buttons, labels, tooltips, headings, drop-downs, and the status-bar messages the desktop app
-writes itself (including the ones with values in them). Not covered yet: messages returned by the
-engine (errors and command results, which can appear in the status bar), a few small texts such as
-layer descriptions built from layer names and durations like "1m 05s", the CLI, and the browser
-build (which has no way to pick a file).
+Menus, buttons, labels, tooltips, headings, drop-downs, the status-bar messages the desktop app
+writes itself, and engine errors. Not covered yet: successful command results shown in the status
+bar, a few small texts such as layer descriptions built from layer names and durations like
+"1m 05s", the CLI, and the browser build (which has no way to pick a file).
