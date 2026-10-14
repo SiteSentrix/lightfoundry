@@ -1573,3 +1573,38 @@ mod reconnect_tests {
         assert!(h.app.reconnect.is_none() && opens.get() == 0);
     }
 }
+
+mod register_ui_tests {
+    use super::*;
+    use crate::register_ui::{Marks, Pick};
+
+    #[test]
+    fn marks_are_clicked_on_the_canvas_and_applying_them_moves_the_design() {
+        let mut h = Harness::new();
+        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: false };
+        h.app.run("shape.rectangle", json!({"x": 20, "y": 20, "width": 10, "height": 10}));
+        for (actual, index, x, y) in [(false, 0, 20.0, 20.0), (false, 1, 120.0, 20.0), (true, 0, 25.0, 22.0), (true, 1, 125.0, 22.0)] {
+            h.app.marks.pick = Some(Pick { actual, index });
+            h.frame(vec![]);
+            h.click(h.at(x, y));
+            assert!(h.app.marks.pick.is_none(), "the click sets the mark and ends picking");
+        }
+        let (design, actual) = h.app.marks.complete().expect("all four marks are set");
+        assert!(design[0].distance(Point::new(20.0, 20.0)) < 0.5 && actual[1].distance(Point::new(125.0, 22.0)) < 0.5);
+        h.frame(vec![]); // the section and the mark crosses draw
+        h.app.run("align.two_point", json!({"design": design.map(|p| [p.x, p.y]), "actual": actual.map(|p| [p.x, p.y]), "lock_scale": true}));
+        let b = h.app.session.doc.shapes[0].world_bounds().unwrap();
+        assert!((b.x0 - 25.0).abs() < 0.6 && (b.y0 - 22.0).abs() < 0.6, "{b:?}");
+    }
+
+    #[test]
+    fn escape_cancels_picking_and_incomplete_marks_cannot_be_applied() {
+        let mut h = Harness::new();
+        h.app.marks.pick = Some(Pick { actual: false, index: 0 });
+        h.frame(vec![Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+        assert!(h.app.marks.pick.is_none());
+        assert!(Marks::default().complete().is_none());
+        let partial = Marks { design: [Some(Point::new(0.0, 0.0)), None], ..Marks::default() };
+        assert!(partial.complete().is_none());
+    }
+}

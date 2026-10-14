@@ -9,6 +9,7 @@ mod nodes_ui;
 mod panels;
 mod platform;
 mod recent;
+mod register_ui;
 mod settings_ui;
 pub(crate) mod snap;
 mod theme;
@@ -131,6 +132,7 @@ pub struct LightFoundryApp {
     trace_threshold: f64,
     preset_name: String,
     resume_line: usize,
+    marks: register_ui::Marks,
     auto_reconnect: bool,
     reconnect: Option<Reconnect>,
     /// First wait before retrying; doubles each attempt (tests shrink it).
@@ -223,6 +225,7 @@ impl LightFoundryApp {
             trace_threshold: 128.0,
             preset_name: String::new(),
             resume_line: 1,
+            marks: register_ui::Marks::default(),
             auto_reconnect: true,
             reconnect: None,
             reconnect_wait: Duration::from_secs(2),
@@ -646,6 +649,8 @@ impl LightFoundryApp {
         if escape {
             if self.move_head_mode {
                 self.move_head_mode = false;
+            } else if self.marks.pick.is_some() {
+                self.marks.pick = None;
             } else if self.pen.is_some() || self.node_drag.is_some() {
                 nodes_ui::cancel(self);
             } else if self.tool != Tool::Select {

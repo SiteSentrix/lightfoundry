@@ -338,6 +338,7 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         app.run("job.set_scope", json!({ "selection_only": only }));
     }
     job_origin(app, ui);
+    crate::register_ui::section(app, ui);
     cut_order(app, ui);
     test_grid_section(app, ui);
     ui.separator();
