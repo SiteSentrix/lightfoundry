@@ -7,6 +7,7 @@ mod menus;
 mod nodes_ui;
 mod panels;
 mod platform;
+mod recent;
 pub(crate) mod snap;
 mod theme;
 mod timeline_ui;
@@ -110,15 +111,19 @@ pub struct LightFoundryApp {
     pending_recovery: Option<PathBuf>,
     /// An action waiting for "save changes?" to be answered.
     pending_action: Option<PendingAction>,
+    recent: recent::Recent,
+    /// The project path last added to the recent list.
+    recorded_path: Option<PathBuf>,
     allow_close: bool,
     last_title: String,
 }
 
 /// Actions that would discard unsaved changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PendingAction {
     New,
     Open,
+    OpenPath(PathBuf),
     Close,
 }
 
@@ -129,6 +134,7 @@ impl LightFoundryApp {
     pub fn new(session: Session, platform: Box<dyn Platform>) -> Self {
         let ports = platform.serial_ports();
         let pending_recovery = platform.recovery_file().filter(|p| p.exists());
+        let recent = platform.recent_file().map(|p| recent::Recent::load(&p)).unwrap_or_default();
         Self {
             session,
             platform,
@@ -184,6 +190,8 @@ impl LightFoundryApp {
             last_autosave: Instant::now(),
             pending_recovery,
             pending_action: None,
+            recent,
+            recorded_path: None,
             allow_close: false,
             last_title: String::new(),
         }
@@ -194,6 +202,7 @@ impl LightFoundryApp {
         self.poll_link(ui.ctx());
         self.autosave_tick(ui.ctx());
         self.watch_close_and_title(ui.ctx());
+        self.track_recent();
         if !self.has_modal() {
             self.handle_shortcuts(ui.ctx());
         }
@@ -257,6 +266,29 @@ impl LightFoundryApp {
         }
     }
 
+    /// Adds the project to the recent list whenever the document's path changes (open, save as).
+    fn track_recent(&mut self) {
+        if self.session.path == self.recorded_path {
+            return;
+        }
+        self.recorded_path = self.session.path.clone();
+        if let Some(path) = self.recorded_path.clone() {
+            self.recent.push(path);
+            self.save_recent();
+        }
+    }
+
+    fn forget_recent(&mut self, path: &std::path::Path) {
+        self.recent.remove(path);
+        self.save_recent();
+    }
+
+    fn save_recent(&self) {
+        if let Some(file) = self.platform.recent_file() {
+            self.recent.save(&file);
+        }
+    }
+
     /// Asks before discarding unsaved work, then runs `action`.
     pub(crate) fn request(&mut self, action: PendingAction) {
         if self.session.dirty {
@@ -282,6 +314,16 @@ impl LightFoundryApp {
                     self.view = None;
                 }
             }
+            PendingAction::OpenPath(path) => {
+                if self.run("file.open", serde_json::json!({ "path": path })).is_some() {
+                    self.platform.clear_recovery();
+                    self.autosave_revision = None;
+                    self.view = None;
+                } else {
+                    // A file that is gone or unreadable should not stay on the menu.
+                    self.forget_recent(&path);
+                }
+            }
             PendingAction::Close => {
                 self.allow_close = true;
                 self.platform.clear_recovery();
@@ -303,7 +345,7 @@ impl LightFoundryApp {
     /// The person's answer to "save changes first?". Saving that does not complete (cancelled file
     /// dialog, failed write) keeps the question open: the work is never dropped by accident.
     fn answer_unsaved(&mut self, answer: Answer) {
-        let Some(action) = self.pending_action else { return };
+        let Some(action) = self.pending_action.clone() else { return };
         match answer {
             Answer::Save => {
                 if menus::save(self, false) {
@@ -340,7 +382,7 @@ impl LightFoundryApp {
             }
             return;
         }
-        let Some(action) = self.pending_action else { return };
+        let Some(action) = self.pending_action.clone() else { return };
         let name = self.session.path.as_ref().and_then(|p| p.file_name()).map_or("Untitled".to_string(), |n| n.to_string_lossy().into_owned());
         let mut answer = None;
         egui::Modal::new(egui::Id::new("unsaved")).show(ctx, |ui| {

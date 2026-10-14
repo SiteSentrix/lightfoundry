@@ -15,6 +15,11 @@ pub trait Platform {
     /// Removes the autosave copy (the work was saved or knowingly discarded).
     fn clear_recovery(&self) {}
 
+    /// Where the list of recent projects is kept, if this platform has somewhere to keep it.
+    fn recent_file(&self) -> Option<PathBuf> {
+        None
+    }
+
     fn serial_ports(&self) -> Vec<String>;
     fn open_serial(&self, port: &str) -> Result<Box<dyn Transport + Send>, String>;
 }
