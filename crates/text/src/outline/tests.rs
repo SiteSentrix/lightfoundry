@@ -1,7 +1,7 @@
 use kurbo::Shape;
 
 use super::*;
-use crate::outline::testfont::tiny_font;
+use crate::outline::testfont::{tiny_font, tiny_font_with_kerning};
 
 fn style(height: f64) -> TextStyle {
     TextStyle { height, ..TextStyle::default() }
@@ -44,6 +44,17 @@ mod layout_tests {
         let right = layout_outline(&f, "AB\nA", &TextStyle { align: Align::Right, ..style(7.0) }).unwrap().path.bounding_box();
         let left = layout_outline(&f, "AB\nA", &style(7.0)).unwrap().path.bounding_box();
         assert!((right.width() - left.width()).abs() < 1e-6, "alignment does not change the overall width");
+    }
+
+    #[test]
+    fn kerning_from_the_font_pulls_pairs_together() {
+        let plain = layout_outline(&tiny_font(), "AB", &style(7.0)).unwrap().path.bounding_box();
+        let kerned = layout_outline(&tiny_font_with_kerning(), "AB", &style(7.0)).unwrap().path.bounding_box();
+        // 100 font units at 0.01 mm per unit.
+        assert!((plain.width() - kerned.width() - 1.0).abs() < 1e-3, "{} vs {}", plain.width(), kerned.width());
+        let reversed = layout_outline(&tiny_font_with_kerning(), "BA", &style(7.0)).unwrap().path.bounding_box();
+        let unkerned_reversed = layout_outline(&tiny_font(), "BA", &style(7.0)).unwrap().path.bounding_box();
+        assert!((reversed.width() - unkerned_reversed.width()).abs() < 1e-3, "only the A-B pair is kerned");
     }
 
     #[test]

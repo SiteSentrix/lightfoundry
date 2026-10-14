@@ -36,8 +36,6 @@ pub fn layout_outline(data: &[u8], text: &str, style: &TextStyle) -> Result<Text
     let font = FontRef::new(data).map_err(|e| TextError::BadFont(e.to_string()))?;
     let loc = LocationRef::default();
     let metrics = font.metrics(Size::unscaled(), loc);
-    let glyph_metrics = font.glyph_metrics(Size::unscaled(), loc);
-    let charmap = font.charmap();
     let outlines = font.outline_glyphs();
 
     let upem = f64::from(metrics.units_per_em.max(1));
@@ -48,26 +46,32 @@ pub fn layout_outline(data: &[u8], text: &str, style: &TextStyle) -> Result<Text
 
     let mut path = BezPath::new();
     let mut unsupported: Vec<char> = Vec::new();
-    // Widths first, so alignment can shift each line.
+    // Shape each line (kerning, ligatures, contextual forms), then measure it so alignment can
+    // shift it. Positions come back in font units.
+    let shaper_data = harfrust::ShaperData::new(&font);
+    let shaper = shaper_data.shaper(&font).build();
     let lines: Vec<&str> = text.lines().collect();
     let mut widths = Vec::with_capacity(lines.len());
-    let mut placed: Vec<Vec<(char, skrifa::GlyphId, f64)>> = Vec::with_capacity(lines.len());
+    let mut placed: Vec<Vec<(skrifa::GlyphId, f64, f64)>> = Vec::with_capacity(lines.len());
     for line in &lines {
+        let mut buffer = harfrust::UnicodeBuffer::new();
+        buffer.push_str(line);
+        buffer.guess_segment_properties();
+        let shaped = shaper.shape(buffer, harfrust::ShapeOptions::new());
         let mut x = 0.0;
         let mut row = Vec::new();
-        for ch in line.chars() {
-            let gid = match charmap.map(ch) {
-                Some(g) => g,
-                None => {
-                    if !ch.is_whitespace() && !unsupported.contains(&ch) {
-                        unsupported.push(ch);
-                    }
-                    skrifa::GlyphId::new(0)
-                }
-            };
-            let advance = f64::from(glyph_metrics.advance_width(gid).unwrap_or(0.0));
-            row.push((ch, gid, x));
-            x += advance * scale * style.letter_spacing;
+        for (info, pos) in shaped.glyph_infos().iter().zip(shaped.glyph_positions()) {
+            let gid = skrifa::GlyphId::new(info.glyph_id);
+            if info.glyph_id == 0
+                && let Some(ch) = line.get(info.cluster as usize..).and_then(|rest| rest.chars().next())
+                && !ch.is_whitespace()
+                && !unsupported.contains(&ch)
+            {
+                unsupported.push(ch);
+            }
+            let advance = f64::from(pos.x_advance) * scale * style.letter_spacing;
+            row.push((gid, x + f64::from(pos.x_offset) * scale, f64::from(pos.y_offset) * scale));
+            x += advance;
         }
         widths.push(x);
         placed.push(row);
@@ -80,17 +84,14 @@ pub fn layout_outline(data: &[u8], text: &str, style: &TextStyle) -> Result<Text
             Align::Right => widest - widths[i],
         };
         let baseline = style.height + i as f64 * line_height;
-        for (ch, gid, x) in row {
-            if ch.is_whitespace() {
-                continue;
-            }
+        for (gid, x, y_off) in row {
             let Some(glyph) = outlines.get(*gid) else { continue };
             let mut pen = PathPen::default();
             if glyph.draw(DrawSettings::unhinted(Size::unscaled(), loc), &mut pen).is_err() {
                 continue;
             }
             // Font units are y up; flip, scale and move to the pen position.
-            let m = Affine::translate((x + shift, baseline)) * Affine::scale_non_uniform(scale, -scale);
+            let m = Affine::translate((x + shift, baseline - y_off)) * Affine::scale_non_uniform(scale, -scale);
             let mut g = pen.path;
             g.apply_affine(m);
             path.extend(g);

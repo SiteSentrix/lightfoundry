@@ -13,6 +13,7 @@ lightfoundry-geom = { workspace = true }
 kurbo = { workspace = true }
 thiserror = { workspace = true }
 skrifa = { workspace = true }
+harfrust = { workspace = true }
 
 [features]
 # Exposes `testfont::tiny_font()`, a font built in code, for other crates' tests.

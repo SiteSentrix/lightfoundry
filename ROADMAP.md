@@ -221,4 +221,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   (light mark, engrave, deep engrave, photo, thin cut, multi-pass cut), named for the operation
   rather than a material because results depend on the laser and sheet; the UI says to check them
   with a test grid.
+- **2026-10-14 — text shaping and text on a path.** Outline text is now shaped with `harfrust`
+  (kerning, ligatures, contextual forms; checked with a legacy `kern` table in the in-code test
+  font). `text.on_path` bends a text shape along another shape's longest outline (letters keep
+  their size and stand on the line, long edges are cut into 0.5 mm steps so they follow curves,
+  closed paths wrap), producing plain geometry; Arrange > Text on Path applies it to a selected text
+  and shape. New `geom::along` measures polylines by arc length.
 
