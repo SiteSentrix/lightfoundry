@@ -128,7 +128,7 @@ pub fn lead_point(outline: &Polyline, depth: usize, len: f64) -> Option<Point> {
     let normal = Vec2::new(tangent.y, -tangent.x);
     let probe = 1e-3_f64.min(len / 10.0);
     let toward_hole_side = outline.contains(start + normal * probe);
-    let want_inside = depth % 2 == 1;
+    let want_inside = !depth.is_multiple_of(2);
     let n = if toward_hole_side == want_inside { normal } else { -normal };
     Some(start + n * len)
 }
