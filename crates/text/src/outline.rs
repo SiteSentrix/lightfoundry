@@ -2,8 +2,9 @@
 //! ships with the program or lives in the repository; the laid-out shapes are stored in the project,
 //! so a project opens and cuts without the font, and only re-editing the text needs it again.
 //!
-//! Glyphs come from `skrifa` (MIT or Apache-2.0). Layout is simple: advance widths and the font's
-//! line height, no kerning or shaping, so complex scripts that need shaping are not supported.
+//! Glyphs come from `skrifa`, shaping (kerning, ligatures, contextual forms) from `harfrust`, and
+//! mixed left-to-right and right-to-left lines from the Unicode bidirectional algorithm
+//! (`unicode-bidi`); all are MIT or Apache-2.0. A second font can supply characters the first lacks.
 
 use kurbo::{Affine, BezPath};
 use skrifa::instance::{LocationRef, Size};
@@ -74,10 +75,11 @@ pub fn layout_outline_with_fallback(data: &[u8], fallback: Option<&[u8]>, text: 
     for line in &lines {
         let mut x = 0.0;
         let mut row = Vec::new();
-        for (font_ix, run) in runs(line, &charmaps) {
+        for (font_ix, run, rtl) in visual_pieces(line, &charmaps) {
             let (Some(shaper), Some(&sc)) = (shapers.get(font_ix), scales.get(font_ix)) else { continue };
             let mut buffer = harfrust::UnicodeBuffer::new();
             buffer.push_str(run);
+            buffer.set_direction(if rtl { harfrust::Direction::RightToLeft } else { harfrust::Direction::LeftToRight });
             buffer.guess_segment_properties();
             let shaped = shaper.shape(buffer, harfrust::ShapeOptions::new());
             for (info, pos) in shaped.glyph_infos().iter().zip(shaped.glyph_positions()) {
@@ -119,6 +121,28 @@ pub fn layout_outline_with_fallback(data: &[u8], fallback: Option<&[u8]>, text: 
         }
     }
     Ok(TextLayout { path, unsupported })
+}
+
+/// A line as pieces in the order they are drawn, left to right: the Unicode bidirectional algorithm
+/// (UAX #9) splits it into runs of one direction and puts them in visual order, and each run is split
+/// again where the font changes (reversed within a right-to-left run). Each piece also says whether it
+/// reads right to left, so it can be shaped that way.
+fn visual_pieces<'a>(line: &'a str, charmaps: &[skrifa::charmap::Charmap<'_>]) -> Vec<(usize, &'a str, bool)> {
+    let info = unicode_bidi::BidiInfo::new(line, None);
+    let mut out = Vec::new();
+    for para in &info.paragraphs {
+        let (levels, level_runs) = info.visual_runs(para, para.range.clone());
+        for range in level_runs {
+            let Some(rtl) = levels.get(range.start).map(|l| l.is_rtl()) else { continue };
+            let Some(text) = line.get(range) else { continue };
+            let mut pieces: Vec<(usize, &str, bool)> = runs(text, charmaps).into_iter().map(|(f, s)| (f, s, rtl)).collect();
+            if rtl {
+                pieces.reverse();
+            }
+            out.extend(pieces);
+        }
+    }
+    out
 }
 
 /// Splits a line into runs that each use one font: a character goes to the first font that maps it,
