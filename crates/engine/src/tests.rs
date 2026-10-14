@@ -855,7 +855,12 @@ mod job_tests {
     #[test]
     fn estimate_and_frame_work() {
         let mut s = square_session();
-        assert!(s.execute("job.estimate", &Value::Null).unwrap()["seconds"].as_f64().unwrap() > 0.0);
+        let e = s.execute("job.estimate", &Value::Null).unwrap();
+        assert!(e["seconds"].as_f64().unwrap() > 0.0);
+        let layers = e["layers"].as_array().unwrap();
+        assert_eq!(layers.len(), 1, "one layer is used");
+        assert!((layers[0]["seconds"].as_f64().unwrap() - e["seconds"].as_f64().unwrap()).abs() < 1e-9);
+        assert!(!layers[0]["name"].as_str().unwrap().is_empty());
         let f = s.execute("job.frame", &json!({})).unwrap();
         assert_eq!(f["bounds"], json!([10.0, 10.0, 30.0, 20.0]));
     }

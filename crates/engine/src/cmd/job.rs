@@ -98,8 +98,16 @@ fn gcode(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
 
 fn estimate(s: &mut Session, _: &Value) -> Result<Value, EngineError> {
     let job = lightfoundry_toolpath::plan(&s.doc)?;
-    let e = lightfoundry_toolpath::estimate(&job, s.doc.machine.rapid_speed);
-    Ok(json!({ "seconds": e.seconds, "cut_mm": e.cut_mm, "travel_mm": e.travel_mm }))
+    let t = lightfoundry_toolpath::Timeline::new(&job, s.doc.machine.rapid_speed);
+    let layers: Vec<Value> = t
+        .layers()
+        .iter()
+        .map(|l| {
+            let name = s.doc.layer(l.layer).map_or_else(String::new, |x| x.name.clone());
+            json!({ "layer": l.layer, "name": name, "seconds": l.seconds, "cut_mm": l.cut_mm, "travel_mm": l.travel_mm })
+        })
+        .collect();
+    Ok(json!({ "seconds": t.total, "cut_mm": t.cut_mm(), "travel_mm": t.travel_mm(), "layers": layers }))
 }
 
 #[derive(Deserialize)]

@@ -9,6 +9,7 @@ mod panels;
 mod platform;
 pub(crate) mod snap;
 mod theme;
+mod timeline_ui;
 mod view;
 
 pub use platform::{NoPlatform, Platform};
@@ -62,6 +63,7 @@ pub struct LightFoundryApp {
     geometry: GeometryCache,
     thumbs: crate::geometry::ImageTextures,
     preview: PreviewCache,
+    player: timeline_ui::Player,
     link: Option<Link>,
     /// Latest state of the machine link, refreshed once per frame.
     snap: Option<Snapshot>,
@@ -142,6 +144,7 @@ impl LightFoundryApp {
             geometry: GeometryCache::default(),
             thumbs: Default::default(),
             preview: PreviewCache::default(),
+            player: timeline_ui::Player::default(),
             link: None,
             snap: None,
             last_job: None,
@@ -198,6 +201,9 @@ impl LightFoundryApp {
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         egui::Panel::left("tools").resizable(false).exact_size(84.0).show(ui, |ui| panels::toolbar(self, ui));
         egui::Panel::right("inspector").default_size(300.0).show(ui, |ui| panels::inspector(self, ui));
+        if self.show_preview {
+            egui::Panel::bottom("timeline").show(ui, |ui| timeline_ui::bar(self, ui));
+        }
         egui::CentralPanel::default().show(ui, |ui| canvas::show(self, ui));
         self.dialogs(ui.ctx());
     }

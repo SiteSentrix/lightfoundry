@@ -487,3 +487,59 @@ mod validation_tests {
         assert!((three.seconds / one.seconds - 3.0).abs() < 0.2);
     }
 }
+
+mod timeline_tests {
+    use super::*;
+
+    #[test]
+    fn totals_match_the_estimate_and_layers_add_up() {
+        let job = plan(&two_layer_doc(2)).unwrap();
+        let t = Timeline::new(&job, 6000.0);
+        let e = estimate(&job, 6000.0);
+        assert!((t.total - e.seconds).abs() < 1e-9 && (t.cut_mm() - e.cut_mm).abs() < 1e-9);
+        let layers = t.layers();
+        assert_eq!(layers.len(), 2);
+        assert!((layers.iter().map(|l| l.seconds).sum::<f64>() - t.total).abs() < 1e-9);
+        assert!(layers[1].seconds > layers[0].seconds, "the 30 mm square at the same speed takes longer than the 10 mm one");
+    }
+
+    #[test]
+    fn at_finds_the_operation_and_pass() {
+        let job = plan(&two_layer_doc(3)).unwrap();
+        let t = Timeline::new(&job, 6000.0);
+        let first = t.ops[0];
+        let m = t.at(first.start + first.pass_seconds * 1.5).unwrap();
+        assert_eq!((m.op, m.pass), (0, 1));
+        assert!((m.into_pass - first.pass_seconds * 0.5).abs() < 1e-9);
+        let second = t.ops[1];
+        assert_eq!(t.at(second.start + 0.001).unwrap().op, 1);
+        let end = t.at(t.total).unwrap();
+        assert_eq!((end.op, end.pass), (1, 2), "the end is the last pass of the last operation");
+        assert_eq!(t.at(0.0).unwrap().op, 0);
+    }
+
+    #[test]
+    fn hostile_times_and_empty_jobs_are_handled() {
+        let t = Timeline::new(&plan(&two_layer_doc(1)).unwrap(), 6000.0);
+        for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -5.0, 1e300] {
+            assert!(t.at(x).is_some(), "{x}");
+        }
+        assert_eq!(Timeline::new(&Job::default(), 6000.0).at(1.0), None);
+        let bad = Timeline::new(&plan(&two_layer_doc(1)).unwrap(), f64::NAN);
+        assert!(bad.total.is_finite() && bad.total > 0.0, "a bad rapid speed falls back to a default");
+    }
+
+    fn two_layer_doc(passes: u32) -> Document {
+        let mut doc = rect_doc(10.0, 10.0, LayerMode::Line);
+        let second = 1;
+        for id in [0, second] {
+            if let Some(l) = doc.layer_mut(id) {
+                l.mode = LayerMode::Line;
+                l.speed = 600.0;
+                l.passes = passes;
+            }
+        }
+        doc.add_shape(Shape::path("big", second, rect_path(50.0, 10.0, 30.0, 30.0)));
+        doc
+    }
+}

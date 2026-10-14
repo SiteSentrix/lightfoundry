@@ -1128,3 +1128,91 @@ mod machine_tests {
         h.frame(vec![]);
     }
 }
+
+mod timeline_ui_tests {
+    use lightfoundry_doc::LayerId;
+    use lightfoundry_toolpath::Moment;
+
+    use super::*;
+    use crate::geometry::PreviewSegment;
+    use crate::timeline_ui::{Reveal, head_position, reveal};
+
+    #[test]
+    fn segments_are_revealed_by_operation_pass_and_time() {
+        let seg = segment(1, 2.0, 4.0);
+        assert_eq!(reveal(&seg, None), Reveal::Full, "no playhead shows the whole job");
+        assert_eq!(reveal(&seg, Some(moment(0, 0, 9.0))), Reveal::Hidden, "an earlier operation has not reached it");
+        assert_eq!(reveal(&seg, Some(moment(2, 0, 0.0))), Reveal::Full, "a later operation has finished it");
+        assert_eq!(reveal(&seg, Some(moment(1, 1, 0.0))), Reveal::Full, "a second pass starts over a finished first one");
+        assert_eq!(reveal(&seg, Some(moment(1, 0, 1.0))), Reveal::Hidden);
+        assert_eq!(reveal(&seg, Some(moment(1, 0, 3.0))), Reveal::Partial(0.5));
+        assert_eq!(reveal(&seg, Some(moment(1, 0, 4.0))), Reveal::Full);
+    }
+
+    #[test]
+    fn the_head_sits_inside_the_segment_being_cut() {
+        let segs = [segment(0, 0.0, 2.0), segment(0, 2.0, 4.0)];
+        let p = head_position(&segs, moment(0, 0, 1.0)).unwrap();
+        assert!(p.distance(Point::new(2.5, 0.0)) < 1e-6, "{p:?}");
+        let end = head_position(&segs, moment(0, 0, 4.0)).unwrap();
+        assert!(end.distance(Point::new(10.0, 0.0)) < 1e-6, "{end:?}");
+        assert_eq!(head_position(&segs, moment(3, 0, 1.0)), None, "no segments of that operation");
+    }
+
+    #[test]
+    fn playing_runs_to_the_end_and_stops_and_the_scrubber_shows_the_head() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 50, "height": 30}));
+        h.app.show_preview = true;
+        h.frame(vec![]);
+        let total = h.app.preview.timeline.total;
+        assert!(total > 0.0);
+        assert!(h.app.preview.segments.iter().all(|s| s.t1 >= s.t0 && f64::from(s.t1) <= total + 1e-3));
+        assert_eq!(h.app.player.position, None, "the preview starts by showing the whole job");
+
+        h.app.player.speed = 4; // 600x
+        h.app.player.position = Some(0.0);
+        h.app.player.playing = true;
+        let mut frames = 0;
+        while h.app.player.playing && frames < 5000 {
+            h.frame(vec![]);
+            frames += 1;
+        }
+        assert!(!h.app.player.playing, "playback stops by itself");
+        assert_eq!(h.app.player.position, Some(total));
+
+        h.app.player.position = Some(total * 0.5);
+        h.frame(vec![]);
+        let now = h.app.preview.timeline.at(total * 0.5).unwrap();
+        assert!(head_position(&h.app.preview.segments, now).is_some());
+    }
+
+    #[test]
+    fn an_empty_job_has_no_timeline_and_does_not_break_the_frame() {
+        let mut h = Harness::new();
+        h.app.show_preview = true;
+        h.app.player.position = Some(5.0);
+        h.app.player.playing = true;
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert!(h.app.preview.timeline.ops.is_empty());
+    }
+
+    #[test]
+    fn layer_times_in_the_estimate_name_each_layer() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 50, "height": 30}));
+        h.app.run("shape.ellipse", json!({"cx": 100, "cy": 100, "rx": 20, "ry": 10, "layer": 2}));
+        let v = h.app.run("job.estimate", serde_json::Value::Null).unwrap();
+        assert_eq!(v["layers"].as_array().map(Vec::len), Some(2));
+    }
+
+    fn segment(op: u32, t0: f32, t1: f32) -> PreviewSegment {
+        let layer: LayerId = 0;
+        PreviewSegment { a: Point::new(f64::from(t0) * 2.5, 0.0), b: Point::new(f64::from(t1) * 2.5, 0.0), layer, power: 50.0, op, t0, t1 }
+    }
+
+    fn moment(op: usize, pass: u32, into_pass: f64) -> Moment {
+        Moment { op, pass, into_pass }
+    }
+}
