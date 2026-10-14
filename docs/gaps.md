@@ -6,7 +6,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | #  | Gap                                                                                  | Why it matters                                                      |
 |----|--------------------------------------------------------------------------------------|---------------------------------------------------------------------|
 | 1  | Verify on real GRBL hardware (jog, frame, short cut), fix what it finds              | Everything machine-side is only simulator-tested                    |
-| 2  | Resume after a power loss with a saved job position (run-from-line, auto-reconnect and the $$ editor are done) | Day-to-day machine ownership                                        |
+| 2  | Resume after a power loss, checked on a real machine: the saved position is offered at next start (run-from-line, auto-reconnect, the $$ editor and the saved job position are done); the head must be re-homed by the person, and a real-machine check is still owed | Day-to-day machine ownership                                        |
 | 4  | Mixed left-to-right/right-to-left lines (bidi) (kerning, font fallback, ligatures, shaping, single-direction right-to-left runs and vertical stacking are done) | Typography beyond plain filled text |
 | 8  | Per-shape cut order overrides (order by group, a chosen start point and overlapping-edge removal are done) | Quality and time |
 | 9  | Least-squares curve fitting and colour-aware tracing (gentle-bend smoothing is done) (tone, crop with canvas handles, resample, sharpen, seven dither modes and basic tracing are done) | Photo engraving results                                  |

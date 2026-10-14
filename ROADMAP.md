@@ -289,3 +289,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   (`fallback_font` on `text.create`/`text.edit`, "Fallback font" in the inspector); characters the
   first font lacks are drawn from it, scaled to the same cap height. Only characters in neither font
   are reported as unsupported.
+- **2026-10-14 — resume after a power cut.** While a job runs the desktop app writes its position
+  (`job-position.json` in the data folder) every 5 s, backed up 20 lines because the controller
+  acknowledges lines when buffered, not when run. A clean finish removes it; otherwise the next start
+  shows "A job was interrupted… restart from line N" in the Laser panel, and "Use this line" fills
+  Run from line once the same design's G-code is generated (matched by a fingerprint).

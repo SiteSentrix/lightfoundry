@@ -17,7 +17,7 @@ pub mod serial;
 pub use link::{CONSOLE_LIMIT, JobState, Link, LinkError, MAX_FEED, MAX_JOG_MM, MAX_TRAVEL_MM, Snapshot, jog_line, jog_to_line};
 pub use sim::SimulatedGrbl;
 pub use status::{MachineState, Status, parse_status};
-pub use stream::{Progress, StreamOptions, StreamReport, stream_program};
+pub use stream::{Progress, RESTART_BACKUP_LINES, StreamOptions, StreamReport, restart_line, stream_program};
 
 use std::io;
 use std::time::Duration;

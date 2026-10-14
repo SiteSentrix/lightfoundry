@@ -381,6 +381,7 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         crate::settings_ui::section(app, ui);
         console(app, ui);
     }
+    interrupted_job(app, ui);
     if let Some(gcode) = app.session.last_gcode.clone() {
         ui.collapsing("G-code", |ui| {
             let lines = gcode.lines().count();
@@ -528,6 +529,30 @@ fn job_origin(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     ui.weak(match o.start_from {
         StartFrom::UserOrigin => "Jog to the spot, then Set origin; that spot is the job origin.",
         _ => "The head's position when the job starts becomes the job origin.",
+    });
+}
+
+/// Offers to pick up a job that an earlier session (or a power cut) left unfinished.
+fn interrupted_job(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let Some(pos) = app.interrupted.clone() else { return };
+    ui.group(|ui| {
+        ui.label(format!("A job was interrupted. It can restart from line {} of {}.", pos.line, pos.total_lines));
+        let same = app.session.last_gcode.as_deref().is_some_and(|g| crate::job_position::fingerprint(g) == pos.hash);
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(same, egui::Button::new("Use this line"))
+                .on_hover_text("Sets Run from line below; set the origin the way the first run had it, then Start here")
+                .clicked()
+            {
+                app.resume_line = pos.line;
+            }
+            if ui.button("Forget").clicked() {
+                app.forget_interrupted();
+            }
+        });
+        if !same {
+            ui.weak("Open the same design and generate its G-code to use this position.");
+        }
     });
 }
 
