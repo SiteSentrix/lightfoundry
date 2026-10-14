@@ -217,4 +217,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   shaded and the percentages feed the Crop button. `image.resample` changes the pixel count (area
   average when shrinking, bilinear when enlarging; 0.05x to 4x, 100 Mpixel cap) without changing the
   size in mm.
+- **2026-10-14 — starter presets.** `preset.add_starters` adds six original, generic first guesses
+  (light mark, engrave, deep engrave, photo, thin cut, multi-pass cut), named for the operation
+  rather than a material because results depend on the laser and sheet; the UI says to check them
+  with a test grid.
 

@@ -1,4 +1,4 @@
-use lightfoundry_doc::{LayerId, MAX_PRESETS, Preset};
+use lightfoundry_doc::{Layer, LayerId, LayerMode, MAX_PRESETS, Preset};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -26,6 +26,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         params_doc: "{name, layer}  — copies the preset's cut settings onto the layer (its name, colour and output switch stay)",
         mutates: true,
         run: apply,
+    },
+    CommandSpec {
+        id: "preset.add_starters",
+        label: "Add Starter Presets",
+        menu: "Laser",
+        shortcut: None,
+        params_doc: "{}  — adds generic starting points (by operation, not by material) that are not already in the project; always check them with a material test grid",
+        mutates: true,
+        run: add_starters,
     },
     CommandSpec { id: "preset.delete", label: "Delete Preset", menu: "Laser", shortcut: None, params_doc: "{name}", mutates: true, run: delete },
 ];
@@ -81,4 +90,39 @@ fn delete(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         return Err(EngineError::NotFound(format!("no preset called {name}")));
     }
     Ok(json!({ "count": s.doc.presets.len() }))
+}
+
+/// Generic starting points, named for what they do rather than for a material: how a given sheet
+/// responds depends on the laser, its optics and the material, so these only give a first guess to
+/// refine with the material test grid. Written for this project, not taken from anyone's library.
+const STARTERS: &[(&str, LayerMode, f64, f64, f64, u32, f64)] = &[
+    // name, mode, speed mm/min, max power %, min power %, passes, interval mm
+    ("Starter: light mark", LayerMode::Line, 3000.0, 15.0, 5.0, 1, 0.1),
+    ("Starter: engrave (fill)", LayerMode::Fill, 3000.0, 35.0, 10.0, 1, 0.1),
+    ("Starter: deep engrave (fill)", LayerMode::Fill, 1500.0, 60.0, 15.0, 2, 0.08),
+    ("Starter: photo (image)", LayerMode::Fill, 4000.0, 40.0, 5.0, 1, 0.1),
+    ("Starter: thin cut", LayerMode::Line, 600.0, 90.0, 40.0, 1, 0.1),
+    ("Starter: multi-pass cut", LayerMode::Line, 900.0, 100.0, 50.0, 4, 0.1),
+];
+
+fn add_starters(s: &mut Session, _: &Value) -> Result<Value, EngineError> {
+    let mut added = 0;
+    for (name, mode, speed, max_power, min_power, passes, interval) in STARTERS {
+        if s.doc.presets.iter().any(|p| p.name == *name) {
+            continue;
+        }
+        if s.doc.presets.len() >= MAX_PRESETS {
+            return Err(EngineError::BadParams(format!("at most {MAX_PRESETS} presets can be kept")));
+        }
+        let mut settings = Layer::numbered(0);
+        settings.mode = *mode;
+        settings.speed = *speed;
+        settings.max_power = *max_power;
+        settings.min_power = *min_power;
+        settings.passes = *passes;
+        settings.interval = *interval;
+        s.doc.presets.push(Preset { name: (*name).to_string(), settings });
+        added += 1;
+    }
+    Ok(json!({ "added": added, "count": s.doc.presets.len() }))
 }
