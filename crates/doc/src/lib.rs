@@ -734,6 +734,10 @@ pub struct Machine {
     /// Controller acceleration in mm/s² for time estimates (GRBL `$120`/`$121`); 0 = ignore.
     #[serde(default)]
     pub acceleration: f64,
+    /// Where a layer sets no overscan of its own, run up for the distance the head needs to reach
+    /// the layer's speed at `acceleration` (v²/2a) instead of a fixed length.
+    #[serde(default)]
+    pub overscan_by_speed: bool,
 }
 
 /// A rotary attachment. The controller's Y steps are calibrated for a roller or chuck of
@@ -805,6 +809,7 @@ impl Default for Machine {
             dialect: Dialect::Grbl,
             rotary: Rotary::default(),
             acceleration: 0.0,
+            overscan_by_speed: false,
         }
     }
 }

@@ -10,7 +10,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 4  | Vertical and right-to-left text layout controls; font fallback when a font lacks a character (kerning, ligatures and shaping are done) | Typography beyond plain filled text |
 | 8  | Per-shape cut order overrides (order by group, a chosen start point and overlapping-edge removal are done) | Quality and time |
 | 9  | Least-squares curve fitting and colour-aware tracing (gentle-bend smoothing is done) (tone, crop with canvas handles, resample, sharpen, seven dither modes and basic tracing are done) | Photo engraving results                                  |
-| 10 | Ramp along fills and images; speed-dependent overscan (tabs, lead-in/out, perforation, outline ramp and overscan are done) | Clean cuts of special materials                                     |
+| 10 | Ramp along fills and images (tabs, lead-in/out, perforation, outline ramp, overscan and speed-dependent overscan are done) | Clean cuts of special materials                                     |
 | 14 | A real material library needs measured values per machine (generic starters, per-project presets, a shared preset library and test grids are done) | Reusing settings for a known material                               |
 | 15 | Other controllers: verify the Marlin/Smoothieware dialects on hardware and add a link for them; Ruida is a large project | Reach beyond GRBL                                                   |
 | 16 | Live camera capture and lens calibration (two-point print-and-cut alignment is done; a photo of the bed can serve as a backdrop on a non-output layer) | Placing work on printed or irregular material                       |
