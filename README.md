@@ -37,6 +37,7 @@ cargo run --release -p lightfoundry                         # desktop app
 cargo run --release -p lightfoundry -- design.svg           # open an SVG
 cargo run -p lightfoundry-cli -- gcode design.svg -o job.gcode --bed 300x200 --origin top_left \
     --set 2:speed=900,max_power=40                          # headless conversion
+apps/lightfoundry-web/build.sh                              # browser build (design, preview, G-code; no machine link yet)
 cargo xtask ci                                              # fmt, clippy, tests, layers, clean-room
 ```
 

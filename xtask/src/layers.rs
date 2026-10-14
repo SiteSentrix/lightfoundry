@@ -37,6 +37,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("testkit", Class::Testkit),
     ("fuzzkit", Class::Exempt),
     ("lightfoundry", Class::Exempt),
+    ("web", Class::Exempt),
     ("cli", Class::Exempt),
     ("xtask", Class::Exempt),
 ];

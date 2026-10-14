@@ -184,4 +184,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   the design marks (by clicking, or the centres of two selected shapes) and the real ones (by
   clicking on a photo of the bed, or From laser using the head position) and draws them on the
   canvas. Live camera capture is OS- and hardware-specific and is not built.
+- **2026-10-14 — browser build.** `apps/lightfoundry-web` compiles the engine and the egui
+  interface to WebAssembly (`apps/lightfoundry-web/build.sh`, then serve the folder and open
+  `index.html`); checked in headless Chromium: it draws, creates shapes and handles drags. It has
+  no file dialogs or machine link yet (`Platform::machine_available` is false there, since the
+  link needs threads). Clocks use `web-time`, which is `std::time` on desktop and works in the
+  browser.
 

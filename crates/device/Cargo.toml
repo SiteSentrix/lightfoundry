@@ -12,6 +12,7 @@ workspace = true
 serialport = { version = "4", default-features = false, optional = true }
 thiserror = { workspace = true }
 log = { workspace = true }
+web-time = { workspace = true }
 
 [features]
 serial = ["dep:serialport"]
