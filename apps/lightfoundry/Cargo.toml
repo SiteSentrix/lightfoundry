@@ -17,6 +17,7 @@ serial = ["lightfoundry-device/serial"]
 [dependencies]
 lightfoundry-engine = { workspace = true }
 lightfoundry-ui-egui = { workspace = true }
+lightfoundry-mcp = { workspace = true }
 lightfoundry-device = { workspace = true }
 eframe = { workspace = true, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
 egui = { workspace = true }

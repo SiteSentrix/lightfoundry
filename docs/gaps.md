@@ -10,7 +10,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 14 | A real material library needs measured values per machine (generic starters, per-project presets, a shared preset library and test grids are done) | Reusing settings for a known material                               |
 | 15 | Other controllers: verify the Marlin/Smoothieware dialects on hardware and add a link for them; Ruida is a large project | Reach beyond GRBL                                                   |
 | 16 | Live camera capture and lens calibration (two-point print-and-cut alignment is done; a photo of the bed can serve as a backdrop on a non-output layer) | Placing work on printed or irregular material                       |
-| 17 | MCP: a live link to the running desktop app (the stdio server edits its own session); resource subscriptions | Agent-driven design, like the sibling apps                          |
+| 17 | MCP: resource subscriptions (the live link to the running desktop app is done)                       | Agent-driven design, like the sibling apps                          |
 | 18 | Browser build: try Web Serial on real hardware; installing as a PWA needs a service worker (JavaScript, which the Rust-only rule forbids unless generated from Rust) and an icon drawn in code; remember recent files |  Web users can design and generate G-code today |
 | 20 | Galvo/fibre/CO2-RF controllers (proprietary protocols); a tilted or 3D Z map; chuck rotary with steps-per-rotation |  Hardware variants |
 | 21 | Translations: the CLI, durations and a few composed labels are still English; the browser build cannot load a catalog; no translation ships (see `translations.md`) | Users outside English-speaking markets |

@@ -10,6 +10,8 @@ use std::io::{self, BufRead, Write};
 use lightfoundry_engine::{Session, commands};
 use serde_json::{Value, json};
 
+pub mod link;
+
 /// Protocol version answered when the client does not name one we can echo.
 const DEFAULT_PROTOCOL: &str = "2024-11-05";
 /// Largest single message accepted, in bytes (a design with an embedded picture can be big).
@@ -47,8 +49,26 @@ pub fn serve(session: &mut Session, input: &mut impl BufRead, output: &mut impl 
     }
 }
 
+/// Who is on the other end: a private session of the agent's own, or the person's open window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// The server owns its session (`lightfoundry-cli mcp`); nothing there can be lost.
+    Standalone,
+    /// The agent is working in the document the person has open, so commands that would throw away
+    /// unsaved work are refused.
+    Live,
+}
+
+/// Commands that replace the open document; the live link refuses them while it has unsaved changes.
+const REPLACES_DOCUMENT: &[&str] = &["file.new", "file.open", "file.recover"];
+
 /// Handles one message; `None` for notifications, which get no reply.
 pub fn handle_line(session: &mut Session, line: &str) -> Option<Value> {
+    handle_line_in(session, line, Mode::Standalone)
+}
+
+/// [`handle_line`] for a server in the given [`Mode`].
+pub fn handle_line_in(session: &mut Session, line: &str, mode: Mode) -> Option<Value> {
     let Ok(msg) = serde_json::from_str::<Value>(line) else {
         return Some(error_response(&Value::Null, PARSE_ERROR, "invalid JSON"));
     };
@@ -61,7 +81,7 @@ pub fn handle_line(session: &mut Session, line: &str) -> Option<Value> {
         return id.map(|id| error_response(&id, INVALID_REQUEST, "missing method"));
     };
     let params = obj.get("params").cloned().unwrap_or(Value::Null);
-    let result = dispatch(session, method, &params);
+    let result = dispatch(session, method, &params, mode);
     let id = id?; // notifications carry no id and get no reply
     Some(match result {
         Ok(v) => json!({ "jsonrpc": "2.0", "id": id, "result": v }),
@@ -69,7 +89,7 @@ pub fn handle_line(session: &mut Session, line: &str) -> Option<Value> {
     })
 }
 
-fn dispatch(session: &mut Session, method: &str, params: &Value) -> Result<Value, (i64, String)> {
+fn dispatch(session: &mut Session, method: &str, params: &Value, mode: Mode) -> Result<Value, (i64, String)> {
     match method {
         "initialize" => {
             let version = params.get("protocolVersion").and_then(Value::as_str).unwrap_or(DEFAULT_PROTOCOL);
@@ -82,7 +102,7 @@ fn dispatch(session: &mut Session, method: &str, params: &Value) -> Result<Value
         }
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tool_list() })),
-        "tools/call" => call_tool(session, params),
+        "tools/call" => call_tool(session, params, mode),
         "resources/list" => Ok(json!({ "resources": resource_list() })),
         "resources/read" => read_resource(session, params),
         "prompts/list" => Ok(json!({ "prompts": prompt_list() })),
@@ -114,7 +134,7 @@ fn tool_list() -> Vec<Value> {
     tools
 }
 
-fn call_tool(session: &mut Session, params: &Value) -> Result<Value, (i64, String)> {
+fn call_tool(session: &mut Session, params: &Value, mode: Mode) -> Result<Value, (i64, String)> {
     let name = params.get("name").and_then(Value::as_str).ok_or((INVALID_PARAMS, "tools/call needs a tool name".to_string()))?;
     if name == SUMMARY_TOOL {
         return Ok(tool_result(false, &summary(session)));
@@ -125,6 +145,12 @@ fn call_tool(session: &mut Session, params: &Value) -> Result<Value, (i64, Strin
         Some(v @ Value::Object(_)) => v.clone(),
         Some(_) => return Err((INVALID_PARAMS, "arguments must be an object".into())),
     };
+    if mode == Mode::Live && session.dirty && REPLACES_DOCUMENT.contains(&spec.id) {
+        return Ok(tool_result(
+            true,
+            &Value::String(format!("{} would discard unsaved changes in the open window; ask the person to save first", spec.id)),
+        ));
+    }
     Ok(match session.execute(spec.id, &args) {
         Ok(v) => tool_result(false, &v),
         Err(e) => tool_result(true, &Value::String(e.to_string())),
@@ -247,14 +273,14 @@ fn error_response(id: &Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
-fn write_message(out: &mut impl Write, msg: &Value) -> io::Result<()> {
+pub(crate) fn write_message(out: &mut impl Write, msg: &Value) -> io::Result<()> {
     let text = serde_json::to_string(msg).map_err(io::Error::other)?;
     out.write_all(text.as_bytes())?;
     out.write_all(b"\n")?;
     out.flush()
 }
 
-enum Line {
+pub(crate) enum Line {
     Ok,
     End,
     TooLong,
@@ -262,7 +288,7 @@ enum Line {
 
 /// Reads up to a newline into `buf`, never holding more than `cap` bytes. A line over the cap is
 /// skipped to its end and reported, so one huge message cannot exhaust memory.
-fn read_capped_line(input: &mut impl BufRead, buf: &mut Vec<u8>, cap: usize) -> io::Result<Line> {
+pub(crate) fn read_capped_line(input: &mut impl BufRead, buf: &mut Vec<u8>, cap: usize) -> io::Result<Line> {
     let mut too_long = false;
     let mut any = false;
     loop {

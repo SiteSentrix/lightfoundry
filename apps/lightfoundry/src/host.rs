@@ -1,14 +1,20 @@
 use std::path::PathBuf;
 
 use lightfoundry_device::Transport;
+use lightfoundry_mcp::link::LinkServer;
 use lightfoundry_ui_egui::{LightFoundryApp, Platform};
 
 pub struct Host {
     pub app: LightFoundryApp,
+    /// Present only when the person switched agent access on; closing the app closes it.
+    pub agent_link: Option<LinkServer>,
 }
 
 impl eframe::App for Host {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if let Some(link) = &self.agent_link {
+            link.serve_pending(&mut self.app.session);
+        }
         self.app.ui(ui);
     }
 }

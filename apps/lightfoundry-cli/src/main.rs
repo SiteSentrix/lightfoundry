@@ -5,6 +5,7 @@
 //! lightfoundry-cli info design.svg
 //! lightfoundry-cli commands
 //! lightfoundry-cli mcp                        # Model Context Protocol server on stdin/stdout
+//! lightfoundry-cli mcp --connect              # the same, but editing the drawing open in a running `lightfoundry --agent-link`
 //! lightfoundry-cli run script.json            # [{"id": "...", "params": {...}}, ...] then prints the last result
 //! ```
 
@@ -22,7 +23,8 @@ usage: lightfoundry-cli <command>
                        [--set LAYER:key=value,key=value]...
   info <input>         shape count, size, estimated time
   commands             list every engine command with its parameters
-  mcp                  serve the engine's commands as MCP tools on stdin/stdout (for AI agents)
+  mcp [--connect]      serve the engine's commands as MCP tools on stdin/stdout (for AI agents);
+                       --connect works in the window of a running `lightfoundry --agent-link` instead
   run <script.json>    run a JSON array of {\"id\", \"params\"} commands and print the last result
 ";
 
@@ -48,7 +50,7 @@ fn run(args: &[String]) -> Result<String, String> {
         Some("info") => info(args.get(1).ok_or(USAGE)?),
         Some("gcode") => gcode(&args[1..]),
         Some("run") => script(args.get(1).ok_or(USAGE)?),
-        Some("mcp") => mcp(),
+        Some("mcp") => mcp(args.get(1).map(String::as_str)),
         _ => Err(USAGE.into()),
     }
 }
@@ -139,7 +141,16 @@ fn script(path: &str) -> Result<String, String> {
 }
 
 /// Speaks MCP on stdin/stdout until the client closes the pipe. Nothing else may print to stdout.
-fn mcp() -> Result<String, String> {
+fn mcp(flag: Option<&str>) -> Result<String, String> {
+    match flag {
+        None => {}
+        Some("--connect") => {
+            let file = lightfoundry_mcp::link::default_link_file().ok_or("no folder for the link file")?;
+            lightfoundry_mcp::link::proxy(&file, std::io::stdin().lock(), std::io::stdout()).map_err(|e| e.to_string())?;
+            return Ok(String::new());
+        }
+        Some(_) => return Err(USAGE.into()),
+    }
     let mut s = Session::new();
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
