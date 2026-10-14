@@ -63,8 +63,7 @@ pub fn trace(w: usize, h: usize, inside: impl Fn(usize, usize) -> bool, toleranc
     let mut loops = Vec::new();
     let starts: Vec<(i32, i32)> = out_edges.keys().copied().collect();
     for start in starts {
-        loop {
-            let Some(d0) = out_edges.get(&start).and_then(|e| e.iter().position(|b| *b)) else { break };
+        while let Some(d0) = out_edges.get(&start).and_then(|e| e.iter().position(|b| *b)) {
             let mut ring = Vec::new();
             let (mut at, mut d) = (start, d0);
             loop {
