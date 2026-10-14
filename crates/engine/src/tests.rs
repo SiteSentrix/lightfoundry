@@ -795,6 +795,19 @@ mod import_tests {
     }
 
     #[test]
+    fn the_gcode_dialect_is_a_machine_setting_that_changes_the_program() {
+        let mut s = Session::new();
+        s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 10})).unwrap();
+        let program = |s: &mut Session| s.execute("job.gcode", &json!({"include": true})).unwrap()["gcode"].as_str().unwrap().to_string();
+        assert!(program(&mut s).contains("M4 S0"));
+        s.execute("machine.set", &json!({"dialect": "marlin"})).unwrap();
+        assert!(program(&mut s).contains("M3 I S0"));
+        s.execute("machine.set", &json!({"dialect": "smoothie"})).unwrap();
+        assert!(!program(&mut s).contains("M4"));
+        assert!(s.execute("machine.set", &json!({"dialect": "ruida"})).is_err());
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

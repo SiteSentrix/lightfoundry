@@ -113,4 +113,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   pixels and are undoable; Atkinson, Jarvis, ordered (8x8 Bayer) and halftone (45 degree dot
   screen mapped through the spot function's quantiles so tone is preserved) join threshold,
   Floyd-Steinberg and grayscale. Image inspector gets a Crop and sharpen section.
+- **2026-10-14 — G-code dialects.** `Machine::dialect` (GRBL, Marlin laser with `M3 I` inline
+  power, Smoothieware with 0-1 `S` on each G1 and no spindle commands), chosen in the Device
+  section and `machine.set`; written from the public firmware docs, flagged as untested on
+  hardware; out-of-bed refusal applies to all. The serial link features stay GRBL-only.
 

@@ -29,7 +29,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Device Settings",
         menu: "Laser",
         shortcut: None,
-        params_doc: "{name?, bed_width?, bed_height?, origin?: bottom_left|top_left, max_s?, dynamic_power?, rapid_speed?, overscan?}",
+        params_doc: "{name?, bed_width?, bed_height?, origin?: bottom_left|top_left, max_s?, dynamic_power?, rapid_speed?, overscan?, dialect?: grbl|marlin|smoothie}",
         mutates: true,
         run: machine_set,
     },
@@ -142,6 +142,7 @@ struct MachineParams {
     dynamic_power: Option<bool>,
     rapid_speed: Option<f64>,
     overscan: Option<f64>,
+    dialect: Option<lightfoundry_doc::Dialect>,
 }
 
 fn machine_set(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
@@ -170,6 +171,7 @@ fn machine_set(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     }
     m.origin = p.origin.unwrap_or(m.origin);
     m.dynamic_power = p.dynamic_power.unwrap_or(m.dynamic_power);
+    m.dialect = p.dialect.unwrap_or(m.dialect);
     Ok(json!({ "bed": [m.bed_width, m.bed_height] }))
 }
 
