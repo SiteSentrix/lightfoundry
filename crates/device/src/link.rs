@@ -58,10 +58,20 @@ pub enum LinkError {
     Rejected(String),
 }
 
+/// Worker iterations run per [`Link::tick`] on an inline link.
+const INLINE_STEPS: usize = 40;
+
 pub struct Link {
     tx: Sender<Cmd>,
     shared: Arc<Mutex<Shared>>,
     handle: Option<JoinHandle<()>>,
+    /// Set for links that run on the caller's thread (see [`Link::connect_inline`]).
+    inline: Option<Mutex<Inline>>,
+}
+
+struct Inline {
+    worker: Worker,
+    finished: bool,
 }
 
 impl Link {
@@ -73,7 +83,37 @@ impl Link {
         }
         let worker_shared = Arc::clone(&shared);
         let handle = std::thread::spawn(move || Worker::new(transport, rx, worker_shared).run());
-        Link { tx, shared, handle: Some(handle) }
+        Link { tx, shared, handle: Some(handle), inline: None }
+    }
+
+    /// A link with no thread of its own, for hosts that have none (the browser): the owner calls
+    /// [`tick`](Link::tick) regularly, and the transport must never block (return `None` from
+    /// `read_line` at once when nothing has arrived).
+    pub fn connect_inline(transport: Box<dyn Transport + Send>) -> Link {
+        let (tx, rx) = channel();
+        let shared = Arc::new(Mutex::new(Shared::default()));
+        if let Ok(mut s) = shared.lock() {
+            s.connected = true;
+        }
+        let worker = Worker::new(transport, rx, Arc::clone(&shared));
+        Link { tx, shared, handle: None, inline: Some(Mutex::new(Inline { worker, finished: false })) }
+    }
+
+    /// Does the work an inline link's thread would have done since the last call. Does nothing for
+    /// ordinary links.
+    pub fn tick(&self) {
+        let Some(inline) = &self.inline else { return };
+        let Ok(mut guard) = inline.lock() else { return };
+        let inline = &mut *guard;
+        for _ in 0..INLINE_STEPS {
+            if inline.finished {
+                break;
+            }
+            if !inline.worker.iteration() {
+                inline.worker.finish();
+                inline.finished = true;
+            }
+        }
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -189,6 +229,15 @@ impl Drop for Link {
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }
+        // An inline link has no thread to notice the request: process it here.
+        self.tick();
+        if let Some(inline) = &self.inline
+            && let Ok(mut guard) = inline.lock()
+            && !guard.finished
+        {
+            guard.worker.finish();
+            guard.finished = true;
+        }
     }
 }
 
@@ -278,25 +327,33 @@ impl Worker {
     }
 
     fn run(mut self) {
-        loop {
-            match self.drain_commands() {
-                Ok(true) => {}
-                Ok(false) => break,
-                Err(e) => {
-                    self.fail_io(e);
-                    break;
-                }
-            }
-            if let Err(e) = self.step() {
-                if matches!(e, DeviceError::Io(_)) {
-                    // The connection itself is gone; there is nothing left to talk to.
-                    self.fail_io(e);
-                    break;
-                }
-                self.fail_job(e);
+        while self.iteration() {}
+        self.finish();
+    }
+
+    /// One pass of the worker loop; `false` when it is time to stop.
+    fn iteration(&mut self) -> bool {
+        match self.drain_commands() {
+            Ok(true) => {}
+            Ok(false) => return false,
+            Err(e) => {
+                self.fail_io(e);
+                return false;
             }
         }
-        // Closing: stop motion and the laser if a job was in progress.
+        if let Err(e) = self.step() {
+            if matches!(e, DeviceError::Io(_)) {
+                // The connection itself is gone; there is nothing left to talk to.
+                self.fail_io(e);
+                return false;
+            }
+            self.fail_job(e);
+        }
+        true
+    }
+
+    /// Closing: stop motion and the laser if a job was in progress.
+    fn finish(&mut self) {
         if self.job.is_some() {
             let _ = self.transport.write_all(&[realtime::SOFT_RESET]);
         }
@@ -705,6 +762,70 @@ mod tests {
             link.start_job(format!("G1 {}", "X1 ".repeat(40))).unwrap();
             let s = wait_for(&link, "failure", |s| matches!(s.job, JobState::Finished(_)));
             assert!(matches!(s.job, JobState::Finished(Err(_))));
+        }
+    }
+
+    mod inline_tests {
+        use super::*;
+
+        /// Ticks until `ok` holds; an inline link makes no progress by itself.
+        fn tick_until(link: &Link, what: &str, mut ok: impl FnMut(&Snapshot) -> bool) -> Snapshot {
+            let start = Instant::now();
+            loop {
+                link.tick();
+                let s = link.snapshot();
+                if ok(&s) {
+                    return s;
+                }
+                assert!(start.elapsed() < WAIT, "timed out waiting for {what}; console: {:?}", s.console);
+            }
+        }
+
+        #[test]
+        fn an_inline_link_needs_a_tick_to_do_anything_and_then_behaves_like_a_threaded_one() {
+            let link = Link::connect_inline(Box::new(SimulatedGrbl::new()));
+            assert!(link.snapshot().status.is_none(), "nothing happens without ticks");
+            tick_until(&link, "a status", |s| s.status.is_some());
+            link.jog(10.0, 5.0, 3000.0).unwrap();
+            tick_until(&link, "the jog", |s| position(s) == Some((10.0, 5.0)));
+            link.request_settings().unwrap();
+            let s = tick_until(&link, "settings", |s| s.settings.len() > 20);
+            assert!(s.connected);
+        }
+
+        #[test]
+        fn a_job_runs_to_the_end_and_can_be_stopped() {
+            let link = Link::connect_inline(Box::new(SimulatedGrbl::new()));
+            link.start_job(long_program(60)).unwrap();
+            tick_until(&link, "the job to finish", |s| matches!(s.job, JobState::Finished(Ok(_))));
+
+            link.start_job(long_program(5000)).unwrap();
+            tick_until(&link, "the job to run", |s| s.job == JobState::Running);
+            assert_eq!(link.send_line("G0 X1"), Err(LinkError::Busy));
+            link.stop().unwrap();
+            let s = tick_until(&link, "the stop", |s| matches!(s.job, JobState::Finished(Err(_))));
+            assert!(s.connected, "stopping keeps the connection");
+        }
+
+        #[test]
+        fn a_broken_transport_disconnects_and_dropping_a_running_inline_link_does_not_hang() {
+            struct Broken;
+            impl Transport for Broken {
+                fn write_all(&mut self, _: &[u8]) -> io::Result<()> {
+                    Err(io::Error::other("unplugged"))
+                }
+
+                fn read_line(&mut self, _: Duration) -> io::Result<Option<String>> {
+                    Err(io::Error::other("unplugged"))
+                }
+            }
+            let link = Link::connect_inline(Box::new(Broken));
+            tick_until(&link, "the disconnect", |s| !s.connected);
+            drop(link);
+            let link = Link::connect_inline(Box::new(SimulatedGrbl::new()));
+            link.start_job(long_program(5000)).unwrap();
+            tick_until(&link, "the job to run", |s| s.job == JobState::Running);
+            drop(link);
         }
     }
 

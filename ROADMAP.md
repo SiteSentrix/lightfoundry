@@ -196,4 +196,12 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   (shared `doc::base64`). The web build opens and imports through the browser's file chooser and
   saves projects and G-code as downloads; verified in headless Chromium (upload of an SVG, download
   of a project).
+- **2026-10-14 — browser machine link (Web Serial).** `Link::connect_inline` runs the same worker
+  on the caller's thread, driven by `Link::tick` once per frame (30 ms while connected); the
+  transport only has to be non-blocking. `Platform` gained `inline_link`, `serial_async`,
+  `request_serial` and `take_serial` (the person picks the device in the browser's prompt). The web
+  build's `WebSerial` transport wraps the Web Serial streams (queued ordered writes, a reader task,
+  EOF on close); the simulator also works there (`set_non_blocking`). Verified in headless Chromium
+  against a scripted fake device (connect, status polling, G-code generated and streamed to the
+  end). Real hardware through a browser is untested, like the desktop link.
 

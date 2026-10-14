@@ -13,8 +13,10 @@ mod web {
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    use lightfoundry_device::Transport;
     use lightfoundry_ui_egui::{LightFoundryApp, Platform, Upload};
     use wasm_bindgen::prelude::*;
+    use wasm_bindgen_futures::{JsFuture, spawn_local};
 
     /// Starts the app on the `<canvas>` with the given id.
     #[wasm_bindgen]
@@ -30,7 +32,12 @@ mod web {
                 canvas,
                 eframe::WebOptions::default(),
                 Box::new(|_cc| {
-                    Ok(Box::new(Host { app: LightFoundryApp::new(Session::new(), Box::new(WebPlatform { inbox: Rc::new(RefCell::new(None)) })) }))
+                    Ok(Box::new(Host {
+                        app: LightFoundryApp::new(
+                            Session::new(),
+                            Box::new(WebPlatform { inbox: Rc::new(RefCell::new(None)), serial: Rc::new(RefCell::new(None)) }),
+                        ),
+                    }))
                 }),
             )
             .await
@@ -41,6 +48,8 @@ mod web {
     struct WebPlatform {
         /// The chosen file once it has been read (shared with the browser callbacks).
         inbox: Rc<RefCell<Option<Upload>>>,
+        /// The serial device once the person has chosen it and it is open (or why not).
+        serial: Rc<RefCell<Option<Result<Box<dyn Transport + Send>, String>>>>,
     }
 
     impl Platform for WebPlatform {
@@ -72,16 +81,32 @@ mod web {
             }
         }
 
-        fn machine_available(&self) -> bool {
-            false
+        fn inline_link(&self) -> bool {
+            true
+        }
+
+        fn serial_async(&self) -> bool {
+            true
+        }
+
+        fn request_serial(&self) {
+            let slot = Rc::clone(&self.serial);
+            spawn_local(async move {
+                let result = open_serial_port().await.map_err(describe);
+                *slot.borrow_mut() = Some(result);
+            });
+        }
+
+        fn take_serial(&self) -> Option<Result<Box<dyn Transport + Send>, String>> {
+            self.serial.borrow_mut().take()
         }
 
         fn serial_ports(&self) -> Vec<String> {
-            Vec::new()
+            if web_serial_available() { vec!["USB serial device".into()] } else { Vec::new() }
         }
 
-        fn open_serial(&self, _: &str) -> Result<Box<dyn lightfoundry_device::Transport + Send>, String> {
-            Err("serial ports are not available in the browser build".into())
+        fn open_serial(&self, _: &str) -> Result<Box<dyn Transport + Send>, String> {
+            Err("choose the device in the browser's prompt".into())
         }
     }
 
@@ -129,6 +154,150 @@ mod web {
         link.set_download(name);
         link.click();
         web_sys::Url::revoke_object_url(&url)
+    }
+
+    // ---- Web Serial ----------------------------------------------------------------------------
+    // The API is not in web-sys's stable set, so the few calls needed are declared here.
+
+    #[wasm_bindgen]
+    extern "C" {
+        #[wasm_bindgen(js_namespace = ["navigator", "serial"], js_name = requestPort, catch)]
+        fn serial_request_port() -> Result<js_sys::Promise, JsValue>;
+
+        type SerialPort;
+        #[wasm_bindgen(method, js_name = open)]
+        fn open(this: &SerialPort, options: &JsValue) -> js_sys::Promise;
+        #[wasm_bindgen(method, getter)]
+        fn readable(this: &SerialPort) -> Stream;
+        #[wasm_bindgen(method, getter)]
+        fn writable(this: &SerialPort) -> Stream;
+
+        type Stream;
+        #[wasm_bindgen(method, js_name = getReader)]
+        fn get_reader(this: &Stream) -> Reader;
+        #[wasm_bindgen(method, js_name = getWriter)]
+        fn get_writer(this: &Stream) -> Writer;
+
+        type Reader;
+        #[wasm_bindgen(method)]
+        fn read(this: &Reader) -> js_sys::Promise;
+
+        type Writer;
+        #[wasm_bindgen(method)]
+        fn write(this: &Writer, chunk: &JsValue) -> js_sys::Promise;
+    }
+
+    /// GRBL's usual speed.
+    const BAUD: f64 = 115_200.0;
+
+    fn web_serial_available() -> bool {
+        web_sys::window().is_some_and(|w| js_sys::Reflect::has(&w.navigator(), &JsValue::from_str("serial")).unwrap_or(false))
+    }
+
+    fn describe(e: JsValue) -> String {
+        e.as_string()
+            .or_else(|| js_sys::Reflect::get(&e, &JsValue::from_str("message")).ok().and_then(|m| m.as_string()))
+            .unwrap_or_else(|| "the browser refused".into())
+    }
+
+    /// Asks the person to choose a serial device, opens it and starts the reader.
+    async fn open_serial_port() -> Result<Box<dyn Transport + Send>, JsValue> {
+        if !web_serial_available() {
+            return Err(JsValue::from_str("this browser has no Web Serial (use a Chromium-based browser)"));
+        }
+        let port: SerialPort = JsFuture::from(serial_request_port()?).await?.unchecked_into();
+        let options = js_sys::Object::new();
+        js_sys::Reflect::set(&options, &JsValue::from_str("baudRate"), &JsValue::from_f64(BAUD))?;
+        JsFuture::from(port.open(&options)).await?;
+        let inbox = Rc::new(RefCell::new(Inbox::default()));
+        let reader = port.readable().get_reader();
+        let reading = Rc::clone(&inbox);
+        spawn_local(async move {
+            loop {
+                let Ok(chunk) = JsFuture::from(reader.read()).await else { break };
+                let done = js_sys::Reflect::get(&chunk, &JsValue::from_str("done")).ok().and_then(|d| d.as_bool()).unwrap_or(true);
+                if done {
+                    break;
+                }
+                if let Ok(value) = js_sys::Reflect::get(&chunk, &JsValue::from_str("value")) {
+                    reading.borrow_mut().bytes.extend(js_sys::Uint8Array::new(&value).to_vec());
+                }
+            }
+            reading.borrow_mut().closed = true;
+        });
+        let outbox = Rc::new(RefCell::new(Outbox::default()));
+        Ok(Box::new(WebSerial { inbox, outbox, writer: Rc::new(port.writable().get_writer()) }))
+    }
+
+    #[derive(Default)]
+    struct Inbox {
+        bytes: std::collections::VecDeque<u8>,
+        closed: bool,
+    }
+
+    #[derive(Default)]
+    struct Outbox {
+        chunks: std::collections::VecDeque<Vec<u8>>,
+        pumping: bool,
+    }
+
+    /// A serial device as a non-blocking [`Transport`]: reads come from what the reader task has
+    /// collected, and writes are queued for a task that sends them in order.
+    struct WebSerial {
+        inbox: Rc<RefCell<Inbox>>,
+        outbox: Rc<RefCell<Outbox>>,
+        writer: Rc<Writer>,
+    }
+
+    // SAFETY-ish note: the browser build is single-threaded (wasm32 without atomics has no other
+    // thread to move this to), so the `Send` the link's API asks for cannot be violated.
+    unsafe impl Send for WebSerial {}
+
+    impl Transport for WebSerial {
+        fn write_all(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+            if self.inbox.borrow().closed {
+                return Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the serial device was closed"));
+            }
+            let start = {
+                let mut out = self.outbox.borrow_mut();
+                out.chunks.push_back(bytes.to_vec());
+                !std::mem::replace(&mut out.pumping, true)
+            };
+            if start {
+                let (outbox, writer, inbox) = (Rc::clone(&self.outbox), Rc::clone(&self.writer), Rc::clone(&self.inbox));
+                spawn_local(async move {
+                    loop {
+                        let next = {
+                            let mut out = outbox.borrow_mut();
+                            let next = out.chunks.pop_front();
+                            if next.is_none() {
+                                out.pumping = false;
+                            }
+                            next
+                        };
+                        let Some(chunk) = next else { break };
+                        if JsFuture::from(writer.write(&js_sys::Uint8Array::from(chunk.as_slice()))).await.is_err() {
+                            inbox.borrow_mut().closed = true;
+                            outbox.borrow_mut().pumping = false;
+                            break;
+                        }
+                    }
+                });
+            }
+            Ok(())
+        }
+
+        fn read_line(&mut self, _timeout: std::time::Duration) -> std::io::Result<Option<String>> {
+            let mut inbox = self.inbox.borrow_mut();
+            if let Some(end) = inbox.bytes.iter().position(|b| *b == b'\n') {
+                let line: Vec<u8> = inbox.bytes.drain(..=end).collect();
+                return Ok(Some(String::from_utf8_lossy(&line).trim_end_matches(['\r', '\n']).to_string()));
+            }
+            if inbox.closed {
+                return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "the serial device was closed"));
+            }
+            Ok(None)
+        }
     }
 
     struct Host {
