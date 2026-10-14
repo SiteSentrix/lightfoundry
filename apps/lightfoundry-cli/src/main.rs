@@ -4,6 +4,7 @@
 //! lightfoundry-cli gcode design.svg -o job.gcode [--layer 0:speed=900,max_power=40] [--bed 300x200] [--origin top_left]
 //! lightfoundry-cli info design.svg
 //! lightfoundry-cli commands
+//! lightfoundry-cli mcp                        # Model Context Protocol server on stdin/stdout
 //! lightfoundry-cli run script.json            # [{"id": "...", "params": {...}}, ...] then prints the last result
 //! ```
 
@@ -21,6 +22,7 @@ usage: lightfoundry-cli <command>
                        [--set LAYER:key=value,key=value]...
   info <input>         shape count, size, estimated time
   commands             list every engine command with its parameters
+  mcp                  serve the engine's commands as MCP tools on stdin/stdout (for AI agents)
   run <script.json>    run a JSON array of {\"id\", \"params\"} commands and print the last result
 ";
 
@@ -46,6 +48,7 @@ fn run(args: &[String]) -> Result<String, String> {
         Some("info") => info(args.get(1).ok_or(USAGE)?),
         Some("gcode") => gcode(&args[1..]),
         Some("run") => script(args.get(1).ok_or(USAGE)?),
+        Some("mcp") => mcp(),
         _ => Err(USAGE.into()),
     }
 }
@@ -133,4 +136,14 @@ fn script(path: &str) -> Result<String, String> {
         last = s.execute(id, &step["params"]).map_err(|e| format!("step {} ({id}): {e}", n + 1))?;
     }
     serde_json::to_string_pretty(&last).map_err(|e| e.to_string())
+}
+
+/// Speaks MCP on stdin/stdout until the client closes the pipe. Nothing else may print to stdout.
+fn mcp() -> Result<String, String> {
+    let mut s = Session::new();
+    let stdin = std::io::stdin();
+    let mut input = stdin.lock();
+    let mut output = std::io::stdout().lock();
+    lightfoundry_mcp::serve(&mut s, &mut input, &mut output).map_err(|e| e.to_string())?;
+    Ok(String::new())
 }

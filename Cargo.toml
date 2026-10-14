@@ -23,6 +23,7 @@ lightfoundry-dxf = { path = "crates/dxf" }
 lightfoundry-format = { path = "crates/format" }
 lightfoundry-device = { path = "crates/device" }
 lightfoundry-engine = { path = "crates/engine" }
+lightfoundry-mcp = { path = "crates/mcp" }
 lightfoundry-ui-egui = { path = "crates/ui-egui" }
 
 # foundation
