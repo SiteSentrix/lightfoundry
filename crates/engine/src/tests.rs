@@ -952,6 +952,35 @@ mod import_tests {
     }
 
     #[test]
+    fn tracing_with_curve_fitting_needs_far_fewer_nodes_than_smoothing_and_validates() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-fit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("disc.png");
+        // A black disc of radius 40 on white.
+        image::GrayImage::from_fn(100, 100, |x, y| {
+            let (dx, dy) = (f64::from(x) - 50.0, f64::from(y) - 50.0);
+            image::Luma([if dx * dx + dy * dy < 1600.0 { 0 } else { 255 }])
+        })
+        .save(&path)
+        .unwrap();
+        let mut s = Session::new();
+        let pic = s.execute("file.import_image", &json!({"path": path, "width": 100})).unwrap()["id"].as_u64().unwrap();
+        let nodes = |s: &Session, id: u64| match &s.doc.shape(id).unwrap().kind {
+            lightfoundry_doc::ShapeKind::Path { path } => path.elements().len(),
+            _ => 0,
+        };
+        let smooth = s.execute("image.trace", &json!({"id": pic, "smooth": true, "tolerance": 1.0})).unwrap()["id"].as_u64().unwrap();
+        let fitted = s.execute("image.trace", &json!({"id": pic, "fit": 0.5, "tolerance": 1.0})).unwrap()["id"].as_u64().unwrap();
+        let (a, b) = (nodes(&s, smooth), nodes(&s, fitted));
+        assert!(b * 2 < a, "fitted {b} elements against smoothed {a}");
+        let bounds = s.doc.shape(fitted).unwrap().world_bounds().unwrap();
+        assert!((bounds.x1 - bounds.x0 - 80.0).abs() < 2.0, "{bounds:?}");
+        for bad in [json!({"id": pic, "fit": 0}), json!({"id": pic, "fit": 100}), json!({"id": pic, "fit": "x"})] {
+            assert!(s.execute("image.trace", &bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn tracing_in_tonal_bands_makes_nested_outlines_from_light_to_dark() {
         let dir = std::env::temp_dir().join(format!("lf-engine-bands-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
