@@ -26,6 +26,10 @@ pub const MAX_RASTER_CELLS: usize = 25_000_000;
 const MAX_DEDUPLICATED: usize = 200_000;
 /// Largest Z offset or per-pass step accepted, in mm.
 pub const MAX_Z_MM: f64 = 200.0;
+/// Largest overscan and ramp length accepted, in mm; ramps are built from steps of this size.
+pub const MAX_OVERSCAN_MM: f64 = 50.0;
+pub const MAX_RAMP_MM: f64 = 1000.0;
+const RAMP_STEP_MM: f64 = 0.5;
 /// Cap on total moves in a job.
 pub const MAX_MOVES: usize = 20_000_000;
 
@@ -143,7 +147,7 @@ fn emit_outline(moves: &mut Vec<Move>, doc: &Document, layer: &Layer, pl: &Polyl
         moves.push(Move::Travel(first));
         match &perforated {
             Some(pieces) => emit_dashes(moves, pieces, power),
-            None => moves.extend(pl.points.iter().skip(1).map(|p| Move::Cut { to: *p, power })),
+            None => cut_with_ramp(moves, &pl.points, false, layer, power),
         }
         return;
     }
@@ -182,13 +186,48 @@ fn emit_outline(moves: &mut Vec<Move>, doc: &Document, layer: &Layer, pl: &Polyl
                 moves.extend(piece.points.iter().skip(1).map(|pt| Move::Cut { to: *pt, power: p }));
             }
         }
-        None => {
-            moves.extend(pl.points.iter().skip(1).map(|p| Move::Cut { to: *p, power }));
-            moves.push(Move::Cut { to: first, power });
-        }
+        None => cut_with_ramp(moves, &pl.points, true, layer, power),
     }
     if let Some(exit) = lead(layer.lead_out) {
         moves.push(Move::Cut { to: exit, power });
+    }
+}
+
+/// Cuts along `points` (and back to the start for closed outlines), raising power from the layer's
+/// minimum to `power` over its ramp length when it has one.
+fn cut_with_ramp(moves: &mut Vec<Move>, points: &[Point], closed: bool, layer: &Layer, power: f64) {
+    let ramp = if layer.ramp_length.is_finite() { layer.ramp_length.clamp(0.0, MAX_RAMP_MM) } else { 0.0 };
+    let low = layer.min_power.clamp(0.0, power);
+    let Some(first) = points.first().copied() else { return };
+    let mut path: Vec<Point> = points.iter().skip(1).copied().collect();
+    if closed {
+        path.push(first);
+    }
+    if ramp <= 0.0 || low >= power {
+        moves.extend(path.into_iter().map(|p| Move::Cut { to: p, power }));
+        return;
+    }
+    let mut at = first;
+    let mut done = 0.0;
+    for to in path {
+        let seg = at.distance(to);
+        if seg <= 0.0 {
+            continue;
+        }
+        let mut pos = 0.0;
+        while pos < seg {
+            if done >= ramp {
+                moves.push(Move::Cut { to, power });
+                break;
+            }
+            let step = (seg - pos).min(RAMP_STEP_MM).min(ramp - done).max(1e-6);
+            let mid = (done + step / 2.0) / ramp;
+            let end = at.lerp(to, ((pos + step) / seg).min(1.0));
+            moves.push(Move::Cut { to: end, power: low + (power - low) * mid.clamp(0.0, 1.0) });
+            pos += step;
+            done += step;
+        }
+        at = to;
     }
 }
 
@@ -264,6 +303,14 @@ fn validate(layer: &Layer) -> Result<(), PlanError> {
     if !(layer.kerf_offset.is_finite() && layer.kerf_offset.abs() <= 50.0) {
         return Err(bad("kerf offset"));
     }
+    if let Some(o) = layer.overscan
+        && !(o.is_finite() && (0.0..=MAX_OVERSCAN_MM).contains(&o))
+    {
+        return Err(bad("overscan"));
+    }
+    if !(layer.ramp_length.is_finite() && (0.0..=MAX_RAMP_MM).contains(&layer.ramp_length)) {
+        return Err(bad("ramp length"));
+    }
     for (value, what) in [(layer.z_offset, "Z offset"), (layer.z_per_pass, "Z step per pass")] {
         if !(value.is_finite() && value.abs() <= MAX_Z_MM) {
             return Err(bad(what));
@@ -309,10 +356,21 @@ fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) ->
             if segs.is_empty() {
                 continue;
             }
+            let over = layer.overscan.filter(|o| o.is_finite()).map_or(0.0, |o| o.clamp(0.0, MAX_OVERSCAN_MM));
             let mut moves = Vec::with_capacity(segs.len() * 2);
             for (a, b) in segs {
-                moves.push(Move::Travel(a));
-                moves.push(Move::Cut { to: b, power });
+                let len = a.distance(b);
+                if over > 0.0 && len > 0.0 {
+                    // Run up to speed before the line and slow down after it, laser off.
+                    let dir = (b - a) / len;
+                    moves.push(Move::Travel(keep_in_bed(doc, a, a - dir * over)));
+                    moves.push(Move::Cut { to: a, power: 0.0 });
+                    moves.push(Move::Cut { to: b, power });
+                    moves.push(Move::Cut { to: keep_in_bed(doc, b, b + dir * over), power: 0.0 });
+                } else {
+                    moves.push(Move::Travel(a));
+                    moves.push(Move::Cut { to: b, power });
+                }
             }
             ops.push(mk(OpKind::Fill, moves));
         }

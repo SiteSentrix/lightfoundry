@@ -1104,6 +1104,20 @@ mod import_tests {
     }
 
     #[test]
+    fn overscan_and_ramp_are_layer_settings_with_validation() {
+        let mut s = Session::new();
+        s.execute("layer.set", &json!({"id": 0, "overscan": 4, "ramp_length": 6})).unwrap();
+        assert_eq!((s.doc.layer(0).unwrap().overscan, s.doc.layer(0).unwrap().ramp_length), (Some(4.0), 6.0));
+        s.execute("layer.set", &json!({"id": 0, "default_overscan": true})).unwrap();
+        assert_eq!(s.doc.layer(0).unwrap().overscan, None);
+        for bad in [json!({"overscan": 99}), json!({"overscan": -1}), json!({"ramp_length": 1e6}), json!({"ramp_length": "x"})] {
+            let mut p = bad.clone();
+            p["id"] = json!(0);
+            assert!(s.execute("layer.set", &p).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

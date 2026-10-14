@@ -11,7 +11,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Cut Settings",
         menu: "Laser",
         shortcut: None,
-        params_doc: "{id, name?, color? (#rrggbb), mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, kerf_offset? (mm; closed outlines are offset before cutting, + grows parts and shrinks holes), tab_count? (per outer outline), tab_width? (mm), lead_in?/lead_out? (mm, on the scrap side), perf_cut?/perf_gap? (mm; both > 0 cuts outlines as dashes with the laser off over the gaps, instead of tabs), bidirectional?, crosshatch? (fill again at right angles), z_offset?/z_per_pass? (mm; Z height for the layer and the change per extra pass), dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
+        params_doc: "{id, name?, color? (#rrggbb), mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, kerf_offset? (mm; closed outlines are offset before cutting, + grows parts and shrinks holes), tab_count? (per outer outline), tab_width? (mm), lead_in?/lead_out? (mm, on the scrap side), perf_cut?/perf_gap? (mm; both > 0 cuts outlines as dashes with the laser off over the gaps, instead of tabs), bidirectional?, crosshatch? (fill again at right angles), overscan? (mm run-up beyond fill lines and picture rows) or default_overscan: true (machine setting for pictures, none for fills), ramp_length? (mm over which outline power rises from the minimum), z_offset?/z_per_pass? (mm; Z height for the layer and the change per extra pass), dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
         mutates: true,
         run: layer_set,
     },
@@ -56,6 +56,10 @@ struct LayerParams {
     perf_gap: Option<f64>,
     crosshatch: Option<bool>,
     z_offset: Option<f64>,
+    overscan: Option<f64>,
+    #[serde(default)]
+    default_overscan: bool,
+    ramp_length: Option<f64>,
     z_per_pass: Option<f64>,
     bidirectional: Option<bool>,
     dither: Option<Dither>,
@@ -91,6 +95,14 @@ fn layer_set(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         layer.lead_in = in_range("lead_in", v, 0.0, 1000.0)?;
     }
     layer.crosshatch = p.crosshatch.unwrap_or(layer.crosshatch);
+    if p.default_overscan {
+        layer.overscan = None;
+    } else if let Some(v) = p.overscan {
+        layer.overscan = Some(in_range("overscan", v, 0.0, 50.0)?);
+    }
+    if let Some(v) = p.ramp_length {
+        layer.ramp_length = in_range("ramp_length", v, 0.0, 1000.0)?;
+    }
     if let Some(v) = p.z_offset {
         layer.z_offset = in_range("z_offset", v, -200.0, 200.0)?;
     }
