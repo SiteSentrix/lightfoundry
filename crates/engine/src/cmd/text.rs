@@ -62,6 +62,7 @@ fn create(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         transform: Affine::translate((p.x, p.y)),
         kind: ShapeKind::Text { content: p.text, style: settings, path },
         cut: None,
+        group: None,
     };
     let id = s.doc.add_shape(shape);
     s.selection = vec![id];

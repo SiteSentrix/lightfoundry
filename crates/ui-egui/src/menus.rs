@@ -111,6 +111,16 @@ fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 }
             });
         });
+        ui.separator();
+        if ui.add(egui::Button::new("Group").shortcut_text("Ctrl+G")).clicked() {
+            app.run("edit.group", json!({}));
+            ui.close();
+        }
+        if ui.add(egui::Button::new("Ungroup").shortcut_text("Ctrl+Shift+G")).clicked() {
+            app.run("edit.ungroup", json!({}));
+            ui.close();
+        }
+        ui.separator();
         if ui.button("Join Paths").clicked() {
             app.run("path.join", json!({}));
             ui.close();

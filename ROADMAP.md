@@ -70,3 +70,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   Material test grid section in the Laser panel and an Own cut settings section in the Selection
   panel. Process note: a gate failure in the previous commit slipped through a shell pipeline; the
   gate script now stops on failure.
+- **2026-10-14 — groups and layers.** Shapes carry an optional group id: selecting a member selects
+  the group, copies and array copies form groups of their own (never sharing the original's),
+  `edit.group` / `edit.ungroup` (Ctrl+G, Ctrl+Shift+G, merging existing groups). Layers can be
+  renamed, recoloured (#rrggbb) and reordered (`layer.move`; list order is cut order).

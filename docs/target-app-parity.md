@@ -8,7 +8,7 @@
 
 | Area                  | Score | Shipped                                                                 | Missing (highlights)                                                                                     |
 |-----------------------|------:|-------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
-| Drawing tools         |  40% | rectangle (rounded), ellipse, line, polygon, editable text (stroke font), grid/circular arrays, join, boolean ops, offset; move, resize, rotate, flip, align | pen/Bézier editing, node edit, outline fonts (Fill-mode text), groups, tabs/bridges |
+| Drawing tools         |  45% | rectangle (rounded), ellipse, line, polygon, editable text (stroke font), grid/circular arrays, groups, join, boolean ops, offset; move, resize, rotate, flip, align | pen/Bézier editing, node edit, outline fonts (Fill-mode text) |
 | Import                |   40% | SVG, DXF (basic entities), raster images with thumbnails and tone adjustments (brightness, contrast, gamma, negative) | AI/PDF/EPS, DXF splines/ellipses/text/blocks, image trace, crop/resize-resample, sharpen, SVG text/images |
 | Layers & cut settings |  55% | 16 layers; line, fill, fill+line, image; speed, power, passes, interval, kerf offset, tabs/bridges, lead-in/out; per-shape settings override; material test grid generator | sub-layers, perforation, ramp, Z offset, per-layer overscan, material library |
 | Toolpath planning     |  40% | inner-first, nearest neighbour, scan fill, dithered raster, kerf, tabs, lead-in/out, estimate | cut-order optimiser options, remove overlaps, start-point choice, cut selected only |
@@ -25,7 +25,7 @@ low power, and stay present.
 
 ## Evidence of what ships
 
-- 257 tests across the workspace (`cargo test --workspace`); gates in `cargo xtask ci`.
+- 265 tests across the workspace (`cargo test --workspace`); gates in `cargo xtask ci`.
 - End-to-end: `lightfoundry-cli gcode demo.svg` → G-code; the desktop app was driven under Xvfb
   (draw with each tool, generate, start on the simulator, progress and completion shown; jog pad
   clicks moved the simulated head the expected way and the console logged each `$J=` line).

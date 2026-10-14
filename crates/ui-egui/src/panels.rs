@@ -72,7 +72,7 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     }
     let Some(layer) = app.session.doc.layer(app.active_layer).cloned() else { return };
     ui.add_space(4.0);
-    ui.label(egui::RichText::new(&layer.name).strong());
+    layer_header(app, ui, &layer);
     let mut output = layer.output;
     if ui.checkbox(&mut output, "Output").changed() {
         app.run("layer.set", json!({ "id": layer.id, "output": output }));
@@ -766,6 +766,26 @@ fn test_grid_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 "speed_min": app.grid_speed.0, "speed_max": app.grid_speed.1, "power_min": app.grid_power.0, "power_max": app.grid_power.1,
             });
             app.run("generate.test_grid", params);
+        }
+    });
+}
+
+/// Name, and position in the cut order (layers are cut top to bottom of this list).
+fn layer_header(app: &mut LightFoundryApp, ui: &mut egui::Ui, layer: &lightfoundry_doc::Layer) {
+    let position = app.session.doc.layers.iter().position(|l| l.id == layer.id).unwrap_or(0);
+    let last = app.session.doc.layers.len().saturating_sub(1);
+    ui.horizontal(|ui| {
+        let mut name = layer.name.clone();
+        let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(110.0));
+        if r.lost_focus() && name != layer.name && !name.trim().is_empty() {
+            app.run("layer.set", json!({ "id": layer.id, "name": name }));
+        }
+        ui.label(format!("#{} of {}", position + 1, last + 1));
+        if ui.add_enabled(position > 0, egui::Button::new("Earlier")).on_hover_text("Cut this layer sooner").clicked() {
+            app.run("layer.move", json!({ "id": layer.id, "index": position - 1 }));
+        }
+        if ui.add_enabled(position < last, egui::Button::new("Later")).on_hover_text("Cut this layer later").clicked() {
+            app.run("layer.move", json!({ "id": layer.id, "index": position + 1 }));
         }
     });
 }

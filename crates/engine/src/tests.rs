@@ -231,6 +231,113 @@ mod override_and_test_grid_tests {
     }
 }
 
+mod group_and_layer_tests {
+    use super::*;
+
+    fn rects(s: &mut Session, n: usize) -> Vec<u64> {
+        (0..n)
+            .map(|i| s.execute("shape.rectangle", &json!({"x": i as f64 * 30.0, "y": 0, "width": 10, "height": 10})).unwrap()["id"].as_u64().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn grouped_shapes_select_and_move_as_one() {
+        let mut s = Session::new();
+        let ids = rects(&mut s, 3);
+        s.execute("edit.group", &json!({"ids": [ids[0], ids[1]]})).unwrap();
+        s.execute("edit.select", &json!({"ids": [ids[0]]})).unwrap();
+        assert_eq!(s.selection, vec![ids[0], ids[1]], "selecting one member selects the group");
+        s.execute("edit.move", &json!({"dx": 5, "dy": 0})).unwrap();
+        assert_eq!(s.doc.shape(ids[1]).unwrap().world_bounds().unwrap().x0, 35.0);
+        assert_eq!(s.doc.shape(ids[2]).unwrap().world_bounds().unwrap().x0, 60.0, "the non-member stays");
+        s.execute("edit.select", &json!({"ids": [ids[2]]})).unwrap();
+        assert_eq!(s.selection, vec![ids[2]]);
+    }
+
+    #[test]
+    fn ungroup_frees_the_members_and_group_needs_two_shapes() {
+        let mut s = Session::new();
+        let ids = rects(&mut s, 3);
+        assert!(s.execute("edit.group", &json!({"ids": [ids[0]]})).is_err());
+        assert!(s.execute("edit.ungroup", &json!({"ids": [ids[0]]})).is_err(), "nothing was grouped");
+        s.execute("edit.group", &json!({"ids": ids})).unwrap();
+        s.execute("edit.ungroup", &json!({"ids": [ids[1]]})).unwrap();
+        s.execute("edit.select", &json!({"ids": [ids[0]]})).unwrap();
+        assert_eq!(s.selection, vec![ids[0]]);
+        s.execute("edit.undo", &Value::Null).unwrap();
+        s.execute("edit.select", &json!({"ids": [ids[0]]})).unwrap();
+        assert_eq!(s.selection.len(), 3, "undo restores the group");
+    }
+
+    #[test]
+    fn grouping_merges_existing_groups_and_copies_get_their_own() {
+        let mut s = Session::new();
+        let ids = rects(&mut s, 4);
+        s.execute("edit.group", &json!({"ids": [ids[0], ids[1]]})).unwrap();
+        s.execute("edit.group", &json!({"ids": [ids[1], ids[2]]})).unwrap();
+        s.execute("edit.select", &json!({"ids": [ids[0]]})).unwrap();
+        assert_eq!(s.selection.len(), 3, "the two groups merged");
+        s.execute("edit.duplicate", &json!({"dx": 0, "dy": 40})).unwrap();
+        let copies = s.selection.clone();
+        assert_eq!(copies.len(), 3);
+        s.execute("edit.move", &json!({"ids": [copies[0]], "dx": 1, "dy": 0})).unwrap();
+        s.execute("edit.select", &json!({"ids": [ids[0]]})).unwrap();
+        assert_eq!(s.selection.len(), 3, "the original group does not include the copies");
+        s.execute("edit.select", &json!({"ids": [copies[1]]})).unwrap();
+        assert_eq!(s.selection.len(), 3, "the copies are a group of their own");
+        assert!(!s.selection.contains(&ids[0]));
+        // Arrays of a group make a group per copy.
+        s.execute("edit.select", &json!({"ids": [ids[0]]})).unwrap();
+        s.execute("arrange.grid", &json!({"columns": 2, "rows": 1})).unwrap();
+        let last_copy = *s.selection.last().unwrap();
+        s.execute("edit.select", &json!({"ids": [last_copy]})).unwrap();
+        assert_eq!(s.selection.len(), 3, "each array copy of a group is a group");
+        assert!(!s.selection.contains(&ids[0]), "and does not include the original");
+    }
+
+    #[test]
+    fn groups_survive_saving() {
+        let mut s = Session::new();
+        let ids = rects(&mut s, 2);
+        s.execute("edit.group", &json!({"ids": ids})).unwrap();
+        let back = lightfoundry_format::from_bytes(&lightfoundry_format::to_bytes(&s.doc).unwrap()).unwrap();
+        assert_eq!(back.expand_groups(&[ids[0]]).len(), 2);
+    }
+
+    #[test]
+    fn layers_can_be_renamed_recoloured_and_reordered_and_order_is_cut_order() {
+        let mut s = Session::new();
+        s.execute("machine.set", &json!({"origin": "top_left"})).unwrap();
+        s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10, "layer": 0})).unwrap();
+        s.execute("shape.rectangle", &json!({"x": 50, "y": 0, "width": 10, "height": 10, "layer": 1})).unwrap();
+        let first_x = |s: &mut Session| {
+            let g = s.execute("job.gcode", &json!({"include": true})).unwrap();
+            g["gcode"].as_str().unwrap().lines().find(|l| l.starts_with("G0 X")).unwrap().to_string()
+        };
+        assert!(first_x(&mut s).starts_with("G0 X0 ") || first_x(&mut s).starts_with("G0 X0"), "layer 0 is cut first");
+        s.execute("layer.move", &json!({"id": 1, "index": 0})).unwrap();
+        assert_eq!(s.doc.layers[0].id, 1);
+        assert!(first_x(&mut s).starts_with("G0 X50"), "now layer 1 goes first");
+        s.execute("layer.set", &json!({"id": 1, "name": "Cut outside", "color": "#AABBCC"})).unwrap();
+        assert_eq!((s.doc.layer(1).unwrap().name.as_str(), s.doc.layer(1).unwrap().color.as_str()), ("Cut outside", "#aabbcc"));
+        for bad in [
+            json!({"id": 1, "color": "red"}),
+            json!({"id": 1, "color": "#12345"}),
+            json!({"id": 1, "color": "#gg0000"}),
+            json!({"id": 1, "color": "#aabbccdd"}),
+        ] {
+            assert!(s.execute("layer.set", &bad).is_err(), "{bad}");
+        }
+        assert_eq!(s.doc.layer(1).unwrap().color, "#aabbcc", "rejected colours change nothing");
+        assert!(s.execute("layer.move", &json!({"id": 99, "index": 0})).is_err());
+        assert!(s.execute("layer.move", &json!({"id": 1, "index": 16})).is_err());
+        assert!(s.execute("layer.move", &json!({"id": 1, "index": -1})).is_err());
+        s.execute("edit.undo", &Value::Null).unwrap();
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(s.doc.layers[0].id, 0, "reordering is undoable");
+    }
+}
+
 mod array_tests {
     use super::*;
 
