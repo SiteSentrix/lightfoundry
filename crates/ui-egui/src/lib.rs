@@ -6,6 +6,7 @@ mod geometry;
 mod menus;
 mod panels;
 mod platform;
+pub(crate) mod snap;
 mod theme;
 mod view;
 
@@ -71,6 +72,13 @@ pub struct LightFoundryApp {
     array_rows: u32,
     array_gap: f64,
     array_count: u32,
+    snapping: snap::SnapSettings,
+    show_rulers: bool,
+    guides: Vec<canvas::Guide>,
+    /// Where the canvas was drawn last frame (screen points).
+    canvas_rect: Option<egui::Rect>,
+    /// Alignment lines the last drag locked onto, for drawing: (x, y).
+    snap_lines: (Option<f64>, Option<f64>),
     grid_cols: u32,
     grid_rows: u32,
     grid_speed: (f64, f64),
@@ -137,6 +145,11 @@ impl LightFoundryApp {
             array_rows: 3,
             array_gap: 5.0,
             array_count: 6,
+            snapping: snap::SnapSettings::default(),
+            show_rulers: true,
+            guides: Vec::new(),
+            canvas_rect: None,
+            snap_lines: (None, None),
             grid_cols: 5,
             grid_rows: 5,
             grid_speed: (200.0, 1200.0),

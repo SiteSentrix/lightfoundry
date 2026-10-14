@@ -12,18 +12,31 @@ struct Harness {
     ctx: egui::Context,
     app: LightFoundryApp,
     time: f64,
+    /// Modifier keys held during the frames that follow (announced to egui when they change).
+    modifiers: Modifiers,
+    sent_modifiers: Modifiers,
 }
 
 impl Harness {
     fn new() -> Self {
-        let mut h = Harness { ctx: egui::Context::default(), app: LightFoundryApp::new(Session::new(), Box::new(NoPlatform)), time: 0.0 };
+        let mut h = Harness {
+            ctx: egui::Context::default(),
+            app: LightFoundryApp::new(Session::new(), Box::new(NoPlatform)),
+            time: 0.0,
+            modifiers: Modifiers::NONE,
+            sent_modifiers: Modifiers::NONE,
+        };
         h.frame(vec![]);
         h.frame(vec![]);
         h
     }
 
-    fn frame(&mut self, events: Vec<Event>) {
+    fn frame(&mut self, mut events: Vec<Event>) {
         self.time += 0.016;
+        if self.modifiers != self.sent_modifiers {
+            events.insert(0, Event::ModifiersChanged(self.modifiers));
+            self.sent_modifiers = self.modifiers;
+        }
         let input =
             RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), SCREEN)), time: Some(self.time), events, ..Default::default() };
         let app = &mut self.app;
@@ -91,7 +104,13 @@ fn temp_dir(tag: &str) -> std::path::PathBuf {
 }
 
 fn harness_with(platform: RecoveryPlatform) -> Harness {
-    let mut h = Harness { ctx: egui::Context::default(), app: LightFoundryApp::new(Session::new(), Box::new(platform)), time: 0.0 };
+    let mut h = Harness {
+        ctx: egui::Context::default(),
+        app: LightFoundryApp::new(Session::new(), Box::new(platform)),
+        time: 0.0,
+        modifiers: Modifiers::NONE,
+        sent_modifiers: Modifiers::NONE,
+    };
     h.frame(vec![]);
     h.frame(vec![]);
     h
@@ -455,6 +474,151 @@ mod image_tests {
         h.click(h.at(c.x, c.y));
         assert_eq!(h.app.session.selection, vec![id]);
         h.frame(vec![]); // the Image inspector is drawn for it
+    }
+}
+
+mod snapping_tests {
+    use super::*;
+
+    fn last_bounds(h: &Harness) -> lightfoundry_geom::Rect {
+        h.app.session.doc.shapes.last().unwrap().world_bounds().unwrap()
+    }
+
+    #[test]
+    fn grid_snapping_puts_a_created_rectangle_exactly_on_the_grid() {
+        let mut h = Harness::new();
+        h.app.snapping = snap::SnapSettings { grid: Some(5.0), objects: false };
+        h.app.tool = Tool::Rectangle;
+        h.drag(h.at(52.0, 51.0), h.at(88.0, 96.5));
+        let b = last_bounds(&h);
+        assert_eq!((b.x0, b.y0, b.x1, b.y1), (50.0, 50.0, 90.0, 95.0), "{b:?}");
+    }
+
+    #[test]
+    fn without_snapping_the_drag_is_taken_literally() {
+        let mut h = Harness::new();
+        h.app.snapping = snap::SnapSettings { grid: None, objects: false };
+        h.app.tool = Tool::Rectangle;
+        h.drag(h.at(52.0, 51.0), h.at(88.0, 96.5));
+        let b = last_bounds(&h);
+        assert!((b.x0 - 52.0).abs() < 0.05 && (b.y1 - 96.5).abs() < 0.05, "{b:?}");
+    }
+
+    #[test]
+    fn a_new_shape_snaps_to_the_edges_of_an_existing_one() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 100, "y": 100, "width": 40, "height": 40}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.frame(vec![]);
+        h.app.tool = Tool::Rectangle;
+        // Start 1.5 mm left of the existing rectangle's left edge and 2 mm above its centre line.
+        h.drag(h.at(98.5, 118.0), h.at(60.0, 60.0));
+        let b = last_bounds(&h);
+        assert_eq!(b.x1, 100.0, "the new rectangle's right edge locks to x = 100: {b:?}");
+        assert_eq!(b.y1, 120.0, "and its bottom to the centre line y = 120");
+    }
+
+    #[test]
+    fn shift_makes_squares_and_circles() {
+        let mut h = Harness::new();
+        h.app.snapping = snap::SnapSettings { grid: None, objects: false };
+        h.app.tool = Tool::Rectangle;
+        h.modifiers = Modifiers::SHIFT;
+        h.drag(h.at(50.0, 50.0), h.at(110.0, 70.0));
+        let b = last_bounds(&h);
+        assert!((b.width() - b.height()).abs() < 1e-6 && (b.width() - 60.0).abs() < 0.1, "{b:?}");
+        h.app.tool = Tool::Line;
+        h.drag(h.at(200.0, 200.0), h.at(260.0, 204.0));
+        let line = last_bounds(&h);
+        assert!(line.height() < 1e-6, "a nearly horizontal line becomes horizontal: {line:?}");
+    }
+
+    #[test]
+    fn moving_a_shape_locks_it_to_another_shapes_edge_and_shows_the_alignment() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 100, "y": 20, "width": 30, "height": 30}));
+        h.app.run("shape.rectangle", json!({"x": 20, "y": 120, "width": 30, "height": 30}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.frame(vec![]);
+        // Drag the second shape right so its left edge ends 1.3 mm short of x = 100.
+        h.drag(h.at(35.0, 135.0), h.at(35.0 + 78.7, 135.0));
+        let b = h.app.session.doc.shapes[1].world_bounds().unwrap();
+        assert!((b.x0 - 100.0).abs() < 1e-6, "left edges aligned: {b:?}");
+    }
+
+    #[test]
+    fn shift_locks_a_move_to_one_axis() {
+        let mut h = Harness::new();
+        h.app.snapping = snap::SnapSettings { grid: None, objects: false };
+        h.app.run("shape.rectangle", json!({"x": 100, "y": 100, "width": 30, "height": 30}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.frame(vec![]);
+        h.modifiers = Modifiers::SHIFT;
+        h.drag(h.at(115.0, 115.0), h.at(145.0, 123.0));
+        let b = h.app.session.doc.shapes[0].world_bounds().unwrap();
+        assert!((b.x0 - 130.0).abs() < 0.1 && (b.y0 - 100.0).abs() < 1e-6, "{b:?}");
+    }
+}
+
+mod ruler_and_guide_tests {
+    use super::*;
+
+    fn ruler_left(h: &Harness) -> egui::Pos2 {
+        let c = h.app.canvas_rect.expect("canvas drawn");
+        c.min + vec2(canvas_ruler() / 2.0, 200.0)
+    }
+
+    fn ruler_top(h: &Harness) -> egui::Pos2 {
+        let c = h.app.canvas_rect.expect("canvas drawn");
+        c.min + vec2(300.0, canvas_ruler() / 2.0)
+    }
+
+    fn canvas_ruler() -> f32 {
+        crate::canvas::RULER_PX
+    }
+
+    #[test]
+    fn dragging_out_of_the_rulers_makes_guides_and_dragging_back_removes_them() {
+        let mut h = Harness::new();
+        let target = h.at(150.0, 0.0);
+        let to = egui::pos2(target.x, h.app.canvas_rect.unwrap().min.y + 300.0);
+        h.drag(ruler_left(&h), to);
+        assert_eq!(h.app.guides.len(), 1, "{:?}", h.app.guides);
+        assert!(h.app.guides[0].vertical && (h.app.guides[0].pos - 150.0).abs() < 0.2, "{:?}", h.app.guides);
+        let down = h.at(0.0, 80.0);
+        h.drag(ruler_top(&h), egui::pos2(h.app.canvas_rect.unwrap().min.x + 400.0, down.y));
+        assert_eq!(h.app.guides.len(), 2);
+        assert!(!h.app.guides[1].vertical && (h.app.guides[1].pos - 80.0).abs() < 0.2);
+        assert!(h.app.session.doc.shapes.is_empty(), "no stray shapes were created by the ruler drags");
+        // Pull the vertical guide back onto the left ruler: it goes away.
+        let on_guide = h.at(150.0, 0.0);
+        h.drag(egui::pos2(on_guide.x, h.app.canvas_rect.unwrap().min.y + 300.0), ruler_left(&h));
+        assert_eq!(h.app.guides.len(), 1);
+        assert!(!h.app.guides[0].vertical);
+    }
+
+    #[test]
+    fn guides_attract_snapping_and_can_be_cleared() {
+        let mut h = Harness::new();
+        h.app.guides.push(crate::canvas::Guide { vertical: true, pos: 200.0 });
+        h.app.tool = Tool::Rectangle;
+        h.drag(h.at(198.5, 50.0), h.at(260.0, 90.0));
+        let b = h.app.session.doc.shapes.last().unwrap().world_bounds().unwrap();
+        assert_eq!(b.x0, 200.0, "the left edge locks to the guide at x = 200 (the bed centre line is also there)");
+        h.app.guides.clear();
+        h.frame(vec![]);
+        assert!(h.app.guides.is_empty());
+    }
+
+    #[test]
+    fn rulers_can_be_hidden_and_then_the_whole_canvas_takes_drags() {
+        let mut h = Harness::new();
+        h.app.show_rulers = false;
+        h.frame(vec![]);
+        h.drag(ruler_left(&h), ruler_left(&h) + vec2(120.0, 0.0));
+        assert!(h.app.guides.is_empty(), "no ruler, no guide");
+        h.app.show_rulers = true;
+        h.frame(vec![]);
     }
 }
 

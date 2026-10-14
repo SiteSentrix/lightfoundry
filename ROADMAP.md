@@ -74,3 +74,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   the group, copies and array copies form groups of their own (never sharing the original's),
   `edit.group` / `edit.ungroup` (Ctrl+G, Ctrl+Shift+G, merging existing groups). Layers can be
   renamed, recoloured (#rrggbb) and reordered (`layer.move`; list order is cut order).
+- **2026-10-14 — snapping and rulers.** Pure snap maths (`snap.rs`: axis snapping to edges, centres,
+  bed and guides with grid fallback; translation snapping that locks the closest selection edge;
+  Shift constraints for squares/circles and 15-degree lines; 1-2-5 ruler steps) wired into creation,
+  resize, move and text placement, with alignment lines while dragging. Rulers on the canvas edges
+  with a cursor marker, guides pulled out of the rulers (drag back to delete), View menu options.
+  Egui 0.36 delivers modifier keys as events, which the test harness now emits.

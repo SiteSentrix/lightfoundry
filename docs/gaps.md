@@ -10,7 +10,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 3  | Jog by dragging/clicking on the canvas; "move laser here" and show head position on canvas | Faster alignment                                              |
 | 4  | Outline fonts for text (Fill-mode text, accented/Unicode characters) via an optional font source (`storytold/craft-fonts` through a build option, never in-repo); today text is an ASCII single-line stroke font | Fill-engraved lettering and non-English text |
 | 5  | Node editing and a pen/Bézier tool                                                   | Cleaning up imports, drawing curves                                 |
-| 7  | Rulers, snapping, guides, numeric create dialogs                                     | Precision layout                                                    |
+| 7  | Numeric create dialogs; snapping to shape vertices and path midpoints (edges, centres, grid, bed and guides are done) | Precision layout                                                    |
 | 8  | Cut-order options (by layer/group, remove duplicate lines, choose start point)       | Quality and time                                                    |
 | 9  | Image crop, sharpen, halftone/newsprint dithers, trace to vectors (tone adjustments are done) | Photo engraving results                                  |
 | 10 | Perforation/dashed cuts, ramp, per-layer overscan setting (tabs and lead-in/out are done) | Clean cuts of special materials                                     |
