@@ -14,6 +14,8 @@ use lightfoundry_geom::{Point, Rect};
 use lightfoundry_toolpath::{Job, Move};
 use thiserror::Error;
 
+/// Largest feed rate written, mm/min.
+pub const MAX_FEED: f64 = 1_000_000.0;
 /// Slack (mm) allowed outside the bed before a job is refused.
 const BED_EPSILON: f64 = 1e-3;
 
@@ -23,6 +25,10 @@ pub enum GcodeError {
     OutOfBed { x: f64, y: f64, w: f64, h: f64 },
     #[error("job contains a non-finite coordinate")]
     NonFinite,
+    #[error("feed rate {0} is not a finite positive number")]
+    BadFeed(f64),
+    #[error("a move lies far outside the job's declared extent")]
+    OutsideExtent,
     #[error("machine {0} must be a positive finite number")]
     BadMachine(&'static str),
     #[error("the job is {w:.1}×{h:.1} mm, larger than the {bw:.0}×{bh:.0} mm work area")]
@@ -53,6 +59,9 @@ pub fn generate(job: &Job, machine: &Machine, placement: Placement) -> Result<St
     let mut w = Writer::new(machine, placement)?;
     w.preamble("LightFoundry job");
     for op in &job.ops {
+        if !(op.speed.is_finite() && op.speed > 0.0 && op.speed <= MAX_FEED) {
+            return Err(GcodeError::BadFeed(op.speed));
+        }
         if op.air_assist {
             w.line("M8");
         }
@@ -126,7 +135,7 @@ struct Writer<'a> {
 impl<'a> Writer<'a> {
     fn new(machine: &'a Machine, placement: Placement) -> Result<Self, GcodeError> {
         if let Placement::Relative { extent: (w, h), anchor, .. } = placement {
-            if !(w.is_finite() && h.is_finite() && anchor.x.is_finite() && anchor.y.is_finite()) {
+            if !(w.is_finite() && h.is_finite() && w >= 0.0 && h >= 0.0 && anchor.x.is_finite() && anchor.y.is_finite()) {
                 return Err(GcodeError::NonFinite);
             }
             if w > machine.bed_width + BED_EPSILON || h > machine.bed_height + BED_EPSILON {
@@ -192,6 +201,9 @@ impl<'a> Writer<'a> {
     }
 
     fn cut(&mut self, p: Point, power: f64, speed: f64) -> Result<(), GcodeError> {
+        if !power.is_finite() {
+            return Err(GcodeError::NonFinite);
+        }
         let (x, y) = self.to_machine(p)?;
         let (sv, text) = self.power_word(power);
         if self.x == Some(x) && self.y == Some(y) && self.s == Some(sv) {
@@ -245,6 +257,15 @@ impl<'a> Writer<'a> {
         let m = self.machine;
         if let Placement::Relative { anchor, .. } = self.placement {
             let (dx, dy) = (p.x - anchor.x, p.y - anchor.y);
+            // Lead-ins and overscan may leave the job's own bounds a little, but never by more than
+            // a bed's width: that would mean the declared extent does not describe this job.
+            let (ew, eh) = match self.placement {
+                Placement::Relative { extent, .. } => extent,
+                Placement::Absolute => (0.0, 0.0),
+            };
+            if dx.abs() > ew + m.bed_width || dy.abs() > eh + m.bed_height {
+                return Err(GcodeError::OutsideExtent);
+            }
             let y = match m.origin {
                 Origin::TopLeft => dy,
                 Origin::BottomLeft => -dy,
@@ -303,6 +324,56 @@ mod tests {
         }
         doc.add_shape(Shape::path("r", 0, rect_path(10.0, 10.0, 20.0, 10.0)));
         generate(&plan(&doc).unwrap(), &doc.machine, Placement::Absolute).unwrap()
+    }
+
+    mod refusal_tests {
+        use super::*;
+        use lightfoundry_toolpath::{Op, OpKind};
+
+        fn job(speed: f64, power: f64, to: Point) -> Job {
+            Job {
+                ops: vec![Op {
+                    layer: 0,
+                    kind: OpKind::Line,
+                    speed,
+                    passes: 1,
+                    air_assist: false,
+                    z: 0.0,
+                    z_per_pass: 0.0,
+                    moves: vec![Move::Travel(Point::new(1.0, 1.0)), Move::Cut { to, power }],
+                }],
+            }
+        }
+
+        #[test]
+        fn unusable_feed_rates_and_powers_are_refused_not_written() {
+            let m = Machine::default();
+            for bad in [f64::NAN, f64::INFINITY, 0.0, -100.0, 1e12] {
+                assert!(matches!(generate(&job(bad, 50.0, Point::new(5.0, 5.0)), &m, Placement::Absolute), Err(GcodeError::BadFeed(_))), "{bad}");
+            }
+            assert_eq!(generate(&job(1000.0, f64::NAN, Point::new(5.0, 5.0)), &m, Placement::Absolute), Err(GcodeError::NonFinite));
+            assert!(generate(&job(1000.0, 50.0, Point::new(5.0, 5.0)), &m, Placement::Absolute).is_ok());
+        }
+
+        #[test]
+        fn relative_jobs_need_a_sane_extent_and_moves_that_match_it() {
+            let m = Machine::default();
+            let at = |extent| Placement::Relative { anchor: Point::new(0.0, 0.0), extent, set_zero: false };
+            assert_eq!(
+                generate(&job(1000.0, 50.0, Point::new(5.0, 5.0)), &m, at((-5.0, 10.0))),
+                Err(GcodeError::NonFinite),
+                "a negative extent is nonsense"
+            );
+            assert_eq!(
+                generate(&job(1000.0, 50.0, Point::new(5000.0, 0.0)), &m, at((10.0, 10.0))),
+                Err(GcodeError::OutsideExtent),
+                "a move far beyond the declared extent means the extent is wrong"
+            );
+            assert!(
+                generate(&job(1000.0, 50.0, Point::new(-30.0, 40.0)), &m, at((10.0, 10.0))).is_ok(),
+                "lead-ins may leave the job's own bounds a little"
+            );
+        }
     }
 
     mod rotary_tests {

@@ -170,7 +170,7 @@ impl Link {
         self.send_line(&jog_line(dx, dy, feed)?)
     }
 
-    /// Jog to an absolute machine position (`$J=G90 G21 ...`). Coordinates and feed are bounded.
+    /// Jog to an absolute position in machine coordinates (`$J=G90 G21 G53 ...`). Coordinates and feed are bounded.
     pub fn jog_to(&self, x: f64, y: f64, feed: f64) -> Result<(), LinkError> {
         self.send_line(&jog_to_line(x, y, feed)?)
     }
@@ -264,7 +264,8 @@ pub fn jog_to_line(x: f64, y: f64, feed: f64) -> Result<String, LinkError> {
     if !(ok(x) && ok(y)) || !(feed.is_finite() && (1.0..=MAX_FEED).contains(&feed)) {
         return Err(LinkError::Rejected(format!("a jog target must be within ±{MAX_TRAVEL_MM} mm and feed within 1–{MAX_FEED} mm/min")));
     }
-    Ok(format!("$J=G90 G21 X{} Y{} F{}", trim_num(x), trim_num(y), trim_num(feed)))
+    // G53: machine coordinates, whatever work offsets (G54, G92) are in force.
+    Ok(format!("$J=G90 G21 G53 X{} Y{} F{}", trim_num(x), trim_num(y), trim_num(feed)))
 }
 
 fn trim_num(v: f64) -> String {
@@ -421,6 +422,7 @@ impl Worker {
             Cmd::Stop => {
                 self.transport.write_all(&[realtime::SOFT_RESET])?;
                 self.pending.clear();
+                self.finishing = false;
                 if self.job.take().is_some() {
                     self.paused = false;
                     self.finish_job(Err(DeviceError::Cancelled.to_string()));
@@ -464,7 +466,12 @@ impl Worker {
         }
         if let Some(status) = parse_status(line) {
             let idle = status.state == crate::MachineState::Idle;
+            let alarm = status.state == crate::MachineState::Alarm;
             self.update(|s| s.status = Some(status));
+            if alarm && self.job.is_some() {
+                // An alarm ends the job even when every line was already accepted.
+                return Err(DeviceError::MachineAlarm);
+            }
             if self.finishing && idle {
                 let lines = self.job.as_ref().map_or(0, |j| j.progress().total);
                 self.job = None;
@@ -488,6 +495,10 @@ impl Worker {
                     }
                 }
                 return Ok(());
+            }
+            if line.starts_with("ALARM:") && self.job.is_some() {
+                let code = line.trim_start_matches("ALARM:").trim().parse().unwrap_or(0);
+                return Err(DeviceError::Alarm(code));
             }
             let sent = self.pending.pop_front();
             self.log(match sent {
@@ -605,11 +616,13 @@ mod tests {
 
         #[test]
         fn absolute_jogs_land_on_the_target_and_bad_ones_are_refused() {
-            assert_eq!(jog_to_line(10.0, 20.5, 3000.0).unwrap(), "$J=G90 G21 X10 Y20.5 F3000");
+            assert_eq!(jog_to_line(10.0, 20.5, 3000.0).unwrap(), "$J=G90 G21 G53 X10 Y20.5 F3000");
             for (x, y, f) in [(f64::NAN, 0.0, 1000.0), (0.0, f64::INFINITY, 1000.0), (1e9, 0.0, 1000.0), (0.0, 0.0, 0.0), (0.0, 0.0, 1e9)] {
                 assert!(jog_to_line(x, y, f).is_err(), "{x} {y} {f}");
             }
             let link = sim_link();
+            // A work offset must not shift a machine-coordinate jog.
+            link.set_zero().unwrap();
             link.jog_to(12.0, 7.0, 3000.0).unwrap();
             wait_for(&link, "the head to arrive", |s| position(s) == Some((12.0, 7.0)));
         }
@@ -626,6 +639,31 @@ mod tests {
             wait_for(&link, "return to the work origin", |s| position(s) == Some((30.0, 40.0)));
             link.home().unwrap();
             wait_for(&link, "homing", |s| position(s) == Some((0.0, 0.0)));
+        }
+
+        #[test]
+        fn stopping_at_the_end_of_a_job_stays_cancelled_and_an_alarm_after_the_last_line_ends_the_job() {
+            // A machine that has accepted every line but is still moving: Stop must not be undone
+            // by the Idle report that follows the reset.
+            let mut busy = SimulatedGrbl::new();
+            busy.stay_busy_until_reset();
+            let link = Link::connect(Box::new(busy));
+            link.start_job(long_program(3)).unwrap();
+            wait_for(&link, "every line to be accepted", |s| s.progress.is_some_and(|p| p.acknowledged == 3));
+            assert_eq!(link.snapshot().job, JobState::Running, "still moving, so not finished");
+            link.stop().unwrap();
+            let s = wait_for(&link, "the stop", |s| matches!(s.job, JobState::Finished(Err(_))));
+            std::thread::sleep(Duration::from_millis(500)); // several Idle reports arrive
+            assert!(matches!(link.snapshot().job, JobState::Finished(Err(_))), "{:?}", link.snapshot().job);
+            assert!(s.connected);
+
+            // An alarm once every line has been accepted ends the job instead of leaving it Running.
+            let mut sim = SimulatedGrbl::new();
+            sim.alarm_after_last_line();
+            let link = Link::connect(Box::new(sim));
+            link.start_job(long_program(3)).unwrap();
+            let s = wait_for(&link, "the alarm to end the job", |s| matches!(s.job, JobState::Finished(_)));
+            assert!(matches!(s.job, JobState::Finished(Err(_))), "{:?}", s.job);
         }
 
         #[test]

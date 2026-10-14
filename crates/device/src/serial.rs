@@ -4,19 +4,20 @@ use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
 use crate::Transport;
+use crate::linebuf::LineBuffer;
 
 /// Typical GRBL laser baud rate.
 pub const DEFAULT_BAUD: u32 = 115_200;
 
 pub struct SerialTransport {
     port: Box<dyn serialport::SerialPort>,
-    buffer: Vec<u8>,
+    lines: LineBuffer,
 }
 
 impl SerialTransport {
     pub fn open(path: &str, baud: u32) -> io::Result<Self> {
         let port = serialport::new(path, baud).timeout(Duration::from_millis(10)).open().map_err(|e| io::Error::other(e.to_string()))?;
-        Ok(Self { port, buffer: Vec::new() })
+        Ok(Self { port, lines: LineBuffer::default() })
     }
 }
 
@@ -35,19 +36,14 @@ impl Transport for SerialTransport {
         let deadline = Instant::now() + timeout;
         let mut byte = [0u8; 1];
         loop {
-            if let Some(pos) = self.buffer.iter().position(|b| *b == b'\n') {
-                let line: Vec<u8> = self.buffer.drain(..=pos).collect();
-                return Ok(Some(String::from_utf8_lossy(&line).trim().to_string()));
-            }
             match self.port.read(&mut byte) {
                 Ok(1) => {
-                    // A misbehaving device must not make us buffer without bound.
-                    if self.buffer.len() < 4096 {
-                        self.buffer.push(byte[0]);
+                    if let Some(line) = self.lines.push(byte[0]) {
+                        return Ok(Some(line));
                     }
                 }
                 Ok(_) => {}
-                Err(e) if e.kind() == io::ErrorKind::TimedOut => {}
+                Err(e) if matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::Interrupted | io::ErrorKind::WouldBlock) => {}
                 Err(e) => return Err(e),
             }
             if Instant::now() >= deadline {
