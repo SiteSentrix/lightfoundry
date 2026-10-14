@@ -147,3 +147,73 @@ mod hostile_tests {
         let _ = boolean(&[zero_area], &[square(0.0, 0.0, 3.0)], BoolOp::Union);
     }
 }
+
+mod join_tests {
+    use super::*;
+
+    fn seg(a: (f64, f64), b: (f64, f64)) -> Polyline {
+        Polyline::new(vec![Point::new(a.0, a.1), Point::new(b.0, b.1)], false)
+    }
+
+    #[test]
+    fn four_loose_lines_become_one_closed_square_whatever_their_order_or_direction() {
+        let lines = [seg((0.0, 0.0), (10.0, 0.0)), seg((10.0, 10.0), (10.0, 0.0)), seg((10.0, 10.0), (0.0, 10.0)), seg((0.0, 0.0), (0.0, 10.0))];
+        let r = join(&lines, 0.01).unwrap();
+        assert_eq!(r.len(), 1);
+        assert!(r[0].closed && r[0].points.len() == 4, "{:?}", r[0]);
+        assert!((area(&r) - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn gaps_within_tolerance_are_bridged_and_larger_ones_are_not() {
+        let lines = [seg((0.0, 0.0), (10.0, 0.0)), seg((10.04, 0.0), (20.0, 0.0))];
+        assert_eq!(join(&lines, 0.05).unwrap().len(), 1);
+        assert_eq!(join(&lines, 0.01).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_chain_that_does_not_close_stays_open_and_closed_shapes_are_untouched() {
+        let lines = [seg((0.0, 0.0), (5.0, 0.0)), seg((5.0, 0.0), (5.0, 5.0)), square(100.0, 100.0, 3.0)];
+        let r = join(&lines, 0.01).unwrap();
+        assert_eq!(r.len(), 2);
+        let open: Vec<_> = r.iter().filter(|l| !l.closed).collect();
+        assert_eq!(open.len(), 1);
+        assert_eq!(open[0].points.len(), 3);
+        assert_eq!(r.iter().filter(|l| l.closed).count(), 1);
+    }
+
+    #[test]
+    fn a_junction_does_not_loop_forever_or_lose_segments() {
+        // A "T": three lines meeting at one point. All segments must be used exactly once.
+        let lines = [seg((0.0, 0.0), (5.0, 0.0)), seg((10.0, 0.0), (5.0, 0.0)), seg((5.0, 0.0), (5.0, 5.0))];
+        let r = join(&lines, 0.01).unwrap();
+        let total: usize = r.iter().map(|l| l.points.len() - 1).sum();
+        assert_eq!(total, 3, "{r:?}");
+    }
+
+    #[test]
+    fn many_segments_of_a_circle_join_into_one_loop_quickly() {
+        let n = 5000;
+        let pts: Vec<Point> = (0..n)
+            .map(|i| {
+                Point::new(50.0 * (i as f64 / n as f64 * std::f64::consts::TAU).cos(), 50.0 * (i as f64 / n as f64 * std::f64::consts::TAU).sin())
+            })
+            .collect();
+        let mut lines: Vec<Polyline> = (0..n).map(|i| Polyline::new(vec![pts[i], pts[(i + 1) % n]], false)).collect();
+        lines.reverse();
+        let r = join(&lines, 1e-6).unwrap();
+        assert_eq!(r.len(), 1);
+        assert!(r[0].closed && r[0].points.len() == n);
+    }
+
+    #[test]
+    fn hostile_inputs_are_errors_not_panics() {
+        assert_eq!(join(&[seg((0.0, 0.0), (1.0, 1.0))], f64::NAN), Err(PathOpsError::BadDistance));
+        assert_eq!(join(&[seg((0.0, 0.0), (1.0, 1.0))], -1.0), Err(PathOpsError::BadDistance));
+        assert_eq!(join(&[seg((f64::NAN, 0.0), (1.0, 1.0))], 0.01), Err(PathOpsError::BadCoordinate));
+        assert!(join(&[], 0.01).unwrap().is_empty());
+        let single = Polyline::new(vec![Point::new(0.0, 0.0)], false);
+        assert!(join(&[single], 0.01).unwrap().is_empty(), "one-point polylines carry no geometry");
+        assert!(join(&[seg((0.0, 0.0), (1.0, 1.0))], 0.0).is_ok(), "zero tolerance joins only exact matches");
+    }
+}

@@ -1,6 +1,6 @@
 use lightfoundry_doc::{Shape, ShapeId};
 use lightfoundry_geom::{BezPath, Polyline};
-use lightfoundry_pathops::{BoolOp, Join, boolean, offset};
+use lightfoundry_pathops::{BoolOp, Join, boolean, join, offset};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -16,6 +16,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         params_doc: "{op: union|difference|intersect|xor, ids? (default: selection, order matters: difference is the first minus the rest), keep_originals?: false}  — closed shapes only",
         mutates: true,
         run: boolean_op,
+    },
+    CommandSpec {
+        id: "path.join",
+        label: "Join Paths",
+        menu: "Arrange",
+        shortcut: None,
+        params_doc: "{ids?, tolerance? (mm, default 0.05), keep_originals?: false}  — chains open lines whose ends meet into longer paths, closing loops; one result per chain, on the source layer",
+        mutates: true,
+        run: join_op,
     },
     CommandSpec {
         id: "path.offset",
@@ -144,6 +153,65 @@ fn offset_op(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     Ok(json!({ "ids": created, "vanished": vanished }))
 }
 
+#[derive(Deserialize)]
+struct JoinParams {
+    ids: Option<Vec<ShapeId>>,
+    #[serde(default = "default_join_tolerance")]
+    tolerance: f64,
+    #[serde(default)]
+    keep_originals: bool,
+}
+
+/// Default gap bridged when joining, mm.
+pub(super) const DEFAULT_JOIN_TOLERANCE: f64 = 0.05;
+
+fn default_join_tolerance() -> f64 {
+    DEFAULT_JOIN_TOLERANCE
+}
+
+fn join_op(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: JoinParams = parse(params)?;
+    finite(&[p.tolerance])?;
+    let ids = existing(s, &id_list(&p.ids, &s.selection));
+    if ids.is_empty() {
+        return Err(EngineError::NothingSelected);
+    }
+    // Join within each layer, so cut settings stay with the geometry.
+    let mut by_layer: Vec<(u32, Vec<Polyline>)> = Vec::new();
+    for id in &ids {
+        let Some(shape) = s.doc.shape(*id) else { continue };
+        if shape.vector_path().is_none() {
+            return Err(EngineError::BadParams(format!("{} is an image and cannot be joined", shape.name)));
+        }
+        let lines = shape.world_polylines();
+        match by_layer.iter_mut().find(|(l, _)| *l == shape.layer) {
+            Some((_, v)) => v.extend(lines),
+            None => by_layer.push((shape.layer, lines)),
+        }
+    }
+    let mut created = Vec::new();
+    let (mut closed, mut open) = (0usize, 0usize);
+    for (layer, lines) in by_layer {
+        for chain in join(&lines, p.tolerance).map_err(|e| EngineError::BadParams(e.to_string()))? {
+            if chain.closed {
+                closed += 1;
+            } else {
+                open += 1;
+            }
+            created.push(s.doc.add_shape(Shape::path(
+                if chain.closed { "Joined shape" } else { "Joined path" },
+                layer,
+                polylines_to_path(std::slice::from_ref(&chain)),
+            )));
+        }
+    }
+    if !p.keep_originals {
+        s.doc.remove_shapes(&ids);
+    }
+    s.selection = created.clone();
+    Ok(json!({ "ids": created, "closed": closed, "open": open }))
+}
+
 fn existing(s: &Session, ids: &[ShapeId]) -> Vec<ShapeId> {
     ids.iter().copied().filter(|id| s.doc.shape(*id).is_some()).collect()
 }
@@ -160,7 +228,7 @@ fn closed_region(s: &Session, id: ShapeId) -> Result<Vec<Polyline>, EngineError>
     Ok(closed)
 }
 
-fn polylines_to_path(lines: &[Polyline]) -> BezPath {
+pub(super) fn polylines_to_path(lines: &[Polyline]) -> BezPath {
     let mut path = BezPath::new();
     for l in lines {
         let Some((first, rest)) = l.points.split_first() else { continue };

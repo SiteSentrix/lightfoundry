@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use image::{DynamicImage, ImageReader, Limits};
-use lightfoundry_doc::{Document, LAYER_COLORS, LayerId, RasterImage, Shape, ShapeKind};
+use lightfoundry_doc::{Document, LAYER_COLORS, LayerId, RasterImage, Shape, ShapeId, ShapeKind};
 use lightfoundry_geom::Affine;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -41,7 +41,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Import DXF…",
         menu: "File/Import",
         shortcut: None,
-        params_doc: "{path | data, x?, y?}",
+        params_doc: "{path | data, x?, y?, join?: true}  — join chains loose line segments into paths",
         mutates: true,
         run: import_dxf,
     },
@@ -127,6 +127,9 @@ struct ImportParams {
     y: f64,
     #[serde(default = "yes")]
     layer_by_color: bool,
+    /// DXF only: chain loose line segments into paths (default true).
+    #[serde(default = "yes")]
+    join: bool,
 }
 
 fn yes() -> bool {
@@ -149,6 +152,40 @@ fn import_svg(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     Ok(json!({ "ids": ids, "width_mm": svg.width_mm, "height_mm": svg.height_mm }))
 }
 
+/// Chains the open shapes among `ids` (per layer) into longer paths, replacing them in `ids`.
+/// Shapes that are already closed are left exactly as imported (curves stay curves).
+fn join_loose_paths(s: &mut Session, ids: &mut Vec<ShapeId>) -> Result<(), EngineError> {
+    let mut by_layer: Vec<(LayerId, Vec<ShapeId>, Vec<lightfoundry_geom::Polyline>)> = Vec::new();
+    for id in ids.iter() {
+        let Some(shape) = s.doc.shape(*id) else { continue };
+        let open: Vec<_> = shape.world_polylines().into_iter().filter(|l| !l.closed).collect();
+        if open.is_empty() || shape.world_polylines().iter().any(|l| l.closed) {
+            continue;
+        }
+        match by_layer.iter_mut().find(|(l, _, _)| *l == shape.layer) {
+            Some((_, v, lines)) => {
+                v.push(*id);
+                lines.extend(open);
+            }
+            None => by_layer.push((shape.layer, vec![*id], open)),
+        }
+    }
+    for (layer, sources, lines) in by_layer {
+        if sources.len() < 2 {
+            continue;
+        }
+        let chains =
+            lightfoundry_pathops::join(&lines, super::pathops::DEFAULT_JOIN_TOLERANCE / 5.0).map_err(|e| EngineError::Import(e.to_string()))?;
+        s.doc.remove_shapes(&sources);
+        ids.retain(|i| !sources.contains(i));
+        for chain in chains {
+            let name = if chain.closed { "Joined shape" } else { "Joined path" };
+            ids.push(s.doc.add_shape(Shape::path(name, layer, super::pathops::polylines_to_path(std::slice::from_ref(&chain)))));
+        }
+    }
+    Ok(())
+}
+
 fn import_dxf(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let p: ImportParams = parse(params)?;
     finite(&[p.x, p.y])?;
@@ -157,14 +194,20 @@ fn import_dxf(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     // DXF layer names map to cut layers in order of first appearance.
     let mut names: Vec<String> = Vec::new();
     let mut ids = Vec::new();
+    let translate = Affine::translate((p.x, p.y));
     for dp in dxf.paths {
         let idx = names.iter().position(|n| *n == dp.layer).unwrap_or_else(|| {
             names.push(dp.layer.clone());
             names.len() - 1
         });
-        let mut shape = Shape::path(dp.layer, (idx % LAYER_COLORS.len()) as LayerId, dp.path);
-        shape.transform = Affine::translate((p.x, p.y));
+        let layer = (idx % LAYER_COLORS.len()) as LayerId;
+        let mut shape = Shape::path(dp.layer, layer, dp.path);
+        shape.transform = translate;
+        // Loose segments are joined below; keep a handle to them until then.
         ids.push(s.doc.add_shape(shape));
+    }
+    if p.join {
+        join_loose_paths(s, &mut ids)?;
     }
     s.selection = ids.clone();
     Ok(json!({ "ids": ids, "width_mm": dxf.width_mm, "height_mm": dxf.height_mm, "skipped": dxf.skipped }))

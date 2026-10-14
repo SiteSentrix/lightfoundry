@@ -104,6 +104,90 @@ pub fn offset(lines: &[Polyline], distance: f64, join: Join) -> Result<Vec<Polyl
     Ok(out)
 }
 
+/// Largest number of open polylines `join` will chain (it searches near neighbours per end point).
+pub const MAX_JOIN_POLYLINES: usize = 200_000;
+
+/// Chains open polylines whose end points lie within `tolerance` of each other into longer
+/// polylines, closing a chain whose two ends meet. Closed polylines pass through untouched.
+/// This is how loose line segments (typical in DXF files) become cuttable, fillable shapes.
+pub fn join(lines: &[Polyline], tolerance: f64) -> Result<Vec<Polyline>, PathOpsError> {
+    if !(tolerance.is_finite() && (0.0..=MAX_OFFSET_MM).contains(&tolerance)) {
+        return Err(PathOpsError::BadDistance);
+    }
+    let mut out: Vec<Polyline> = lines.iter().filter(|l| l.closed).cloned().collect();
+    let open: Vec<&Polyline> = lines.iter().filter(|l| !l.closed && l.points.len() >= 2).collect();
+    if open.len() > MAX_JOIN_POLYLINES {
+        return Err(PathOpsError::TooLarge);
+    }
+    if open.iter().any(|l| l.points.iter().any(|p| !(p.x.is_finite() && p.y.is_finite()))) {
+        return Err(PathOpsError::BadCoordinate);
+    }
+    let cell = tolerance.max(1e-6);
+    let key = |p: Point| ((p.x / cell).floor() as i64, (p.y / cell).floor() as i64);
+    // End points by grid cell: (polyline index, is_start).
+    let mut grid: std::collections::HashMap<(i64, i64), Vec<(usize, bool)>> = std::collections::HashMap::new();
+    for (i, l) in open.iter().enumerate() {
+        if let (Some(first), Some(last)) = (l.points.first(), l.points.last()) {
+            grid.entry(key(*first)).or_default().push((i, true));
+            grid.entry(key(*last)).or_default().push((i, false));
+        }
+    }
+    let mut used = vec![false; open.len()];
+    // Finds an unused polyline with an end point near `p`; returns its index and whether to read it forward.
+    let find = |p: Point, used: &[bool]| -> Option<(usize, bool)> {
+        let (cx, cy) = key(p);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for (i, is_start) in grid.get(&(cx + dx, cy + dy)).into_iter().flatten() {
+                    if used[*i] {
+                        continue;
+                    }
+                    let end = if *is_start { open[*i].points.first() } else { open[*i].points.last() };
+                    if end.is_some_and(|e| e.distance(p) <= tolerance) {
+                        return Some((*i, *is_start));
+                    }
+                }
+            }
+        }
+        None
+    };
+    for start in 0..open.len() {
+        if used[start] {
+            continue;
+        }
+        used[start] = true;
+        let mut chain: Vec<Point> = open[start].points.clone();
+        // Grow at the tail, then at the head.
+        while let Some(tail) = chain.last().copied()
+            && let Some((i, forward)) = find(tail, &used)
+        {
+            used[i] = true;
+            let pts = &open[i].points;
+            if forward {
+                chain.extend(pts.iter().skip(1));
+            } else {
+                chain.extend(pts.iter().rev().skip(1));
+            }
+        }
+        while let Some(head) = chain.first().copied()
+            && let Some((i, forward)) = find(head, &used)
+        {
+            used[i] = true;
+            let pts = &open[i].points;
+            let mut prefix: Vec<Point> = if forward { pts.iter().rev().cloned().collect() } else { pts.clone() };
+            prefix.pop(); // the shared end point is already the chain's head
+            prefix.extend(chain);
+            chain = prefix;
+        }
+        let closes = chain.len() >= 4 && chain.first().zip(chain.last()).is_some_and(|(a, b)| a.distance(*b) <= tolerance);
+        if closes {
+            chain.pop();
+        }
+        out.push(Polyline::new(chain, closes));
+    }
+    Ok(out)
+}
+
 fn join_style(join: Join, distance: f64) -> LineJoin<f64> {
     match join {
         Join::Round => LineJoin::Round(0.1_f64.min(0.5 / distance.abs().max(0.5))),

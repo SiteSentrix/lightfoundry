@@ -111,6 +111,10 @@ fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 }
             });
         });
+        if ui.button("Join Paths").clicked() {
+            app.run("path.join", json!({}));
+            ui.close();
+        }
         ui.separator();
         if ui.button("Flip Horizontal").clicked() {
             app.run("edit.flip", json!({ "axis": "horizontal" }));

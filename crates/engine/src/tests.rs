@@ -315,6 +315,52 @@ mod import_tests {
     }
 
     #[test]
+    fn four_loose_dxf_lines_import_as_one_closed_fillable_shape() {
+        let line = |x1: f64, y1: f64, x2: f64, y2: f64| format!("0\nLINE\n8\nCUT\n10\n{x1}\n20\n{y1}\n11\n{x2}\n21\n{y2}\n");
+        let dxf = format!(
+            "0\nSECTION\n2\nENTITIES\n{}{}{}{}0\nENDSEC\n0\nEOF\n",
+            line(0.0, 0.0, 20.0, 0.0),
+            line(20.0, 0.0, 20.0, 10.0),
+            line(20.0, 10.0, 0.0, 10.0),
+            line(0.0, 10.0, 0.0, 0.0)
+        );
+        let mut s = Session::new();
+        s.execute("file.import_dxf", &json!({"data": dxf})).unwrap();
+        assert_eq!(s.doc.shapes.len(), 1, "joined into one shape");
+        assert!(s.doc.shapes[0].world_polylines().iter().all(|l| l.closed));
+        // A closed shape fills; four open lines would not have.
+        s.execute("layer.set", &json!({"id": 0, "mode": "fill", "interval": 1})).unwrap();
+        let g = s.execute("job.gcode", &json!({"include": true})).unwrap();
+        assert!(g["gcode"].as_str().unwrap().matches("G1").count() >= 10);
+        // join: false keeps the segments separate.
+        let mut t = Session::new();
+        t.execute("file.import_dxf", &json!({"data": dxf, "join": false})).unwrap();
+        assert_eq!(t.doc.shapes.len(), 4);
+        // And joining afterwards by hand gets the same result.
+        t.execute("edit.select_all", &Value::Null).unwrap();
+        let v = t.execute("path.join", &json!({})).unwrap();
+        assert_eq!((v["closed"].as_u64(), v["open"].as_u64()), (Some(1), Some(0)));
+        assert_eq!(t.doc.shapes.len(), 1);
+    }
+
+    #[test]
+    fn joining_keeps_shapes_on_their_own_layers_and_validates() {
+        let mut s = Session::new();
+        let a = s.execute("shape.line", &json!({"x1": 0, "y1": 0, "x2": 10, "y2": 0, "layer": 1})).unwrap()["id"].as_u64().unwrap();
+        let b = s.execute("shape.line", &json!({"x1": 10, "y1": 0, "x2": 10, "y2": 10, "layer": 1})).unwrap()["id"].as_u64().unwrap();
+        let c = s.execute("shape.line", &json!({"x1": 10, "y1": 10, "x2": 20, "y2": 10, "layer": 2})).unwrap()["id"].as_u64().unwrap();
+        s.execute("path.join", &json!({"ids": [a, b, c]})).unwrap();
+        let mut layers: Vec<_> = s.doc.shapes.iter().map(|sh| (sh.layer, sh.world_polylines()[0].points.len())).collect();
+        layers.sort();
+        assert_eq!(layers, vec![(1, 3), (2, 2)], "the layer-2 line is not merged into the layer-1 chain");
+        assert!(s.execute("path.join", &json!({"tolerance": -1})).is_err());
+        assert!(s.execute("path.join", &json!({"tolerance": "x"})).is_err());
+        let before = s.doc.clone();
+        assert!(s.execute("path.join", &json!({"ids": []})).is_err());
+        assert_eq!(s.doc, before);
+    }
+
+    #[test]
     fn imports_are_undoable_as_one_step() {
         let mut s = Session::new();
         s.execute("file.import_svg", &json!({"data": SVG})).unwrap();

@@ -481,6 +481,19 @@ mod shape_operation_tests {
     }
 
     #[test]
+    fn join_from_the_panel_closes_a_loop_of_lines() {
+        let mut h = Harness::new();
+        for (a, b) in [((10, 10), (50, 10)), ((50, 10), (50, 40)), ((50, 40), (10, 40)), ((10, 40), (10, 10))] {
+            h.app.run("shape.line", json!({"x1": a.0, "y1": a.1, "x2": b.0, "y2": b.1}));
+        }
+        h.app.run("edit.select_all", serde_json::Value::Null);
+        h.frame(vec![]);
+        h.app.run("path.join", json!({}));
+        assert_eq!(h.app.session.doc.shapes.len(), 1);
+        assert!(h.app.session.doc.shapes[0].world_polylines()[0].closed);
+    }
+
+    #[test]
     fn a_boolean_with_one_shape_selected_reports_instead_of_crashing() {
         let mut h = Harness::new();
         h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
