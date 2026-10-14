@@ -103,6 +103,11 @@ fn validate(doc: &mut Document) -> Result<(), FormatError> {
         {
             return Err(FormatError::Invalid("image size does not match its pixel data"));
         }
+        if let ShapeKind::Image { image, .. } = &s.kind
+            && image.rgb.as_ref().is_some_and(|rgb| rgb.len() != image.gray.len().saturating_mul(3))
+        {
+            return Err(FormatError::Invalid("image colour data does not match its size"));
+        }
     }
     let max_id = doc.shapes.iter().map(|s| s.id).max().unwrap_or(0);
     doc.next_id = doc.next_id.max(max_id.saturating_add(1));
@@ -120,6 +125,27 @@ mod tests {
         let mut doc = Document::default();
         doc.add_shape(Shape::path("r", 3, rect_path(1.0, 2.0, 3.0, 4.0)));
         doc
+    }
+
+    #[test]
+    fn a_picture_whose_colour_data_does_not_fit_is_refused() {
+        use lightfoundry_doc::{ImageAdjust, RasterImage, Shape, ShapeKind};
+        let mut doc = sample();
+        let mut shape = Shape::path("p", 0, lightfoundry_geom::rect_path(0.0, 0.0, 1.0, 1.0));
+        let image = RasterImage::new(2, 1, vec![1, 2]).unwrap();
+        shape.kind = ShapeKind::Image {
+            image: std::sync::Arc::new(image.clone().with_rgb(vec![0; 6]).unwrap()),
+            width_mm: 2.0,
+            height_mm: 1.0,
+            adjust: ImageAdjust::default(),
+        };
+        doc.add_shape(shape.clone());
+        assert!(from_bytes(&to_bytes(&doc).unwrap()).is_ok());
+        let mut bad = image;
+        bad.rgb = Some(vec![0; 5]);
+        shape.kind = ShapeKind::Image { image: std::sync::Arc::new(bad), width_mm: 2.0, height_mm: 1.0, adjust: ImageAdjust::default() };
+        doc.add_shape(shape);
+        assert!(from_bytes(&to_bytes(&doc).unwrap()).is_err());
     }
 
     #[test]

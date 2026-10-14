@@ -912,6 +912,46 @@ mod import_tests {
     }
 
     #[test]
+    fn tracing_by_colour_makes_a_shape_per_palette_colour_and_needs_a_coloured_picture() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-colours-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (colour, grey) = (dir.join("c.png"), dir.join("g.png"));
+        // White 20x10 with a red block (columns 2..8) and a blue block (columns 12..18).
+        image::RgbImage::from_fn(20, 10, |x, _| {
+            image::Rgb(if (2..8).contains(&x) {
+                [220, 20, 20]
+            } else if (12..18).contains(&x) {
+                [20, 20, 220]
+            } else {
+                [255, 255, 255]
+            })
+        })
+        .save(&colour)
+        .unwrap();
+        image::GrayImage::from_fn(20, 10, |x, _| image::Luma([if x < 10 { 0 } else { 255 }])).save(&grey).unwrap();
+        let mut s = Session::new();
+        let pic = s.execute("file.import_image", &json!({"path": colour, "width": 40})).unwrap()["id"].as_u64().unwrap();
+        let v = s.execute("image.trace", &json!({"id": pic, "colors": 2})).unwrap();
+        let ids = v["ids"].as_array().unwrap();
+        assert_eq!((ids.len(), v["colors"].as_u64()), (2, Some(2)), "{v}");
+        let layers: Vec<u32> = ids.iter().map(|i| s.doc.shape(i.as_u64().unwrap()).unwrap().layer).collect();
+        assert_ne!(layers[0], layers[1], "red and blue land on different layers");
+        for i in ids {
+            let b = s.doc.shape(i.as_u64().unwrap()).unwrap().world_bounds().unwrap();
+            assert!((b.x1 - b.x0 - 12.0).abs() < 1e-6, "each block is 6 px = 12 mm wide: {b:?}");
+        }
+        assert!(s.execute("image.trace", &json!({"id": pic, "colors": 1})).is_err());
+        assert!(s.execute("image.trace", &json!({"id": pic, "colors": 99})).is_err());
+        // The colour survives crop and is saved in the project.
+        s.execute("image.crop", &json!({"id": pic, "x": 0, "y": 0, "width": 10, "height": 10})).ok();
+        let back = lightfoundry_format::from_bytes(&lightfoundry_format::to_bytes(&s.doc).unwrap()).unwrap();
+        assert!(matches!(&back.shape(pic).unwrap().kind, lightfoundry_doc::ShapeKind::Image { image, .. } if image.rgb.is_some()));
+
+        let grey_pic = s.execute("file.import_image", &json!({"path": grey, "width": 40})).unwrap()["id"].as_u64().unwrap();
+        assert!(s.execute("image.trace", &json!({"id": grey_pic, "colors": 2})).is_err(), "a grey picture has no colours");
+    }
+
+    #[test]
     fn tracing_in_tonal_bands_makes_nested_outlines_from_light_to_dark() {
         let dir = std::env::temp_dir().join(format!("lf-engine-bands-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

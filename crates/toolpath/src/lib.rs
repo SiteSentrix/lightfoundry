@@ -5,6 +5,7 @@
 mod fill;
 mod order;
 mod overlap;
+mod palette;
 mod perforate;
 mod raster;
 mod tabs;
@@ -14,6 +15,7 @@ mod trace;
 pub use fill::fill_segments;
 pub use order::{order_polylines, remove_duplicates};
 pub use overlap::remove_overlaps;
+pub use palette::{BACKGROUND, MAX_COLORS, Quantized, quantize};
 pub use raster::{Grid, dither, sample_grid};
 pub use timeline::{LayerTime, Moment, OpTime, Timeline, move_seconds};
 pub use trace::{MAX_TRACE_PIXELS, trace};

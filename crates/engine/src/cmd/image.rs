@@ -32,7 +32,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Trace Image to Vectors",
         menu: "Edit",
         shortcut: None,
-        params_doc: "{id?, threshold? (0..255, default 128: pixels darker than this are traced, after the image's tone adjustments), tolerance? (pixels, default 1), min_area? (pixels squared, default 4), layer?, keep_image? (default true), smooth? (default false: curves instead of straight steps), levels? (1..8, default 1: that many nested outlines for light-to-dark tonal bands)}  — adds a path shape that follows the dark areas, on top of the picture",
+        params_doc: "{id?, threshold? (0..255, default 128: pixels darker than this are traced, after the image's tone adjustments), tolerance? (pixels, default 1), min_area? (pixels squared, default 4), layer?, keep_image? (default true), smooth? (default false: curves instead of straight steps), levels? (1..8, default 1: that many nested outlines for light-to-dark tonal bands), colors? (2..8: trace that many palette colours separately, each onto the layer whose colour is nearest; needs a coloured picture, imported with this version; ignores threshold, levels and the tone adjustments; paper-white is left out)}  — adds a path shape that follows the dark areas, on top of the picture",
         mutates: true,
         run: trace,
     },
@@ -210,6 +210,8 @@ struct TraceParams {
     /// Tonal bands: this many outlines, each around pixels darker than a share of the threshold.
     #[serde(default = "one")]
     levels: u32,
+    /// Trace each of this many palette colours separately (needs a coloured picture).
+    colors: Option<usize>,
 }
 
 fn one() -> u32 {
@@ -232,6 +234,71 @@ fn yes() -> bool {
     true
 }
 
+/// Traces each palette colour of a coloured picture as its own shape, on the nearest layer colour.
+fn trace_colors(
+    s: &mut Session,
+    id: ShapeId,
+    colors: usize,
+    tolerance: f64,
+    min_area: f64,
+    smooth: bool,
+    keep_image: bool,
+) -> Result<Value, EngineError> {
+    use lightfoundry_doc::LAYER_COLORS;
+    if !(2..=lightfoundry_toolpath::MAX_COLORS).contains(&colors) {
+        return Err(EngineError::BadParams(format!("colors must be between 2 and {}", lightfoundry_toolpath::MAX_COLORS)));
+    }
+    let shape = s.doc.shape(id).ok_or_else(|| EngineError::NotFound(format!("shape {id} does not exist")))?;
+    let ShapeKind::Image { image, width_mm, height_mm, .. } = &shape.kind else { return Err(not_an_image(id)) };
+    let rgb = image
+        .rgb
+        .as_ref()
+        .ok_or_else(|| EngineError::BadParams("that picture has no colour (grey, or imported by an older version); import it again".into()))?;
+    let (w, h) = (image.width as usize, image.height as usize);
+    let q = lightfoundry_toolpath::quantize(rgb, colors)
+        .ok_or_else(|| EngineError::BadParams("the picture has no ink to trace (it is all paper-white)".into()))?;
+    let to_local = Affine::scale_non_uniform(*width_mm / w as f64, *height_mm / h as f64);
+    let place = shape.transform * to_local;
+    let hex_rgb = |hex: &str| -> [i32; 3] {
+        let v = u32::from_str_radix(hex.trim_start_matches('#'), 16).unwrap_or(0);
+        [((v >> 16) & 255) as i32, ((v >> 8) & 255) as i32, (v & 255) as i32]
+    };
+    let mut made = Vec::new();
+    for (k, colour) in q.palette.iter().enumerate() {
+        let label = k as u8;
+        let loops = lightfoundry_toolpath::trace(w, h, |x, y| q.labels.get(y * w + x) == Some(&label), tolerance, min_area)
+            .ok_or_else(|| EngineError::BadParams("that picture is too large or too detailed to trace".into()))?;
+        if loops.is_empty() {
+            continue;
+        }
+        let path = if smooth {
+            let subpaths = loops.iter().map(|l| lightfoundry_geom::nodes::smooth_polyline(&l.points, l.closed, SMOOTH_CORNER_DEG)).collect();
+            lightfoundry_geom::nodes::NodePath { subpaths }.to_bez()
+        } else {
+            super::pathops::polylines_to_path(&loops)
+        };
+        let want = [i32::from(colour[0]), i32::from(colour[1]), i32::from(colour[2])];
+        let layer = LAYER_COLORS
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, hex)| hex_rgb(hex).iter().zip(want).map(|(a, b)| (a - b).pow(2)).sum::<i32>())
+            .map_or(0, |(i, _)| i as LayerId);
+        let mut traced = Shape::path(format!("Traced #{:02x}{:02x}{:02x}", colour[0], colour[1], colour[2]), layer, path);
+        traced.transform = place;
+        made.push((traced, loops.len()));
+    }
+    if made.is_empty() {
+        return Err(EngineError::BadParams("nothing to trace".into()));
+    }
+    let outlines: usize = made.iter().map(|(_, n)| n).sum();
+    let ids: Vec<ShapeId> = made.into_iter().map(|(shape, _)| s.doc.add_shape(shape)).collect();
+    if !keep_image {
+        s.doc.shapes.retain(|x| x.id != id);
+    }
+    s.selection = ids.clone();
+    Ok(json!({ "ids": ids, "outlines": outlines, "colors": q.palette.len() }))
+}
+
 /// Most tonal bands one trace may make.
 const MAX_TRACE_LEVELS: u32 = 8;
 
@@ -247,6 +314,9 @@ fn trace(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let shape = s.doc.shape(id).ok_or_else(|| EngineError::NotFound(format!("shape {id} does not exist")))?;
     let ShapeKind::Image { image, width_mm, height_mm, adjust } = &shape.kind else { return Err(not_an_image(id)) };
     let (w, h) = (image.width as usize, image.height as usize);
+    if let Some(colors) = p.colors {
+        return trace_colors(s, id, colors, tolerance, min_area, p.smooth, p.keep_image);
+    }
     if !(1..=MAX_TRACE_LEVELS).contains(&p.levels) {
         return Err(EngineError::BadParams(format!("levels must be between 1 and {MAX_TRACE_LEVELS}")));
     }
