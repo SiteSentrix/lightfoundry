@@ -8,7 +8,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 1  | Verify on real GRBL hardware (jog, frame, short cut), fix what it finds              | Everything machine-side is only simulator-tested                    |
 | 2  | Machine settings ($$) editor; run-from-line; auto-reconnect                          | Day-to-day machine ownership                                        |
 | 3  | Jog by dragging/clicking on the canvas; "move laser here" and show head position on canvas | Faster alignment                                              |
-| 4  | Text tool (needs a font source: `storytold/craft-fonts` via build option, not in-repo) | Most-used design feature after shapes                               |
+| 4  | Outline fonts for text (Fill-mode text, accented/Unicode characters) via an optional font source (`storytold/craft-fonts` through a build option, never in-repo); today text is an ASCII single-line stroke font | Fill-engraved lettering and non-English text |
 | 5  | Node editing and a pen/Bézier tool                                                   | Cleaning up imports, drawing curves                                 |
 | 6  | Offset/kerf, boolean ops (union, difference, intersect), weld                        | Fit and assembly work (boxes, joints)                               |
 | 7  | Rulers, snapping, guides, numeric create dialogs                                     | Precision layout                                                    |

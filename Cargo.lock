@@ -1412,6 +1412,7 @@ dependencies = [
  "lightfoundry-gcode",
  "lightfoundry-geom",
  "lightfoundry-svg",
+ "lightfoundry-text",
  "lightfoundry-toolpath",
  "log",
  "serde",
@@ -1457,6 +1458,15 @@ dependencies = [
  "lightfoundry-geom",
  "thiserror 2.0.21",
  "usvg",
+]
+
+[[package]]
+name = "lightfoundry-text"
+version = "0.1.0"
+dependencies = [
+ "kurbo",
+ "lightfoundry-geom",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

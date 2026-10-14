@@ -12,7 +12,7 @@ simulator when nothing is plugged in.
 
 ## What works today
 
-- **Create:** rectangle, ellipse, line and regular-polygon tools; drag, rubber-band select, corner-handle resize, nudge, align, flip, rotate, duplicate, undo/redo (200 steps).
+- **Create:** rectangle, ellipse, line, regular-polygon and text tools (editable multi-line text in an original single-line stroke font: size, letter/line gap, alignment; click anywhere in the block to select); drag, rubber-band select, corner-handle resize, nudge, align, flip, rotate, duplicate, undo/redo (200 steps).
 - **Import:** SVG (shapes, groups, transforms, units; stroke/fill colours map to cut layers), DXF (LINE, LWPOLYLINE with bulges, POLYLINE, CIRCLE, ARC; `$INSUNITS` honoured; DXF layers become cut layers), and raster images (PNG/JPEG/BMP/GIF/WebP).
 - **Cut layers:** 16 layers, each with Line / Fill / Fill + Line mode, speed, min/max power, passes, fill interval and angle, bi-directional scanning, air assist, and image dithering (threshold, Floyd–Steinberg, grayscale).
 - **Toolpath:** inner shapes cut before outer ones, nearest-neighbour ordering, serpentine scan fill with holes, raster engraving with overscan, and a toolpath preview with time estimate.

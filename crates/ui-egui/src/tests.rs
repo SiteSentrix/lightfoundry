@@ -126,6 +126,67 @@ mod tool_tests {
     }
 }
 
+mod text_tool_tests {
+    use super::*;
+
+    #[test]
+    fn clicking_with_the_text_tool_places_text_and_returns_to_select() {
+        let mut h = Harness::new();
+        h.app.tool = Tool::Text;
+        h.app.active_layer = 3;
+        h.click(h.at(60.0, 70.0));
+        assert_eq!(h.app.session.doc.shapes.len(), 1, "{:?}", h.app.status);
+        let shape = &h.app.session.doc.shapes[0];
+        assert_eq!(shape.layer, 3);
+        assert!(matches!(&shape.kind, lightfoundry_doc::ShapeKind::Text { content, .. } if content == "Text"));
+        let b = shape.world_bounds().unwrap();
+        assert!((b.x0 - 60.0).abs() < 1.5 && (b.y0 - 70.0).abs() < 1.5, "{b:?}");
+        assert_eq!(h.app.tool, Tool::Select);
+        assert_eq!(h.app.session.selection, vec![shape.id]);
+    }
+
+    #[test]
+    fn the_inspector_follows_the_selected_text_and_edits_apply() {
+        let mut h = Harness::new();
+        h.app.run("text.create", json!({"text": "ONE", "x": 10, "y": 10}));
+        h.frame(vec![]);
+        assert!(matches!(&h.app.text_buffer, Some((_, t)) if t == "ONE"));
+        h.app.run("text.edit", json!({"text": "TWO"}));
+        h.app.text_buffer = None; // what the inspector does after committing
+        h.frame(vec![]);
+        assert!(matches!(&h.app.text_buffer, Some((_, t)) if t == "TWO"));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.frame(vec![]);
+        assert!(h.app.text_buffer.is_none());
+    }
+
+    #[test]
+    fn text_is_selected_by_clicking_anywhere_in_its_block_but_not_beside_it() {
+        let mut h = Harness::new();
+        h.app.run("text.create", json!({"text": "TEXT", "x": 100, "y": 100, "height": 20}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.frame(vec![]);
+        // Between the stem of the T and the E: no stroke is near, but it is inside the block.
+        h.click(h.at(104.0, 112.0));
+        assert_eq!(h.app.session.selection.len(), 1, "inside the block");
+        h.click(h.at(104.0, 150.0));
+        assert!(h.app.session.selection.is_empty(), "well below the block");
+    }
+
+    #[test]
+    fn unsupported_characters_raise_a_visible_warning() {
+        let mut h = Harness::new();
+        if let Some(v) = h.app.run("text.create", json!({"text": "caf\u{e9}"})) {
+            h.app.note_unsupported(&v);
+        }
+        assert!(h.app.text_warning.as_deref().is_some_and(|w| w.contains('\u{e9}')));
+        if let Some(v) = h.app.run("text.edit", json!({"text": "cafe"})) {
+            h.app.note_unsupported(&v);
+        }
+        assert!(h.app.text_warning.is_none());
+    }
+}
+
 mod select_tests {
     use super::*;
 

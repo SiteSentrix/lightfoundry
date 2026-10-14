@@ -129,6 +129,65 @@ mod edit_tests {
     }
 }
 
+mod text_tests {
+    use super::*;
+
+    #[test]
+    fn text_is_created_placed_and_engraved_as_lines() {
+        let mut s = Session::new();
+        s.execute("machine.set", &json!({"origin": "top_left"})).unwrap();
+        let v = s.execute("text.create", &json!({"text": "HELLO", "x": 20, "y": 30, "height": 12})).unwrap();
+        let id = v["id"].as_u64().unwrap();
+        let b = s.doc.bounds_of(&[id]).unwrap();
+        assert!((b.height() - 12.0).abs() < 1e-6 && (b.x0 - 20.0).abs() < 1e-6 && (b.y0 - 30.0).abs() < 1e-6, "{b:?}");
+        let g = s.execute("job.gcode", &json!({"include": true})).unwrap();
+        assert!(g["gcode"].as_str().unwrap().matches("G1").count() > 50, "text becomes many cutting moves");
+    }
+
+    #[test]
+    fn editing_text_regenerates_the_geometry_in_one_undo_step() {
+        let mut s = Session::new();
+        let id = s.execute("text.create", &json!({"text": "AB", "height": 10})).unwrap()["id"].as_u64().unwrap();
+        let narrow = s.doc.bounds_of(&[id]).unwrap().width();
+        s.execute("text.edit", &json!({"text": "ABCDEFG", "height": 20})).unwrap();
+        let wide = s.doc.bounds_of(&[id]).unwrap();
+        assert!(wide.width() > narrow * 4.0 && (wide.height() - 20.0).abs() < 1e-6, "{wide:?}");
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert!((s.doc.bounds_of(&[id]).unwrap().width() - narrow).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_moved_text_keeps_its_transform_when_edited() {
+        let mut s = Session::new();
+        let id = s.execute("text.create", &json!({"text": "HI", "x": 0, "y": 0})).unwrap()["id"].as_u64().unwrap();
+        s.execute("edit.move", &json!({"dx": 40, "dy": 25})).unwrap();
+        s.execute("text.edit", &json!({"text": "HELLO"})).unwrap();
+        let b = s.doc.bounds_of(&[id]).unwrap();
+        assert!((b.x0 - 40.0).abs() < 1e-6 && (b.y0 - 25.0).abs() < 1e-6, "{b:?}");
+    }
+
+    #[test]
+    fn bad_text_input_is_an_error_and_unsupported_characters_are_reported() {
+        let mut s = Session::new();
+        assert!(s.execute("text.create", &json!({"text": "   "})).is_err());
+        assert!(s.execute("text.create", &json!({"text": "A", "height": -3})).is_err());
+        assert!(s.execute("text.create", &json!({"text": "A", "height": 1e12})).is_err());
+        assert!(s.execute("text.edit", &json!({})).is_err(), "nothing selected");
+        let v = s.execute("text.create", &json!({"text": "caf\u{e9}"})).unwrap();
+        assert_eq!(v["unsupported"], json!(["\u{e9}"]));
+        let rect = s.execute("shape.rectangle", &json!({"width": 5, "height": 5})).unwrap()["id"].as_u64().unwrap();
+        assert!(s.execute("text.edit", &json!({"id": rect, "text": "x"})).is_err(), "only text can be edited as text");
+    }
+
+    #[test]
+    fn text_survives_save_and_load() {
+        let mut s = Session::new();
+        s.execute("text.create", &json!({"text": "SAVE ME", "align": "center"})).unwrap();
+        let back = lightfoundry_format::from_bytes(&lightfoundry_format::to_bytes(&s.doc).unwrap()).unwrap();
+        assert_eq!(back.shapes, s.doc.shapes);
+    }
+}
+
 mod import_tests {
     use super::*;
 

@@ -105,8 +105,21 @@ fn interact(app: &mut LightFoundryApp, ui: &egui::Ui, resp: &egui::Response, vie
         app.drag = Drag::None;
         offset = (0.0, 0.0);
     }
+    // The tool as it was when the click happened: placing text switches back to Select, and that
+    // must not turn the same click into a selection click.
+    let tool = app.tool;
     if resp.clicked_by(PointerButton::Primary)
-        && app.tool == Tool::Select
+        && tool == Tool::Text
+        && let Some(p) = pointer
+    {
+        let layer = app.active_layer;
+        if let Some(v) = app.run("text.create", json!({ "text": "Text", "x": p.x, "y": p.y, "layer": layer })) {
+            app.note_unsupported(&v);
+        }
+        app.tool = Tool::Select;
+    }
+    if resp.clicked_by(PointerButton::Primary)
+        && tool == Tool::Select
         && let Some(p) = pointer
     {
         click_select(app, p, tol, shift);
@@ -178,7 +191,7 @@ fn create(app: &mut LightFoundryApp, a: Point, b: Point) {
     let (w, h) = ((b.x - a.x).abs(), (b.y - a.y).abs());
     let layer = app.active_layer;
     match app.tool {
-        Tool::Select => {}
+        Tool::Select | Tool::Text => {}
         Tool::Rectangle if w > MIN_CREATE_MM && h > MIN_CREATE_MM => {
             app.run("shape.rectangle", json!({ "x": a.x.min(b.x), "y": a.y.min(b.y), "width": w, "height": h, "layer": layer }));
         }
@@ -377,6 +390,6 @@ fn draw_create_ghost(app: &LightFoundryApp, painter: &egui::Painter, view: &View
                 .collect();
             painter.add(Shape::closed_line(pts, stroke));
         }
-        Tool::Select => {}
+        Tool::Select | Tool::Text => {}
     }
 }
