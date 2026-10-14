@@ -38,6 +38,7 @@ file error: {0}
 file is larger than {1} MB
 file is not a LightFoundry document
 gap must be a finite number
+give a path, or include: true to get the text
 give either path or data
 give either path or data_base64
 image is too large
@@ -118,6 +119,7 @@ the two marks are too close together to give a direction
 there is no node {0} in that sub-path
 there is no segment {0} in that sub-path
 there is no sub-path {0}
+there is nothing to export
 there is nothing to frame
 there is nothing to output
 this file was saved by a newer LightFoundry (format v{0}); update to open it

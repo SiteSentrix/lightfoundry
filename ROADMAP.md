@@ -333,3 +333,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   inside each run (reversed within right-to-left runs). The stroke font has no right-to-left letters, so
   it is unchanged. Gap 4 is closed; gap 10 (ramp along fills and images) was dropped as unnecessary
   given overscan, speed-based overscan and `M4` dynamic power.
+- **2026-10-14 — SVG export.** `file.export_svg` (File > Save SVG…; `include: true` returns the text, which
+  is what the browser build downloads) writes the drawing in millimetres with one group per layer
+  coloured like the layer: line layers as hairline strokes, fill layers as even-odd fills, text as
+  outlines, pictures embedded as PNG with their tone adjustments. `selection_only` and
+  `include_hidden` narrow or widen it. Written so work designed here can go into software that takes SVG
+  but not G-code (such as a cloud-driven laser's own app); reading it back gives the same size.

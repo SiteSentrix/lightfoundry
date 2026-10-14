@@ -912,6 +912,73 @@ mod import_tests {
     }
 
     #[test]
+    fn svg_export_writes_millimetre_layers_that_import_back_to_the_same_size() {
+        let mut s = Session::new();
+        s.execute("shape.rectangle", &json!({"x": 10, "y": 20, "width": 30, "height": 15})).unwrap();
+        s.execute("shape.ellipse", &json!({"cx": 80, "cy": 40, "rx": 10, "ry": 5, "layer": 1})).unwrap();
+        s.execute("layer.set", &json!({"id": 1, "mode": "fill", "name": "Fill \"A\" <1>"})).unwrap();
+        s.execute("text.create", &json!({"text": "Hi", "x": 10, "y": 60, "height": 8, "layer": 2})).unwrap();
+        let v = s.execute("file.export_svg", &json!({"include": true})).unwrap();
+        let svg = v["svg"].as_str().unwrap();
+        assert_eq!(v["shapes"], json!(3));
+        assert!(svg.contains("width=\"") && svg.contains("mm\"") && svg.contains("viewBox=\"10 20 80 48\""), "{svg}");
+        assert!(svg.contains("id=\"layer-0\"") && svg.contains("id=\"layer-1\"") && svg.contains("fill-rule=\"evenodd\""));
+        assert!(svg.contains("data-name=\"Fill &quot;A&quot; &lt;1&gt;\""), "names are escaped");
+        assert!(!svg.contains("layer-3"), "empty layers are left out");
+
+        // It reads back at the same size and place.
+        let before = s
+            .doc
+            .shapes
+            .iter()
+            .filter_map(|sh| sh.world_bounds())
+            .fold(None, |a: Option<lightfoundry_geom::Rect>, b| Some(a.map_or(b, |a| a.union(b))))
+            .unwrap();
+        let mut t = Session::new();
+        t.execute("file.import_svg", &json!({"data": svg})).unwrap();
+        let after = t
+            .doc
+            .shapes
+            .iter()
+            .filter_map(|sh| sh.world_bounds())
+            .fold(None, |a: Option<lightfoundry_geom::Rect>, b| Some(a.map_or(b, |a| a.union(b))))
+            .unwrap();
+        assert!((before.width() - after.width()).abs() < 0.5 && (before.height() - after.height()).abs() < 0.5, "{before:?} vs {after:?}");
+    }
+
+    #[test]
+    fn svg_export_can_limit_to_the_selection_include_hidden_layers_and_refuses_nothing() {
+        let mut s = Session::new();
+        assert!(s.execute("file.export_svg", &json!({"include": true})).is_err(), "nothing to export");
+        let a = s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap()["id"].as_u64().unwrap();
+        s.execute("shape.rectangle", &json!({"x": 50, "y": 50, "width": 10, "height": 10, "layer": 4})).unwrap();
+        s.selection = vec![a];
+        assert_eq!(s.execute("file.export_svg", &json!({"include": true, "selection_only": true})).unwrap()["shapes"], json!(1));
+        s.execute("layer.set", &json!({"id": 4, "output": false})).unwrap();
+        assert_eq!(s.execute("file.export_svg", &json!({"include": true})).unwrap()["shapes"], json!(1), "layers with output off are skipped");
+        assert_eq!(s.execute("file.export_svg", &json!({"include": true, "include_hidden": true})).unwrap()["shapes"], json!(2));
+        assert!(s.execute("file.export_svg", &json!({})).is_err(), "needs a path or include");
+        let dir = std::env::temp_dir().join(format!("lf-engine-svgout-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("out.svg");
+        s.execute("file.export_svg", &json!({"path": file})).unwrap();
+        assert!(std::fs::read_to_string(&file).unwrap().starts_with("<?xml"));
+        assert!(s.execute("file.export_svg", &json!({"path": dir.join("no/such/dir/x.svg")})).is_err());
+    }
+
+    #[test]
+    fn svg_export_embeds_pictures_as_png_with_their_placement() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-svgimg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p.png");
+        image::GrayImage::from_fn(4, 2, |x, _| image::Luma([(x * 60) as u8])).save(&path).unwrap();
+        let mut s = Session::new();
+        s.execute("file.import_image", &json!({"path": path, "width": 40, "x": 5, "y": 7})).unwrap();
+        let svg = s.execute("file.export_svg", &json!({"include": true})).unwrap()["svg"].as_str().unwrap().to_string();
+        assert!(svg.contains("<image ") && svg.contains("href=\"data:image/png;base64,") && svg.contains("matrix("), "{svg}");
+    }
+
+    #[test]
     fn tracing_by_colour_makes_a_shape_per_palette_colour_and_needs_a_coloured_picture() {
         let dir = std::env::temp_dir().join(format!("lf-engine-colours-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

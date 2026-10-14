@@ -11,6 +11,7 @@ mod pathops;
 mod presets;
 mod setup;
 mod shapes;
+mod svg_export;
 mod testgrid;
 mod text;
 
