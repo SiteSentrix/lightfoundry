@@ -241,4 +241,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   turns bends gentler than 60 degrees into smooth nodes (handles a third of the way to each
   neighbour) and keeps sharper ones as corners, so traced discs and lettering come out as editable
   curves with the node tool.
+- **2026-10-14 — more DXF.** ELLIPSE (full and partial, any rotation), SPLINE (de Boor with
+  optional weights, falling back to fit points or the control polygon when knots are unusable, work
+  capped), and INSERT of BLOCK definitions (translate, rotate, non-uniform scale, base point; nested
+  four deep; a shared entity budget stops self-inserting blocks).
 
