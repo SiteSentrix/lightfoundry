@@ -245,4 +245,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   optional weights, falling back to fit points or the control polygon when knots are unusable, work
   capped), and INSERT of BLOCK definitions (translate, rotate, non-uniform scale, base point; nested
   four deep; a shared entity budget stops self-inserting blocks).
+- **2026-10-14 — SVG pictures and text.** Embedded PNG/JPEG/GIF/WebP pictures in an SVG become
+  picture shapes at the right place and size (capped at 64 pictures and 64 MB; an undecodable one is
+  counted, not fatal). Text is converted to outlines by `usvg` using the machine's installed fonts,
+  which are only loaded when the file contains text (and not in the browser).
 

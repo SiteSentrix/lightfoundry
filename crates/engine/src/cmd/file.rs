@@ -188,8 +188,26 @@ fn import_svg(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         shape.transform = Affine::translate((p.x, p.y));
         ids.push(s.doc.add_shape(shape));
     }
+    // Pictures embedded in the SVG; one that cannot be decoded is reported, not fatal.
+    let mut skipped_images = 0;
+    for img in svg.images {
+        let Ok(raster) = decode_picture(&img.bytes) else {
+            skipped_images += 1;
+            continue;
+        };
+        let shape = Shape {
+            id: 0,
+            name: img.name,
+            layer: 0,
+            transform: Affine::translate((p.x, p.y)) * img.transform,
+            kind: ShapeKind::Image { image: Arc::new(raster), width_mm: img.width_mm, height_mm: img.height_mm, adjust: Default::default() },
+            cut: None,
+            group: None,
+        };
+        ids.push(s.doc.add_shape(shape));
+    }
     s.selection = ids.clone();
-    Ok(json!({ "ids": ids, "width_mm": svg.width_mm, "height_mm": svg.height_mm }))
+    Ok(json!({ "ids": ids, "width_mm": svg.width_mm, "height_mm": svg.height_mm, "skipped_images": skipped_images }))
 }
 
 /// Chains the open shapes among `ids` (per layer) into longer paths, replacing them in `ids`.
@@ -310,6 +328,16 @@ fn import_image(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let id = s.doc.add_shape(shape);
     s.selection = vec![id];
     Ok(json!({ "id": id, "width_mm": width_mm, "height_mm": width_mm * aspect }))
+}
+
+/// Decodes picture bytes (format guessed) to the gray raster the engine works with.
+fn decode_picture(bytes: &[u8]) -> Result<RasterImage, EngineError> {
+    let mut reader = ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?;
+    let mut limits = Limits::default();
+    limits.max_alloc = Some(MAX_IMAGE_PIXELS * 8);
+    reader.limits(limits);
+    let decoded = reader.decode().map_err(|e| EngineError::Import(e.to_string()))?;
+    to_gray(&decoded)
 }
 
 fn autosave(s: &mut Session, params: &Value) -> Result<Value, EngineError> {

@@ -1,4 +1,6 @@
 //! SVG import: shapes, groups and transforms are resolved by `usvg`, then converted to mm paths.
+//! Text is turned into outlines with the fonts installed on the machine (when there are any), and
+//! embedded raster pictures are returned as encoded bytes for the caller to decode.
 
 use lightfoundry_geom::{Affine, BezPath};
 use thiserror::Error;
@@ -29,31 +31,99 @@ pub struct ImportedPath {
     pub filled: bool,
 }
 
+/// An embedded raster picture (PNG, JPEG, GIF or WebP data).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportedImage {
+    pub name: String,
+    pub bytes: Vec<u8>,
+    /// The picture's size in mm and where it sits: maps its own mm space (0..width, 0..height) onto
+    /// the SVG's mm space (y down, from the top-left corner).
+    pub width_mm: f64,
+    pub height_mm: f64,
+    pub transform: Affine,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SvgImport {
     pub width_mm: f64,
     pub height_mm: f64,
     pub paths: Vec<ImportedPath>,
+    pub images: Vec<ImportedImage>,
 }
+
+/// Cap on imported pictures and on the bytes they may add up to.
+pub const MAX_IMAGES: usize = 64;
+pub const MAX_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 
 pub fn import_svg(data: &[u8]) -> Result<SvgImport, SvgError> {
     if data.len() > MAX_SVG_BYTES {
         return Err(SvgError::TooLarge);
     }
-    let tree = usvg::Tree::from_data(data, &usvg::Options::default()).map_err(|e| SvgError::Parse(e.to_string()))?;
+    let mut options = usvg::Options::default();
+    // Installed fonts are only looked up when the file has text to draw (loading them takes a while).
+    if data.windows(5).any(|w| w == b"<text") {
+        load_system_fonts(&mut options);
+    }
+    let tree = usvg::Tree::from_data(data, &options).map_err(|e| SvgError::Parse(e.to_string()))?;
     let size = tree.size();
-    let mut paths = Vec::new();
-    collect(tree.root(), &mut paths);
-    Ok(SvgImport { width_mm: f64::from(size.width()) * MM_PER_PX, height_mm: f64::from(size.height()) * MM_PER_PX, paths })
+    let mut found = Found::default();
+    collect(tree.root(), &mut found);
+    Ok(SvgImport {
+        width_mm: f64::from(size.width()) * MM_PER_PX,
+        height_mm: f64::from(size.height()) * MM_PER_PX,
+        paths: found.paths,
+        images: found.images,
+    })
 }
 
-fn collect(group: &usvg::Group, out: &mut Vec<ImportedPath>) {
+#[cfg(not(target_arch = "wasm32"))]
+fn load_system_fonts(options: &mut usvg::Options<'_>) {
+    std::sync::Arc::make_mut(&mut options.fontdb).load_system_fonts();
+}
+
+/// A browser has no font files to read.
+#[cfg(target_arch = "wasm32")]
+fn load_system_fonts(_: &mut usvg::Options<'_>) {}
+
+#[derive(Default)]
+struct Found {
+    paths: Vec<ImportedPath>,
+    images: Vec<ImportedImage>,
+    image_bytes: usize,
+}
+
+fn collect(group: &usvg::Group, found: &mut Found) {
     for node in group.children() {
-        if out.len() >= MAX_PATHS {
+        if found.paths.len() >= MAX_PATHS {
             return;
         }
+        let out = &mut found.paths;
         match node {
-            usvg::Node::Group(g) => collect(g, out),
+            usvg::Node::Group(g) => collect(g, found),
+            // Text arrives already converted to outlines (an empty group without fonts).
+            usvg::Node::Text(t) => collect(t.flattened(), found),
+            usvg::Node::Image(img) => {
+                let bytes = match img.kind() {
+                    usvg::ImageKind::PNG(d) | usvg::ImageKind::JPEG(d) | usvg::ImageKind::GIF(d) | usvg::ImageKind::WEBP(d) => d.as_slice(),
+                    usvg::ImageKind::SVG(_) => continue,
+                };
+                if found.images.len() >= MAX_IMAGES || found.image_bytes + bytes.len() > MAX_IMAGE_BYTES {
+                    continue;
+                }
+                let size = img.size();
+                let ts = img.abs_transform();
+                let m = Affine::new([ts.sx as f64, ts.ky as f64, ts.kx as f64, ts.sy as f64, ts.tx as f64, ts.ty as f64]);
+                let transform = Affine::scale(MM_PER_PX) * m * Affine::scale(1.0 / MM_PER_PX);
+                found.image_bytes += bytes.len();
+                let name = if img.id().is_empty() { format!("image {}", found.images.len() + 1) } else { img.id().to_string() };
+                found.images.push(ImportedImage {
+                    name,
+                    bytes: bytes.to_vec(),
+                    width_mm: f64::from(size.width()) * MM_PER_PX,
+                    height_mm: f64::from(size.height()) * MM_PER_PX,
+                    transform,
+                });
+            }
             usvg::Node::Path(p) => {
                 let ts = p.abs_transform();
                 let m = Affine::new([ts.sx as f64, ts.ky as f64, ts.kx as f64, ts.sy as f64, ts.tx as f64, ts.ty as f64]);
@@ -63,8 +133,6 @@ fn collect(group: &usvg::Group, out: &mut Vec<ImportedPath>) {
                 let name = if p.id().is_empty() { format!("path {}", out.len() + 1) } else { p.id().to_string() };
                 out.push(ImportedPath { name, path: bez, color, filled: p.fill().is_some() });
             }
-            // Raster images and text are handled elsewhere (text must be converted to outlines first).
-            _ => {}
         }
     }
 }
