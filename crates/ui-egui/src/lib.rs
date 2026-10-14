@@ -13,7 +13,7 @@ pub use platform::{NoPlatform, Platform};
 
 use std::path::PathBuf;
 
-use lightfoundry_device::{JobRunner, SimulatedGrbl};
+use lightfoundry_device::{JobState, Link, SimulatedGrbl, Snapshot};
 use lightfoundry_doc::LayerId;
 use lightfoundry_engine::{EngineError, Session};
 use serde_json::Value;
@@ -53,8 +53,13 @@ pub struct LightFoundryApp {
     status: Option<(String, bool)>,
     geometry: GeometryCache,
     preview: PreviewCache,
-    runner: Option<JobRunner>,
-    run_result: Option<Result<String, String>>,
+    link: Option<Link>,
+    /// Latest state of the machine link, refreshed once per frame.
+    snap: Option<Snapshot>,
+    last_job: Option<JobState>,
+    console_input: String,
+    jog_step: f64,
+    jog_feed: f64,
     target: Target,
     ports: Vec<String>,
     frame_power: f64,
@@ -77,8 +82,12 @@ impl LightFoundryApp {
             status: None,
             geometry: GeometryCache::default(),
             preview: PreviewCache::default(),
-            runner: None,
-            run_result: None,
+            link: None,
+            snap: None,
+            last_job: None,
+            console_input: String::new(),
+            jog_step: 1.0,
+            jog_feed: 3000.0,
             target: Target::Simulator,
             ports,
             frame_power: 0.0,
@@ -87,7 +96,7 @@ impl LightFoundryApp {
 
     /// Draws one frame. Called from the host's `eframe::App::ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        self.poll_runner(ui.ctx());
+        self.poll_link(ui.ctx());
         self.handle_shortcuts(ui.ctx());
         menus::menu_bar(self, ui);
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
@@ -123,11 +132,8 @@ impl LightFoundryApp {
         self.platform.pick_save(title, name, exts)
     }
 
-    pub(crate) fn start_job(&mut self, program: String) {
-        if self.runner.as_ref().is_some_and(JobRunner::is_running) {
-            self.status = Some(("A job is already running".into(), true));
-            return;
-        }
+    /// Opens the selected machine (or the simulator) and keeps the connection until `disconnect`.
+    pub(crate) fn connect(&mut self) {
         let transport: Result<Box<dyn lightfoundry_device::Transport + Send>, String> = match &self.target {
             Target::Simulator => {
                 let mut sim = SimulatedGrbl::new();
@@ -138,26 +144,67 @@ impl LightFoundryApp {
         };
         match transport {
             Ok(t) => {
-                self.run_result = None;
-                self.runner = Some(JobRunner::start(t, program));
+                self.link = Some(Link::connect(t));
+                self.say("Connected");
             }
             Err(e) => self.status = Some((format!("Could not open the machine: {e}"), true)),
         }
     }
 
-    fn poll_runner(&mut self, ctx: &egui::Context) {
-        let Some(runner) = self.runner.as_mut() else { return };
-        if runner.is_running() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    /// Dropping the link cancels any running job (soft reset) before the connection closes.
+    pub(crate) fn disconnect(&mut self) {
+        self.link = None;
+        self.snap = None;
+        self.last_job = None;
+        self.say("Disconnected");
+    }
+
+    pub(crate) fn start_job(&mut self, program: String) {
+        let Some(link) = &self.link else {
+            self.status = Some(("Connect to a machine (or the simulator) first".into(), true));
+            return;
+        };
+        if let Err(e) = link.start_job(program) {
+            self.status = Some((e.to_string(), true));
         }
-        if let Some(outcome) = runner.poll() {
-            let (text, is_err) = match &outcome {
-                Ok(r) => (format!("Job finished: {} lines sent", r.lines), false),
-                Err(e) => (e.to_string(), true),
-            };
-            self.status = Some((text.clone(), is_err));
-            self.run_result = Some(outcome.map(|_| text).map_err(|e| e.to_string()));
+    }
+
+    /// Runs a link command and shows a refusal in the status bar.
+    pub(crate) fn link_do(&mut self, f: impl FnOnce(&Link) -> Result<(), lightfoundry_device::LinkError>) {
+        let Some(link) = &self.link else {
+            self.status = Some(("Not connected".into(), true));
+            return;
+        };
+        if let Err(e) = f(link) {
+            self.status = Some((e.to_string(), true));
         }
+    }
+
+    pub(crate) fn job_active(&self) -> bool {
+        self.snap.as_ref().is_some_and(|s| matches!(s.job, JobState::Running | JobState::Paused))
+    }
+
+    fn poll_link(&mut self, ctx: &egui::Context) {
+        let Some(link) = &self.link else { return };
+        // The worker updates continuously; poll at a modest rate rather than every frame forever.
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        let snap = link.snapshot();
+        if !snap.connected {
+            self.status = Some(("The machine connection was lost".into(), true));
+            self.link = None;
+            self.snap = None;
+            return;
+        }
+        if self.last_job.as_ref() != Some(&snap.job) {
+            if let JobState::Finished(result) = &snap.job {
+                self.status = Some(match result {
+                    Ok(lines) => (format!("Job finished: {lines} lines"), false),
+                    Err(e) => (format!("Job stopped: {e}"), true),
+                });
+            }
+            self.last_job = Some(snap.job.clone());
+        }
+        self.snap = Some(snap);
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {

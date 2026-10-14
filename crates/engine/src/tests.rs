@@ -218,6 +218,31 @@ mod job_tests {
     }
 
     #[test]
+    fn start_from_current_position_makes_the_job_relative_to_its_anchor() {
+        let mut s = square_session(); // 20x10 rect at (10,10), top-left origin
+        s.execute("job.set_origin", &json!({"start_from": "current_position", "anchor": "center"})).unwrap();
+        let g = s.execute("job.gcode", &json!({"include": true})).unwrap();
+        let text = g["gcode"].as_str().unwrap();
+        assert!(text.contains("G92 X0 Y0"), "{text}");
+        assert!(text.contains("X-10") && text.contains("Y-5"), "centre anchor: corner is at (-10,-5)\n{text}");
+        // Even a job far outside the design bed is fine when placement is relative.
+        s.execute("edit.move", &json!({"dx": 5000, "dy": 0})).unwrap();
+        assert!(s.execute("job.gcode", &Value::Null).is_ok());
+        s.execute("job.set_origin", &json!({"start_from": "absolute"})).unwrap();
+        assert!(matches!(s.execute("job.gcode", &Value::Null), Err(EngineError::Gcode(_))));
+    }
+
+    #[test]
+    fn job_origin_is_undoable_and_saved() {
+        let mut s = square_session();
+        s.execute("job.set_origin", &json!({"anchor": "bottom_right"})).unwrap();
+        let bytes = lightfoundry_format::to_bytes(&s.doc).unwrap();
+        assert_eq!(lightfoundry_format::from_bytes(&bytes).unwrap().job_origin.anchor, lightfoundry_doc::Anchor::BottomRight);
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(s.doc.job_origin.anchor, lightfoundry_doc::Anchor::TopLeft);
+    }
+
+    #[test]
     fn layer_settings_flow_through_to_gcode() {
         let mut s = square_session();
         s.execute("layer.set", &json!({"id": 0, "speed": 777, "max_power": 25, "passes": 2})).unwrap();

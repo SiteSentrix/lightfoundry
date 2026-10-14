@@ -22,12 +22,21 @@ pub struct Document {
     pub layers: Vec<Layer>,
     pub shapes: Vec<Shape>,
     pub machine: Machine,
+    /// Where the job lands relative to the machine; absent in older files.
+    #[serde(default)]
+    pub job_origin: JobOrigin,
     pub next_id: ShapeId,
 }
 
 impl Default for Document {
     fn default() -> Self {
-        Self { layers: (0..LAYER_COLORS.len() as u32).map(Layer::numbered).collect(), shapes: Vec::new(), machine: Machine::default(), next_id: 1 }
+        Self {
+            layers: (0..LAYER_COLORS.len() as u32).map(Layer::numbered).collect(),
+            shapes: Vec::new(),
+            machine: Machine::default(),
+            job_origin: JobOrigin::default(),
+            next_id: 1,
+        }
     }
 }
 
@@ -67,6 +76,70 @@ impl Document {
     /// Bounds of the given shapes in workspace mm.
     pub fn bounds_of(&self, ids: &[ShapeId]) -> Option<Rect> {
         ids.iter().filter_map(|id| self.shape(*id)).filter_map(Shape::world_bounds).reduce(|a, b| a.union(b))
+    }
+}
+
+/// How the job is positioned on the machine.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct JobOrigin {
+    pub start_from: StartFrom,
+    /// Which point of the job's bounds sits at the origin (relative modes only).
+    pub anchor: Anchor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartFrom {
+    /// Design coordinates are machine coordinates: the bed in the editor is the bed on the machine.
+    #[default]
+    Absolute,
+    /// The user has set the work-coordinate zero on the machine; the job anchor goes there.
+    UserOrigin,
+    /// The head's current position becomes zero when the job starts.
+    CurrentPosition,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Anchor {
+    #[default]
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Center,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+
+impl Anchor {
+    pub const ALL: [Anchor; 9] = [
+        Anchor::TopLeft,
+        Anchor::Top,
+        Anchor::TopRight,
+        Anchor::Left,
+        Anchor::Center,
+        Anchor::Right,
+        Anchor::BottomLeft,
+        Anchor::Bottom,
+        Anchor::BottomRight,
+    ];
+
+    /// The anchor's point on `b` (workspace mm, y down).
+    pub fn point(self, b: Rect) -> lightfoundry_geom::Point {
+        let x = match self {
+            Anchor::TopLeft | Anchor::Left | Anchor::BottomLeft => b.x0,
+            Anchor::Top | Anchor::Center | Anchor::Bottom => (b.x0 + b.x1) / 2.0,
+            Anchor::TopRight | Anchor::Right | Anchor::BottomRight => b.x1,
+        };
+        let y = match self {
+            Anchor::TopLeft | Anchor::Top | Anchor::TopRight => b.y0,
+            Anchor::Left | Anchor::Center | Anchor::Right => (b.y0 + b.y1) / 2.0,
+            Anchor::BottomLeft | Anchor::Bottom | Anchor::BottomRight => b.y1,
+        };
+        lightfoundry_geom::Point::new(x, y)
     }
 }
 
@@ -296,6 +369,23 @@ mod tests {
         s.transform = Affine::translate((5.0, 7.0));
         let b = s.world_bounds();
         assert_eq!(b, Some(Rect::new(5.0, 7.0, 15.0, 17.0)));
+    }
+
+    #[test]
+    fn anchors_pick_the_expected_points() {
+        let b = Rect::new(10.0, 20.0, 30.0, 60.0);
+        assert_eq!(Anchor::TopLeft.point(b), lightfoundry_geom::Point::new(10.0, 20.0));
+        assert_eq!(Anchor::Center.point(b), lightfoundry_geom::Point::new(20.0, 40.0));
+        assert_eq!(Anchor::BottomRight.point(b), lightfoundry_geom::Point::new(30.0, 60.0));
+        assert_eq!(Anchor::ALL.len(), 9);
+    }
+
+    #[test]
+    fn old_files_without_job_origin_still_load() {
+        let mut v = serde_json::to_value(Document::default()).unwrap();
+        v.as_object_mut().unwrap().remove("job_origin");
+        let doc: Document = serde_json::from_value(v).unwrap();
+        assert_eq!(doc.job_origin, JobOrigin::default());
     }
 
     #[test]

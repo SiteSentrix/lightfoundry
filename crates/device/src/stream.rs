@@ -33,6 +33,71 @@ pub struct StreamReport {
     pub lines: usize,
 }
 
+/// The protocol state of one program being streamed: which lines are in flight and how many
+/// bytes of GRBL's RX buffer they occupy. Shared by [`stream_program`] and the persistent link.
+pub(crate) struct JobStream {
+    lines: Vec<String>,
+    in_flight: VecDeque<usize>,
+    in_flight_bytes: usize,
+    next: usize,
+    acked: usize,
+}
+
+impl JobStream {
+    pub(crate) fn new(program: &str) -> Result<Self, DeviceError> {
+        Ok(Self { lines: prepare(program)?, in_flight: VecDeque::new(), in_flight_bytes: 0, next: 0, acked: 0 })
+    }
+
+    pub(crate) fn progress(&self) -> Progress {
+        Progress { sent: self.next, acknowledged: self.acked, total: self.lines.len() }
+    }
+
+    pub(crate) fn is_done(&self) -> bool {
+        self.acked >= self.lines.len()
+    }
+
+    pub(crate) fn has_in_flight(&self) -> bool {
+        !self.in_flight.is_empty()
+    }
+
+    /// Sends as many lines as fit in the controller's RX buffer.
+    pub(crate) fn pump(&mut self, transport: &mut dyn Transport) -> Result<(), DeviceError> {
+        while let Some(line) = self.lines.get(self.next) {
+            let cost = line.len() + 1;
+            if self.in_flight_bytes + cost > GRBL_RX_BUFFER - 1 {
+                break;
+            }
+            transport.write_all(format!("{line}\n").as_bytes())?;
+            self.in_flight.push_back(cost);
+            self.in_flight_bytes += cost;
+            self.next += 1;
+        }
+        Ok(())
+    }
+
+    /// Feeds one controller response. `Ok(true)` if it was an acknowledgement of a streamed line.
+    pub(crate) fn on_response(&mut self, resp: &str) -> Result<bool, DeviceError> {
+        let resp = resp.trim();
+        if resp == "ok" {
+            self.in_flight_bytes -= self.in_flight.pop_front().unwrap_or(0);
+            self.acked += 1;
+            Ok(true)
+        } else if let Some(code) = resp.strip_prefix("error:") {
+            let index = self.acked;
+            Err(DeviceError::Grbl {
+                code: code.trim().parse().unwrap_or(0),
+                line: index + 1,
+                text: self.lines.get(index).cloned().unwrap_or_default(),
+            })
+        } else if let Some(code) = resp.strip_prefix("ALARM:") {
+            Err(DeviceError::Alarm(code.trim().parse().unwrap_or(0)))
+        } else {
+            // Status reports, "[MSG:...]" and banners are informational.
+            Ok(false)
+        }
+    }
+}
+
 /// Streams a G-code program with GRBL's character-counting protocol: keep as many lines in flight
 /// as fit in the 128-byte RX buffer and free space as `ok`/`error` responses arrive.
 pub fn stream_program(
@@ -42,59 +107,36 @@ pub fn stream_program(
     cancel: &AtomicBool,
     mut on_progress: impl FnMut(Progress),
 ) -> Result<StreamReport, DeviceError> {
-    let lines = prepare(program)?;
-    let total = lines.len();
-    let mut in_flight: VecDeque<usize> = VecDeque::new();
-    let mut in_flight_bytes = 0usize;
-    let (mut next, mut acked) = (0usize, 0usize);
+    let mut job = JobStream::new(program)?;
     let mut last_activity = Instant::now();
 
-    while acked < total {
+    while !job.is_done() {
         if cancel.load(Ordering::Relaxed) {
             // Reset flushes GRBL's buffers and stops motion; the laser is switched off by the reset.
             transport.write_all(&[realtime::SOFT_RESET])?;
             return Err(DeviceError::Cancelled);
         }
-        while let Some(line) = lines.get(next) {
-            let cost = line.len() + 1;
-            if in_flight_bytes + cost > GRBL_RX_BUFFER - 1 {
-                break;
-            }
-            transport.write_all(format!("{line}\n").as_bytes())?;
-            in_flight.push_back(cost);
-            in_flight_bytes += cost;
-            next += 1;
-            on_progress(Progress { sent: next, acknowledged: acked, total });
+        let before = job.progress().sent;
+        job.pump(transport)?;
+        if job.progress().sent != before {
+            on_progress(job.progress());
         }
         match transport.read_line(options.poll)? {
             Some(resp) => {
                 last_activity = Instant::now();
-                let resp = resp.trim();
-                if resp == "ok" {
-                    in_flight_bytes -= in_flight.pop_front().unwrap_or(0);
-                    acked += 1;
-                    on_progress(Progress { sent: next, acknowledged: acked, total });
-                } else if let Some(code) = resp.strip_prefix("error:") {
-                    let line = acked;
-                    return Err(DeviceError::Grbl {
-                        code: code.trim().parse().unwrap_or(0),
-                        line: line + 1,
-                        text: lines.get(line).cloned().unwrap_or_default(),
-                    });
-                } else if let Some(code) = resp.strip_prefix("ALARM:") {
-                    return Err(DeviceError::Alarm(code.trim().parse().unwrap_or(0)));
+                if job.on_response(&resp)? {
+                    on_progress(job.progress());
                 }
-                // Anything else (status reports, "[MSG:...]", banners) is informational.
             }
             None if last_activity.elapsed() > options.idle_timeout => return Err(DeviceError::Timeout(options.idle_timeout.as_secs())),
             None => {}
         }
     }
-    Ok(StreamReport { lines: total })
+    Ok(StreamReport { lines: job.progress().total })
 }
 
 /// Strips comments and blank lines; refuses lines GRBL would truncate.
-fn prepare(program: &str) -> Result<Vec<String>, DeviceError> {
+pub(crate) fn prepare(program: &str) -> Result<Vec<String>, DeviceError> {
     let mut out = Vec::new();
     for (i, raw) in program.lines().enumerate() {
         let code = raw.split(';').next().unwrap_or("");

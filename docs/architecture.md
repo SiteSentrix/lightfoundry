@@ -22,9 +22,9 @@ and that nothing below L6 depends on a UI toolkit. The table lives in `xtask/src
 | L2    | `toolpath` | document to `Job`: ordering, scan fill, raster dithering, time estimate                          |
 | L3    | `svg`      | SVG import (`usvg` resolves shapes, groups, transforms, units)                                   |
 | L3    | `dxf`      | ASCII DXF import written from the public reference                                               |
-| L3    | `gcode`    | `Job` to GRBL G-code; bed-bounds and finiteness checks; framing                                  |
+| L3    | `gcode`    | `Job` to GRBL G-code with a `Placement` (absolute, or relative to a job anchor); bed-bounds and finiteness checks; framing |
 | L3    | `format`   | the native `.lightfoundry` file: versioned JSON, atomic save, validation on load                 |
-| L3    | `device`   | `Transport` trait, GRBL character-counting streamer, status parsing, background `JobRunner`, simulated controller, optional serial port (`serial` feature) |
+| L3    | `device`   | `Transport` trait, GRBL character-counting streamer (`JobStream`), status parsing, the persistent `Link` (worker thread: status polling, jog/home/unlock/zero, job streaming, pause/resume/stop, console), simulated controller, optional serial port (`serial` feature) |
 | L5    | `engine`   | `Session` (document, selection, undo/redo), the command registry, the panic guard                |
 | L6    | `ui-egui`  | menus, tools, canvas, panels; talks to the engine only through `execute`                         |
 | L7    | `apps/lightfoundry`, `apps/lightfoundry-cli`, `xtask` | the eframe desktop app (native dialogs, serial), the CLI, build tooling |
@@ -55,13 +55,29 @@ machine-independent `Move`s (`Travel`, `Cut { power % }`). `gcode::generate` map
 `S` (0–`max_s`), flips Y for a bottom-left origin, drops redundant words, repeats each op `passes`
 times, and refuses out-of-bed or non-finite coordinates.
 
+## Job origin
+
+`Document::job_origin` (`start_from` + a 9-point `anchor`) decides how design coordinates become
+machine coordinates. *Absolute*: workspace = machine coordinates, bed-checked point by point.
+*User origin* / *Current position*: coordinates are relative to the anchor point of the job's
+bounds, which sits at work-zero; the job's extent must fit the bed (it cannot be checked point by
+point because zero is wherever the user put it). *Current position* also emits `G92 X0 Y0`. The
+command is `job.set_origin`; the setting is saved in the project file (older files load with
+defaults).
+
 ## Talking to a machine
 
-`device::stream_program` implements GRBL's character-counting protocol: keep as many lines in
-flight as fit in the 128-byte RX buffer and free space as `ok` responses arrive; `error:N` and
-`ALARM:N` abort with the offending line; cancel sends a soft reset (0x18) so the laser stops.
-`JobRunner` runs it on a thread; dropping a runner cancels the job. `SimulatedGrbl` models the RX
-buffer so tests can prove the streamer never overruns it.
+`device::Link` owns a transport on a worker thread. It polls status (`?`, a real-time byte that does
+not use the RX buffer), sends immediate lines (`$J=` jogs, `$H`, `$X`, `G92`), and streams jobs with
+GRBL's character-counting protocol (`JobStream`): keep as many lines in flight as fit in the 128-byte
+RX buffer and free space as `ok` arrives. `error:N` and `ALARM:N` abort the job with the offending
+line and soft-reset the controller; stop sends a soft reset (0x18) so the laser goes off; pause and
+resume are feed hold (`!`) and cycle start (`~`). A job is not "finished" until every line is
+accepted *and* the controller reports Idle. Immediate commands are refused while a job runs, lines
+are validated (single line, bounded length, no embedded reset byte), jogs are bounded, and dropping
+the link mid-job soft-resets. Jog/home/zero are UI-level machine actions, not document edits, so
+they are `Link` methods rather than engine commands; the document-affecting parts (`job.*`) are
+commands. `SimulatedGrbl` models the RX buffer, jogging, homing, `G92` and feed hold.
 
 ## Robustness
 

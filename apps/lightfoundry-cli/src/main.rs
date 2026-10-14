@@ -17,6 +17,7 @@ const USAGE: &str = "\
 usage: lightfoundry-cli <command>
 
   gcode <input.svg|dxf|png|jpg|lightfoundry> -o <out.gcode> [--bed WxH] [--origin top_left|bottom_left]
+                       [--start-from absolute|user_origin|current_position] [--anchor center|top_left|...]
                        [--set LAYER:key=value,key=value]...
   info <input>         shape count, size, estimated time
   commands             list every engine command with its parameters
@@ -91,6 +92,12 @@ fn gcode(args: &[String]) -> Result<String, String> {
             }
             "--origin" => {
                 s.execute("machine.set", &json!({ "origin": value })).map_err(|e| e.to_string())?;
+            }
+            "--start-from" => {
+                s.execute("job.set_origin", &json!({ "start_from": value })).map_err(|e| e.to_string())?;
+            }
+            "--anchor" => {
+                s.execute("job.set_origin", &json!({ "anchor": value })).map_err(|e| e.to_string())?;
             }
             "--set" => apply_layer_settings(&mut s, value)?,
             other => return Err(format!("unknown option {other}")),
