@@ -585,6 +585,34 @@ pub struct Machine {
     pub rapid_speed: f64,
     /// Extra lead-in/out for raster rows in mm so the head is at speed.
     pub overscan: f64,
+    /// Which controller firmware's G-code to write; absent in older files (GRBL).
+    #[serde(default)]
+    pub dialect: Dialect,
+}
+
+/// G-code flavours. GRBL is the one tested on a (simulated) controller; the others follow the
+/// public firmware documentation (Marlin: marlinfw.org M3; Smoothieware: smoothieware.org/laser).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Dialect {
+    #[default]
+    Grbl,
+    /// `M3 I` inline power with `S` in the firmware's configured unit (PWM 0-255 by default).
+    Marlin,
+    /// No spindle commands; `S` is a 0-1 fraction on each `G1`.
+    Smoothie,
+}
+
+impl Dialect {
+    pub const ALL: [Dialect; 3] = [Dialect::Grbl, Dialect::Marlin, Dialect::Smoothie];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Dialect::Grbl => "GRBL",
+            Dialect::Marlin => "Marlin (laser)",
+            Dialect::Smoothie => "Smoothieware",
+        }
+    }
 }
 
 impl Default for Machine {
@@ -598,6 +626,7 @@ impl Default for Machine {
             dynamic_power: true,
             rapid_speed: 6000.0,
             overscan: 2.0,
+            dialect: Dialect::Grbl,
         }
     }
 }
@@ -655,6 +684,14 @@ mod tests {
         assert_eq!(Anchor::Center.point(b), lightfoundry_geom::Point::new(20.0, 40.0));
         assert_eq!(Anchor::BottomRight.point(b), lightfoundry_geom::Point::new(30.0, 60.0));
         assert_eq!(Anchor::ALL.len(), 9);
+    }
+
+    #[test]
+    fn old_files_without_a_dialect_are_grbl() {
+        let mut v = serde_json::to_value(Document::default()).unwrap();
+        v["machine"].as_object_mut().unwrap().remove("dialect");
+        let doc: Document = serde_json::from_value(v).unwrap();
+        assert_eq!(doc.machine.dialect, Dialect::Grbl);
     }
 
     #[test]

@@ -5,7 +5,7 @@
 
 use std::fmt::Write;
 
-use lightfoundry_doc::{Machine, Origin};
+use lightfoundry_doc::{Dialect, Machine, Origin};
 use lightfoundry_geom::{Point, Rect};
 use lightfoundry_toolpath::{Job, Move};
 use thiserror::Error;
@@ -132,8 +132,19 @@ impl<'a> Writer<'a> {
         if matches!(self.placement, Placement::Relative { set_zero: true, .. }) {
             self.line("G92 X0 Y0");
         }
-        self.line(if self.machine.dynamic_power { "M4 S0" } else { "M3 S0" });
-        self.s = Some(0);
+        match self.machine.dialect {
+            Dialect::Grbl => {
+                self.line(if self.machine.dynamic_power { "M4 S0" } else { "M3 S0" });
+                self.s = Some(0);
+            }
+            Dialect::Marlin => {
+                // Inline mode: power then follows the S word of each G1 and the laser is off for G0.
+                self.line("M3 I S0");
+                self.s = Some(0);
+            }
+            // The laser module fires on G1 with the S of that move; no spindle command is needed.
+            Dialect::Smoothie => self.s = None,
+        }
     }
 
     fn shutdown(&mut self) {
@@ -154,14 +165,14 @@ impl<'a> Writer<'a> {
 
     fn cut(&mut self, p: Point, power: f64, speed: f64) -> Result<(), GcodeError> {
         let (x, y) = self.to_machine(p)?;
-        let sv = ((power.clamp(0.0, 100.0) / 100.0) * self.machine.max_s as f64).round() as u32;
+        let (sv, text) = self.power_word(power);
         if self.x == Some(x) && self.y == Some(y) && self.s == Some(sv) {
             return Ok(());
         }
         let mut s = String::from("G1");
         self.push_axes(&mut s, x, y);
         if self.s != Some(sv) {
-            let _ = write!(s, " S{sv}");
+            let _ = write!(s, " S{text}");
             self.s = Some(sv);
         }
         if self.f != Some(speed) {
@@ -170,6 +181,22 @@ impl<'a> Writer<'a> {
         }
         self.line(&s);
         Ok(())
+    }
+
+    /// The S value for a power percentage: a key for change detection and its text.
+    fn power_word(&self, power: f64) -> (u32, String) {
+        let fraction = power.clamp(0.0, 100.0) / 100.0;
+        match self.machine.dialect {
+            // Smoothieware takes 0..1 by default; thousandths is plenty of resolution.
+            Dialect::Smoothie => {
+                let milli = (fraction * 1000.0).round() as u32;
+                (milli, num(f64::from(milli) / 1000.0))
+            }
+            Dialect::Grbl | Dialect::Marlin => {
+                let sv = (fraction * self.machine.max_s as f64).round() as u32;
+                (sv, sv.to_string())
+            }
+        }
     }
 
     fn push_axes(&mut self, s: &mut String, x: f64, y: f64) {
@@ -248,6 +275,58 @@ mod tests {
         }
         doc.add_shape(Shape::path("r", 0, rect_path(10.0, 10.0, 20.0, 10.0)));
         generate(&plan(&doc).unwrap(), &doc.machine, Placement::Absolute).unwrap()
+    }
+
+    mod dialect_tests {
+        use lightfoundry_doc::Dialect;
+
+        use super::*;
+
+        fn program(dialect: Dialect, max_s: u32) -> String {
+            let mut doc = Document::default();
+            doc.machine.dialect = dialect;
+            doc.machine.max_s = max_s;
+            if let Some(l) = doc.layer_mut(0) {
+                l.max_power = 25.0;
+                l.speed = 900.0;
+            }
+            doc.add_shape(Shape::path("r", 0, rect_path(10.0, 10.0, 20.0, 10.0)));
+            generate(&plan(&doc).unwrap(), &doc.machine, Placement::Absolute).unwrap()
+        }
+
+        #[test]
+        fn marlin_uses_inline_power_in_its_configured_units() {
+            let g = program(Dialect::Marlin, 255);
+            assert!(g.contains("\nM3 I S0\n"), "{g}");
+            assert!(!g.contains("M4"), "{g}");
+            assert!(g.contains(" S64"), "25% of 255 is 64: {g}");
+            assert!(g.trim_end().ends_with("G0 X0 Y0") && g.contains("\nM5\n"), "{g}");
+        }
+
+        #[test]
+        fn smoothie_uses_fractional_s_on_each_move_and_no_spindle_on() {
+            let g = program(Dialect::Smoothie, 1000);
+            assert!(!g.contains("M3") && !g.contains("M4"), "the laser must only fire on G1 moves: {g}");
+            assert!(g.contains("G1 X30 S0.25 F900") || g.contains(" S0.25"), "{g}");
+            assert!(g.contains("\nM5\n"), "{g}");
+        }
+
+        #[test]
+        fn grbl_output_is_unchanged_and_the_default() {
+            assert_eq!(Machine::default().dialect, Dialect::Grbl);
+            let g = program(Dialect::Grbl, 1000);
+            assert!(g.contains("\nM4 S0\n") && g.contains(" S250"), "{g}");
+        }
+
+        #[test]
+        fn every_dialect_still_refuses_out_of_bed_jobs() {
+            for d in Dialect::ALL {
+                let mut doc = Document::default();
+                doc.machine.dialect = d;
+                doc.add_shape(Shape::path("r", 0, rect_path(1000.0, 10.0, 20.0, 10.0)));
+                assert!(matches!(generate(&plan(&doc).unwrap(), &doc.machine, Placement::Absolute), Err(GcodeError::OutOfBed { .. })), "{d:?}");
+            }
+        }
     }
 
     mod program_tests {

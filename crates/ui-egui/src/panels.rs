@@ -241,6 +241,21 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             }
             ui.end_row();
         });
+        let mut dialect = m.dialect;
+        ui.horizontal(|ui| {
+            ui.label("G-code");
+            egui::ComboBox::from_id_salt("dialect").selected_text(dialect.label()).show_ui(ui, |ui| {
+                for d in lightfoundry_doc::Dialect::ALL {
+                    ui.selectable_value(&mut dialect, d, d.label());
+                }
+            });
+        });
+        if dialect != m.dialect {
+            app.run("machine.set", json!({ "dialect": dialect }));
+        }
+        if dialect != lightfoundry_doc::Dialect::Grbl {
+            ui.weak("Written from the firmware's public documentation and untested on a machine. Use Frame at 0% power first. The controller-link features ($$, jog) are GRBL only.");
+        }
         let mut dynamic = m.dynamic_power;
         if ui.checkbox(&mut dynamic, "Dynamic power (M4)").changed() {
             app.run("machine.set", json!({ "dynamic_power": dynamic }));
