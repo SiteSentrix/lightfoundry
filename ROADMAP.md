@@ -80,3 +80,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   resize, move and text placement, with alignment lines while dragging. Rulers on the canvas edges
   with a cursor marker, guides pulled out of the rulers (drag back to delete), View menu options.
   Egui 0.36 delivers modifier keys as events, which the test harness now emits.
+- **2026-10-14 — node editing and pen tool.** `geom::nodes` is an editable node model (corner/smooth
+  nodes with handles, shape-preserving insert, delete, line/curve segments, open/close) with
+  commands `node.move`, `node.move_handle`, `node.insert`, `node.delete`, `node.set_smooth`,
+  `node.set_segment`, `node.set_closed`, `path.create` and `edit.convert_to_path` (text to path).
+  Nodes tool (drag nodes and handles, double-click a segment to insert, Delete) and Pen tool
+  (click corners, drag out smooth nodes, click the first node to close, Enter/double-click/right
+  click to finish, Escape to cancel), both snapping. 319 tests.
