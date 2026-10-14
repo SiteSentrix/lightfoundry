@@ -1261,6 +1261,32 @@ mod import_tests {
     }
 
     #[test]
+    fn svg_pictures_are_imported_in_place_and_text_does_not_break_the_import() {
+        let mut png = Vec::new();
+        image::DynamicImage::ImageLuma8(image::GrayImage::from_pixel(10, 5, image::Luma([0])))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let b64 = lightfoundry_doc::base64::encode(&png);
+        // 96 px per inch: 96 px = 25.4 mm. The picture is 48 x 24 px at (96, 48), a rectangle sits beside it.
+        let svg = format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="300" height="150" viewBox="0 0 300 150"><rect x="0" y="0" width="20" height="20"/><image x="96" y="48" width="48" height="24" xlink:href="data:image/png;base64,{b64}"/><text x="10" y="100" font-size="20">Hi</text></svg>"#
+        );
+        let mut s = Session::new();
+        let v = s.execute("file.import_svg", &json!({"data": svg, "x": 10, "y": 20})).unwrap();
+        assert_eq!(v["skipped_images"], json!(0));
+        let pic = s.doc.shapes.iter().find(|sh| matches!(sh.kind, lightfoundry_doc::ShapeKind::Image { .. })).expect("the picture was imported");
+        let b = pic.world_bounds().unwrap();
+        let mm = 25.4 / 96.0;
+        assert!((b.x0 - (10.0 + 96.0 * mm)).abs() < 1e-6 && (b.y0 - (20.0 + 48.0 * mm)).abs() < 1e-6, "{b:?}");
+        assert!((b.width() - 48.0 * mm).abs() < 1e-6 && (b.height() - 24.0 * mm).abs() < 1e-6, "{b:?}");
+
+        let broken = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="50" height="50"><image width="10" height="10" xlink:href="data:image/png;base64,AAAA"/><rect width="5" height="5"/></svg>"#;
+        let mut t = Session::new();
+        assert!(t.execute("file.import_svg", &json!({"data": broken})).is_ok(), "an undecodable picture is not fatal");
+        assert!(!t.doc.shapes.is_empty());
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {
