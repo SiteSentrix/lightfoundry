@@ -1,5 +1,6 @@
 //! Geometry primitives on `kurbo`: polylines, flattening, bounds and hit-testing helpers.
 
+pub mod along;
 pub mod nodes;
 pub mod register;
 

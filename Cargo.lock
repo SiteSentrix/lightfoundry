@@ -1542,6 +1542,7 @@ dependencies = [
 name = "lightfoundry-text"
 version = "0.1.0"
 dependencies = [
+ "harfrust",
  "kurbo",
  "lightfoundry-geom",
  "skrifa",

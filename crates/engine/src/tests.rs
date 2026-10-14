@@ -1162,6 +1162,41 @@ mod import_tests {
     }
 
     #[test]
+    fn text_can_be_bent_along_a_circle_or_a_line() {
+        let mut s = Session::new();
+        let text = s.execute("text.create", &json!({"text": "HELLO", "x": 0, "y": 0, "height": 10})).unwrap()["id"].as_u64().unwrap();
+        let tb = s.doc.shape(text).unwrap().world_bounds().unwrap();
+        let circle = s.execute("shape.ellipse", &json!({"cx": 100, "cy": 100, "rx": 40, "ry": 40})).unwrap()["id"].as_u64().unwrap();
+        let v = s.execute("text.on_path", &json!({"text": text, "path": circle, "offset": 0})).unwrap();
+        let bent = s.doc.shape(v["id"].as_u64().unwrap()).unwrap();
+        assert_eq!(s.doc.shapes.len(), 3, "the originals are kept by default");
+        // Every point of the bent text lies between the circle and 10 mm outside it (the letters stand on the line).
+        for pl in bent.world_polylines() {
+            for p in &pl.points {
+                let r = p.distance(lightfoundry_geom::Point::new(100.0, 100.0));
+                assert!(r > 39.0 && r < 50.5, "radius {r}");
+            }
+        }
+        let bb = bent.world_bounds().unwrap();
+        assert!(bb.height() > tb.height() * 2.0, "the word is no longer a flat strip: {bb:?}");
+
+        // On a straight line the text stays straight, just placed on it.
+        let line = s.execute("shape.line", &json!({"x1": 10, "y1": 200, "x2": 200, "y2": 200})).unwrap()["id"].as_u64().unwrap();
+        let v = s.execute("text.on_path", &json!({"text": text, "path": line, "offset": 5, "keep": false})).unwrap();
+        assert!(s.doc.shape(text).is_none(), "keep: false removes the text");
+        let flat = s.doc.shape(v["id"].as_u64().unwrap()).unwrap().world_bounds().unwrap();
+        assert!((flat.y1 - 200.0).abs() < 0.2 && (flat.y1 - flat.y0 - tb.height()).abs() < 0.3, "{flat:?}");
+        assert!((flat.x0 - 15.0).abs() < 0.5, "the offset moves the start along the line: {flat:?}");
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert!(s.doc.shape(text).is_some(), "one undo step");
+
+        assert!(s.execute("text.on_path", &json!({"text": text, "path": text})).is_err());
+        assert!(s.execute("text.on_path", &json!({"text": circle, "path": line})).is_err(), "a circle is not text");
+        assert!(s.execute("text.on_path", &json!({"text": text, "path": 9999})).is_err());
+        let _ = s.execute("text.on_path", &json!({"text": text, "path": line, "offset": 1e30})); // absurd offsets may not panic
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

@@ -3,6 +3,15 @@
 /// Glyph 'A' is a square with a
 /// square hole (advance 700), 'B' a plain square (advance 500); capitals are 700 units of 1000.
 pub fn tiny_font() -> Vec<u8> {
+    build(false)
+}
+
+/// The same font with a legacy `kern` table that pulls 'B' 100 units closer after 'A'.
+pub fn tiny_font_with_kerning() -> Vec<u8> {
+    build(true)
+}
+
+fn build(kerning: bool) -> Vec<u8> {
     fn be16(v: &mut Vec<u8>, x: i32) {
         v.extend_from_slice(&(x as i16).to_be_bytes());
     }
@@ -104,8 +113,24 @@ pub fn tiny_font() -> Vec<u8> {
         be16(&mut cmap, v);
     }
 
-    let tables: Vec<(&[u8; 4], Vec<u8>)> =
+    let mut tables: Vec<(&[u8; 4], Vec<u8>)> =
         vec![(b"cmap", cmap), (b"glyf", glyf), (b"head", head), (b"hhea", hhea), (b"hmtx", hmtx), (b"loca", loca), (b"maxp", maxp)];
+    if kerning {
+        let mut kern = Vec::new();
+        be16(&mut kern, 0); // version
+        be16(&mut kern, 1); // one subtable
+        be16(&mut kern, 0); // subtable version
+        be16(&mut kern, 14 + 6); // length: header plus one pair
+        be16(&mut kern, 1); // horizontal, format 0
+        be16(&mut kern, 1); // pairs
+        be16(&mut kern, 6);
+        be16(&mut kern, 0);
+        be16(&mut kern, 0);
+        be16(&mut kern, 1); // left glyph A
+        be16(&mut kern, 2); // right glyph B
+        be16(&mut kern, -100);
+        tables.insert(5, (b"kern", kern)); // the directory stays sorted by tag: ..., hmtx, kern, loca
+    }
     let mut out = Vec::new();
     be32(&mut out, 0x0001_0000);
     be16(&mut out, tables.len() as i32);

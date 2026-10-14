@@ -160,6 +160,16 @@ fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 }
             }
         });
+        ui.add_enabled_ui(app.session.selection.len() == 2, |ui| {
+            if ui.button("Text on Path").on_hover_text("Select a text and the shape to bend it along").clicked() {
+                let is_text = |id: &u64| app.session.doc.shape(*id).is_some_and(|s| matches!(s.kind, lightfoundry_doc::ShapeKind::Text { .. }));
+                if let [a, b] = app.session.selection[..] {
+                    let (text, path) = if is_text(&a) { (a, b) } else { (b, a) };
+                    app.run("text.on_path", json!({ "text": text, "path": path }));
+                }
+                ui.close();
+            }
+        });
         ui.separator();
         ui.add_enabled_ui(app.session.selection.len() >= 2, |ui| {
             ui.menu_button("Boolean", |ui| {
