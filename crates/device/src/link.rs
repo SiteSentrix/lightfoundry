@@ -6,7 +6,9 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use crate::settings;
 use crate::stream::{JobStream, MAX_LINE_BYTES};

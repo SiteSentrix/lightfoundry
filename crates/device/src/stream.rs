@@ -1,6 +1,8 @@
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use crate::{DeviceError, GRBL_RX_BUFFER, Transport, realtime};
 

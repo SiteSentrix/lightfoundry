@@ -34,6 +34,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 skrifa = "0.44"
+web-time = "1"
 log = "0.4"
 proptest = "1"
 usvg = "0.48"

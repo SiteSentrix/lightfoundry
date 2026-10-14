@@ -506,6 +506,10 @@ fn resume_controls(app: &mut LightFoundryApp, ui: &mut egui::Ui, gcode: &str, li
 }
 
 fn connection(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    if !app.platform.machine_available() {
+        ui.weak("Machine connections are not available in this build; generate G-code and run it with the desktop app or another sender.");
+        return;
+    }
     let connected = app.link.is_some();
     ui.horizontal(|ui| {
         ui.label("Machine");

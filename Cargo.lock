@@ -1420,6 +1420,7 @@ dependencies = [
  "log",
  "serialport",
  "thiserror 2.0.21",
+ "web-time",
 ]
 
 [[package]]
@@ -1572,6 +1573,21 @@ dependencies = [
  "lightfoundry-toolpath",
  "log",
  "serde_json",
+ "web-time",
+]
+
+[[package]]
+name = "lightfoundry-web"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "lightfoundry-device",
+ "lightfoundry-engine",
+ "lightfoundry-ui-egui",
+ "log",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

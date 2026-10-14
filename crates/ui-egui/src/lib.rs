@@ -19,7 +19,9 @@ mod view;
 pub use platform::{NoPlatform, Platform};
 
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use lightfoundry_device::{JobState, Link, SimulatedGrbl, Snapshot};
 use lightfoundry_doc::LayerId;
@@ -486,6 +488,10 @@ impl LightFoundryApp {
     /// Opens the selected machine (or the simulator) and keeps the connection until `disconnect`.
     pub(crate) fn connect(&mut self) {
         self.reconnect = None;
+        if !self.platform.machine_available() {
+            self.status = Some(("Connecting to a machine is not available in this build".into(), true));
+            return;
+        }
         let transport: Result<Box<dyn lightfoundry_device::Transport + Send>, String> = match &self.target {
             Target::Simulator => {
                 let mut sim = SimulatedGrbl::new();

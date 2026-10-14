@@ -20,6 +20,12 @@ pub trait Platform {
         None
     }
 
+    /// Whether this platform can run a machine link at all (it needs threads, which the browser
+    /// build does not have).
+    fn machine_available(&self) -> bool {
+        true
+    }
+
     fn serial_ports(&self) -> Vec<String>;
     fn open_serial(&self, port: &str) -> Result<Box<dyn Transport + Send>, String>;
 }
