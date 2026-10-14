@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use lightfoundry_doc::{Document, LayerMode, RasterImage, Shape, ShapeKind};
-use lightfoundry_geom::{Affine, Point, ellipse_path, rect_path};
+use lightfoundry_geom::{Affine, Point, Polyline, ellipse_path, rect_path};
 
 use super::*;
 
@@ -541,5 +541,80 @@ mod timeline_tests {
         }
         doc.add_shape(Shape::path("big", second, rect_path(50.0, 10.0, 30.0, 30.0)));
         doc
+    }
+}
+
+mod order_option_tests {
+    use lightfoundry_doc::Optimize;
+
+    use super::*;
+
+    #[test]
+    fn identical_outlines_are_cut_once_whatever_their_direction_or_start() {
+        let sq = |pts: [(f64, f64); 4]| Polyline::new(pts.iter().map(|&(x, y)| Point::new(x, y)).collect(), true);
+        let a = sq([(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]);
+        let reversed = sq([(0.0, 10.0), (10.0, 10.0), (10.0, 0.0), (0.0, 0.0)]);
+        let rotated = sq([(10.0, 10.0), (0.0, 10.0), (0.0, 0.0), (10.0, 0.0)]);
+        let other = sq([(0.0, 0.0), (11.0, 0.0), (11.0, 10.0), (0.0, 10.0)]);
+        let kept = remove_duplicates(vec![a.clone(), reversed, rotated, other.clone()]);
+        assert_eq!(kept, vec![a, other]);
+
+        let open = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 5.0), Point::new(9.0, 1.0)], false);
+        let open_back = Polyline::new(open.points.iter().rev().copied().collect(), false);
+        assert_eq!(remove_duplicates(vec![open.clone(), open_back]).len(), 1);
+        let closed_same_points = Polyline::new(open.points.clone(), true);
+        assert_eq!(remove_duplicates(vec![open, closed_same_points]).len(), 2, "open and closed are different cuts");
+    }
+
+    #[test]
+    fn hostile_coordinates_never_panic_or_vanish() {
+        let bad = Polyline::new(vec![Point::new(f64::NAN, 0.0), Point::new(1.0, f64::INFINITY)], false);
+        let huge = Polyline::new(vec![Point::new(1e300, 0.0), Point::new(0.0, -1e300)], false);
+        assert_eq!(remove_duplicates(vec![bad.clone(), bad, huge.clone(), huge]).len(), 4, "lines it cannot compare are left alone");
+        assert!(remove_duplicates(Vec::new()).is_empty());
+        assert_eq!(remove_duplicates(vec![Polyline::new(Vec::new(), true), Polyline::new(Vec::new(), true)]).len(), 1);
+    }
+
+    #[test]
+    fn planning_drops_a_pasted_copy_unless_the_option_is_off() {
+        let mut doc = rect_doc(20.0, 20.0, LayerMode::Line);
+        doc.add_shape(Shape::path("copy", 0, rect_path(10.0, 10.0, 20.0, 20.0)));
+        let cut_moves = |doc: &Document| plan(doc).unwrap().ops.iter().flat_map(|o| &o.moves).filter(|m| matches!(m, Move::Cut { .. })).count();
+        let once = cut_moves(&doc);
+        doc.optimize.remove_duplicates = false;
+        assert_eq!(cut_moves(&doc), once * 2);
+    }
+
+    #[test]
+    fn a_duplicate_pair_does_not_cancel_itself_out_of_a_fill() {
+        let mut doc = rect_doc(20.0, 20.0, LayerMode::Fill);
+        doc.add_shape(Shape::path("copy", 0, rect_path(10.0, 10.0, 20.0, 20.0)));
+        let moves = plan(&doc).unwrap().ops.iter().map(|o| o.moves.len()).sum::<usize>();
+        assert!(moves > 0, "the square is still engraved");
+    }
+
+    #[test]
+    fn ordering_options_choose_between_depth_drawing_order_and_nearest() {
+        let rect = |x: f64, y: f64, w: f64| {
+            Polyline::new(vec![Point::new(x, y), Point::new(x + w, y), Point::new(x + w, y + w), Point::new(x, y + w)], true)
+        };
+        let outer = rect(0.0, 0.0, 100.0);
+        let inner = rect(40.0, 40.0, 10.0);
+        let far = rect(300.0, 0.0, 10.0);
+        let lines = vec![outer.clone(), far.clone(), inner.clone()];
+        let start = Point::new(0.0, 0.0);
+        let order = |inner_first, reduce_travel| {
+            let opts = Optimize { inner_first, reduce_travel, remove_duplicates: false };
+            order_polylines(lines.clone(), start, &opts).iter().map(|l| l.bounds().map_or(0.0, |b| b.x1 - b.x0).round() as usize).collect::<Vec<_>>()
+        };
+        let sizes = |v: Vec<usize>| v;
+        // Default: the hole-like inner square first, then the rest by distance.
+        assert_eq!(sizes(order(true, true))[0], 10);
+        // Neither option: exactly the drawing order.
+        assert_eq!(sizes(order(false, false)), vec![100, 10, 10]);
+        // Depth only: inner first, the rest keep their drawing order.
+        assert_eq!(sizes(order(true, false)), vec![10, 100, 10]);
+        // Nearest only: starting at the origin the outer square is nearest.
+        assert_eq!(sizes(order(false, true))[0], 100);
     }
 }
