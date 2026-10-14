@@ -1,4 +1,4 @@
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use serde_json::{Value, json};
 
 use crate::{LightFoundryApp, PendingAction};
@@ -122,7 +122,7 @@ fn file_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         } else if let Some(path) = app.pick_save("Save G-code", "job.gcode", &["gcode", "nc"])
             && app.run("file.export_gcode", json!({ "path": path })).is_some()
         {
-            app.say("G-code saved");
+            app.say(tr("G-code saved"));
         }
         ui.close();
     }
@@ -300,13 +300,13 @@ fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 fn laser_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     if ui.button(tr("Generate G-code")).clicked() {
         if app.run("job.gcode", Value::Null).is_some() {
-            app.say("G-code generated");
+            app.say(tr("G-code generated"));
         }
         ui.close();
     }
     if ui.button(tr("Estimate time")).clicked() {
         if let Some(v) = app.run("job.estimate", Value::Null) {
-            app.say(format!("Estimated {}", format_duration(v["seconds"].as_f64().unwrap_or(0.0))));
+            app.say(trf!("Estimated {time}", time = format_duration(v["seconds"].as_f64().unwrap_or(0.0))));
         }
         ui.close();
     }
@@ -336,7 +336,7 @@ pub(crate) fn save(app: &mut LightFoundryApp, always_ask: bool) -> bool {
         return false;
     }
     if app.run("file.save", params).is_some() {
-        app.say("Saved");
+        app.say(tr("Saved"));
         return true;
     }
     false
@@ -355,7 +355,7 @@ fn import(app: &mut LightFoundryApp, command: &str, title: &str, exts: &[&str]) 
     if let Some(path) = app.pick_open(title, exts)
         && app.run(command, json!({ "path": path })).is_some()
     {
-        app.say("Imported");
+        app.say(tr("Imported"));
     }
 }
 

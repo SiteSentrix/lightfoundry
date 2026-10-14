@@ -23,7 +23,7 @@ mod view;
 
 pub use platform::{NoPlatform, Platform, Upload};
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -355,7 +355,7 @@ impl LightFoundryApp {
                 i18n::set_active(Some(t));
                 self.fonts_dirty = true;
             }
-            Err(e) => self.status = Some((format!("Could not use the saved translation: {e}"), true)),
+            Err(e) => self.status = Some((trf!("Could not use the saved translation: {e}", e = e), true)),
         }
     }
 
@@ -392,7 +392,8 @@ impl LightFoundryApp {
                         log::warn!("could not keep a copy of the translation at {}: {e}", saved.display());
                     }
                 }
-                self.status = Some((format!("Using the translation {}", if t.name.is_empty() { "(unnamed)" } else { &t.name }), false));
+                self.status =
+                    Some((trf!("Using the translation {name}", name = if t.name.is_empty() { tr("(unnamed)") } else { t.name.clone() }), false));
                 i18n::set_active(Some(t));
                 self.fonts_dirty = true;
             }
@@ -416,8 +417,8 @@ impl LightFoundryApp {
     pub(crate) fn save_translation_template(&mut self) {
         let Some(path) = self.pick_save("Save translation template", "translation-template.json", &["json"]) else { return };
         self.status = Some(match std::fs::write(&path, i18n::template()) {
-            Ok(()) => (format!("Saved the translation template to {}", path.display()), false),
-            Err(e) => (format!("Could not save the template: {e}"), true),
+            Ok(()) => (trf!("Saved the translation template to {path}", path = path.display()), false),
+            Err(e) => (trf!("Could not save the template: {e}", e = e), true),
         });
     }
 
@@ -466,7 +467,7 @@ impl LightFoundryApp {
                 self.autosave_revision = Some(self.session.revision);
                 // A copy that cannot be read back is no safety net: say so while it can still be fixed.
                 if !recovery::is_readable(&path) {
-                    self.status = Some(("The automatic backup could not be read back; save your work".into(), true));
+                    self.status = Some((tr("The automatic backup could not be read back; save your work"), true));
                 }
             }
             Err(e) => log::warn!("autosave failed: {e}"),
@@ -540,14 +541,14 @@ impl LightFoundryApp {
             UploadKind::Image => self.run("file.import_image", serde_json::json!({ "data_base64": data, "name": name })).is_some(),
         };
         if ok {
-            self.say(format!("Opened {name}"));
+            self.say(trf!("Opened {name}", name = name));
         }
     }
 
     /// Hands a finished file to the person as a download.
     pub(crate) fn download(&mut self, name: &str, bytes: &[u8], mime: &str) {
         self.platform.download(name, bytes, mime);
-        self.say(format!("Downloaded {name}"));
+        self.say(trf!("Downloaded {name}", name = name));
     }
 
     /// Adds the project to the recent list whenever the document's path changes (open, save as).
@@ -687,7 +688,7 @@ impl LightFoundryApp {
         let mut answer = None;
         egui::Modal::new(egui::Id::new("unsaved")).show(ctx, |ui| {
             ui.heading(tr("Unsaved changes"));
-            ui.label(format!("Save changes to {name} first?"));
+            ui.label(trf!("Save changes to {name} first?", name = name));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui.button(tr("Save")).clicked() {
@@ -724,7 +725,7 @@ impl LightFoundryApp {
     pub(crate) fn note_unsupported(&mut self, result: &Value) {
         let chars: Vec<String> =
             result["unsupported"].as_array().map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect()).unwrap_or_default();
-        self.text_warning = (!chars.is_empty()).then(|| format!("No glyph for: {} (drawn as a box)", chars.join(" ")));
+        self.text_warning = (!chars.is_empty()).then(|| trf!("No glyph for: {chars} (drawn as a box)", chars = chars.join(" ")));
     }
 
     pub(crate) fn say(&mut self, text: impl Into<String>) {
@@ -755,8 +756,8 @@ impl LightFoundryApp {
             let _ = std::fs::create_dir_all(parent);
         }
         match serde_json::to_string_pretty(&library).map(|text| std::fs::write(file, text)) {
-            Ok(Ok(())) => self.say(format!("{added} preset(s) added to your library")),
-            _ => self.status = Some(("Could not write the preset library".into(), true)),
+            Ok(Ok(())) => self.say(trf!("{added} preset(s) added to your library", added = added)),
+            _ => self.status = Some((tr("Could not write the preset library"), true)),
         }
     }
 
@@ -764,11 +765,11 @@ impl LightFoundryApp {
     pub(crate) fn load_preset_library(&mut self, file: &std::path::Path) {
         let library = read_library(file);
         if library.is_empty() {
-            self.say("Your preset library is empty");
+            self.say(tr("Your preset library is empty"));
             return;
         }
         if let Some(v) = self.run("preset.import", serde_json::json!({ "presets": library })) {
-            self.say(format!("{} preset(s) added from your library", v["added"]));
+            self.say(trf!("{count} preset(s) added from your library", count = v["added"]));
         }
     }
 
@@ -796,7 +797,7 @@ impl LightFoundryApp {
         let clean: String = name.trim().chars().filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_')).take(60).collect();
         let Some(dir) = self.platform.templates_dir() else { return };
         if clean.is_empty() {
-            self.status = Some(("Give the template a name".into(), true));
+            self.status = Some((tr("Give the template a name"), true));
             return;
         }
         let _ = std::fs::create_dir_all(&dir);
@@ -807,8 +808,8 @@ impl LightFoundryApp {
         let bytes = v["data_base64"].as_str().and_then(lightfoundry_doc::base64::decode).unwrap_or_default();
         self.session.dirty = was_dirty;
         match std::fs::write(&file, bytes) {
-            Ok(()) => self.say(format!("Saved template {clean}")),
-            Err(e) => self.status = Some((format!("Could not save the template: {e}"), true)),
+            Ok(()) => self.say(trf!("Saved template {clean}", clean = clean)),
+            Err(e) => self.status = Some((trf!("Could not save the template: {e}", e = e), true)),
         }
     }
 
@@ -828,7 +829,7 @@ impl LightFoundryApp {
     pub(crate) fn connect(&mut self) {
         self.reconnect = None;
         if !self.platform.machine_available() {
-            self.status = Some(("Connecting to a machine is not available in this build".into(), true));
+            self.status = Some((tr("Connecting to a machine is not available in this build"), true));
             return;
         }
         let inline = self.platform.inline_link();
@@ -857,9 +858,9 @@ impl LightFoundryApp {
         match transport {
             Ok(t) => {
                 self.link = Some(if self.platform.inline_link() { Link::connect_inline(t) } else { Link::connect(t) });
-                self.say("Connected");
+                self.say(tr("Connected"));
             }
-            Err(e) => self.status = Some((format!("Could not open the machine: {e}"), true)),
+            Err(e) => self.status = Some((trf!("Could not open the machine: {e}", e = e), true)),
         }
     }
 
@@ -883,12 +884,12 @@ impl LightFoundryApp {
         self.move_head_mode = false;
         self.snap = None;
         self.last_job = None;
-        self.say("Disconnected");
+        self.say(tr("Disconnected"));
     }
 
     pub(crate) fn start_job(&mut self, program: String) {
         let Some(link) = &self.link else {
-            self.status = Some(("Connect to a machine (or the simulator) first".into(), true));
+            self.status = Some((tr("Connect to a machine (or the simulator) first"), true));
             return;
         };
         let kept: std::sync::Arc<str> = program.as_str().into();
@@ -943,7 +944,7 @@ impl LightFoundryApp {
     /// Runs a link command and shows a refusal in the status bar.
     pub(crate) fn link_do(&mut self, f: impl FnOnce(&Link) -> Result<(), lightfoundry_device::LinkError>) {
         let Some(link) = &self.link else {
-            self.status = Some(("Not connected".into(), true));
+            self.status = Some((tr("Not connected"), true));
             return;
         };
         if let Err(e) = f(link) {
@@ -972,13 +973,13 @@ impl LightFoundryApp {
             Ok(t) => {
                 self.link = Some(Link::connect(t));
                 self.reconnect = None;
-                self.say("Reconnected. Nothing is running; start the job again if you want to continue.");
+                self.say(tr("Reconnected. Nothing is running; start the job again if you want to continue."));
             }
             Err(e) => {
                 let attempts = attempts + 1;
                 if attempts >= RECONNECT_ATTEMPTS {
                     self.reconnect = None;
-                    self.status = Some((format!("Could not reconnect to {port}: {e}"), true));
+                    self.status = Some((trf!("Could not reconnect to {port}: {e}", port = port, e = e), true));
                 } else {
                     let wait = (self.reconnect_wait * 2u32.saturating_pow(attempts)).min(RECONNECT_MAX_WAIT);
                     self.reconnect = Some(Reconnect { attempts, next: Instant::now() + wait });
@@ -1003,18 +1004,18 @@ impl LightFoundryApp {
             self.move_head_mode = false;
             if self.auto_reconnect && matches!(self.target, Target::Serial(_)) && !self.platform.serial_async() {
                 self.reconnect = Some(Reconnect { attempts: 0, next: Instant::now() + self.reconnect_wait });
-                let note = if had_job { " The job was stopped and will not resume by itself." } else { "" };
-                self.status = Some((format!("The machine connection was lost; trying to reconnect.{note}"), true));
+                let note = if had_job { tr(" The job was stopped and will not resume by itself.") } else { String::new() };
+                self.status = Some((trf!("The machine connection was lost; trying to reconnect.{note}", note = note), true));
             } else {
-                self.status = Some(("The machine connection was lost".into(), true));
+                self.status = Some((tr("The machine connection was lost"), true));
             }
             return;
         }
         if self.last_job.as_ref() != Some(&snap.job) {
             if let JobState::Finished(result) = &snap.job {
                 self.status = Some(match result {
-                    Ok(lines) => (format!("Job finished: {lines} lines"), false),
-                    Err(e) => (format!("Job stopped: {e}"), true),
+                    Ok(lines) => (trf!("Job finished: {lines} lines", lines = lines), false),
+                    Err(e) => (trf!("Job stopped: {e}", e = e), true),
                 });
             }
             self.last_job = Some(snap.job.clone());
@@ -1081,10 +1082,10 @@ impl LightFoundryApp {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| match &self.status {
             Some((text, true)) => {
-                ui.colored_label(self.tokens.error, tr(text));
+                ui.colored_label(self.tokens.error, text);
             }
             Some((text, false)) => {
-                ui.colored_label(self.tokens.ok, tr(text));
+                ui.colored_label(self.tokens.ok, text);
             }
             None => {
                 ui.label(tr("Ready"));

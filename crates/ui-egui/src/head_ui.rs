@@ -3,6 +3,7 @@
 //! This only works when the design's coordinates are machine coordinates ("Absolute" start), the
 //! one case where a machine position and a point on the bed are the same thing.
 
+use crate::i18n::tr;
 use lightfoundry_doc::{Document, Machine, Origin, StartFrom};
 use lightfoundry_geom::Point;
 
@@ -58,11 +59,11 @@ pub fn click(app: &mut LightFoundryApp, at: Point) -> bool {
         return false;
     }
     if !mappable(&app.session.doc) {
-        app.status = Some(("Moving the laser from the canvas needs Start from: Absolute coordinates".into(), true));
+        app.status = Some((tr("Moving the laser from the canvas needs Start from: Absolute coordinates"), true));
         return true;
     }
     let Some((x, y)) = world_to_machine(&app.session.doc.machine, at) else {
-        app.status = Some(("That point is outside the bed".into(), true));
+        app.status = Some((tr("That point is outside the bed"), true));
         return true;
     };
     let feed = app.jog_feed;
