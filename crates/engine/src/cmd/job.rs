@@ -49,7 +49,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Cut Order Options",
         menu: "Laser",
         shortcut: None,
-        params_doc: "{inner_first?: bool, reduce_travel?: bool, remove_duplicates?: bool}",
+        params_doc: "{inner_first?: bool, reduce_travel?: bool, remove_duplicates?: bool, by_group?: bool, start?: [x, y] (where ordering starts, mm) or default_start: true}",
         mutates: true,
         run: set_optimize,
     },
@@ -141,6 +141,10 @@ struct SetOptimizeParams {
     inner_first: Option<bool>,
     reduce_travel: Option<bool>,
     remove_duplicates: Option<bool>,
+    by_group: Option<bool>,
+    start: Option<[f64; 2]>,
+    #[serde(default)]
+    default_start: bool,
 }
 
 fn set_optimize(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
@@ -149,7 +153,18 @@ fn set_optimize(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     o.inner_first = p.inner_first.unwrap_or(o.inner_first);
     o.reduce_travel = p.reduce_travel.unwrap_or(o.reduce_travel);
     o.remove_duplicates = p.remove_duplicates.unwrap_or(o.remove_duplicates);
-    Ok(json!({ "inner_first": o.inner_first, "reduce_travel": o.reduce_travel, "remove_duplicates": o.remove_duplicates }))
+    o.by_group = p.by_group.unwrap_or(o.by_group);
+    if p.default_start {
+        o.start = None;
+    } else if let Some(start) = p.start {
+        if !start.iter().all(|v| v.is_finite() && v.abs() <= 1e6) {
+            return Err(EngineError::BadParams("start must be two finite numbers".into()));
+        }
+        o.start = Some(start);
+    }
+    Ok(
+        json!({ "inner_first": o.inner_first, "reduce_travel": o.reduce_travel, "remove_duplicates": o.remove_duplicates, "by_group": o.by_group, "start": o.start }),
+    )
 }
 
 #[derive(Deserialize, Default)]

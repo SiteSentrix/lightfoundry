@@ -8,7 +8,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 1  | Verify on real GRBL hardware (jog, frame, short cut), fix what it finds              | Everything machine-side is only simulator-tested                    |
 | 2  | Resume after a power loss with a saved job position (run-from-line, auto-reconnect and the $$ editor are done) | Day-to-day machine ownership                                        |
 | 4  | Vertical and right-to-left text layout controls; font fallback when a font lacks a character (kerning, ligatures and shaping are done) | Typography beyond plain filled text |
-| 8  | Cut-order: by group, choose the start point, remove overlapping segments (not only identical outlines) | Quality and time                                                    |
+| 8  | Remove overlapping segments (not only identical outlines); per-shape cut order overrides (order by group and a chosen start point are done) | Quality and time |
 | 9  | Smoother (curve-fitted) tracing and colour-aware tracing (tone, crop with canvas handles, resample, sharpen, seven dither modes and basic tracing are done) | Photo engraving results                                  |
 | 10 | Ramp along fills and images; speed-dependent overscan (tabs, lead-in/out, perforation, outline ramp and overscan are done) | Clean cuts of special materials                                     |
 | 14 | Share presets between projects; a real material library needs measured values per machine (generic starters, per-project presets and test grids are done) | Reusing settings for a known material                               |

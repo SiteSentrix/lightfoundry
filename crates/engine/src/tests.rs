@@ -1197,6 +1197,20 @@ mod import_tests {
     }
 
     #[test]
+    fn group_and_start_options_are_validated_and_one_undo_step() {
+        let mut s = Session::new();
+        let v = s.execute("job.set_optimize", &json!({"by_group": true, "start": [120, 30]})).unwrap();
+        assert_eq!((v["by_group"].clone(), v["start"].clone()), (json!(true), json!([120.0, 30.0])));
+        for bad in [json!({"start": [1e12, 0]}), json!({"start": [1]}), json!({"start": "here"}), json!({"by_group": "yes"})] {
+            assert!(s.execute("job.set_optimize", &bad).is_err(), "{bad}");
+        }
+        s.execute("job.set_optimize", &json!({"default_start": true})).unwrap();
+        assert_eq!(s.doc.optimize.start, None);
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(s.doc.optimize.start, Some([120.0, 30.0]));
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

@@ -410,12 +410,28 @@ fn cut_order(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ("inner_first", "Inner shapes first", "Cut holes and nested shapes before the outlines around them", o.inner_first),
             ("reduce_travel", "Reduce travel", "Go to the nearest outline next instead of following the drawing order", o.reduce_travel),
             ("remove_duplicates", "Remove duplicate lines", "Skip outlines that lie exactly on top of another one", o.remove_duplicates),
+            ("by_group", "Finish each group first", "Cut one group of shapes completely before starting the next", o.by_group),
         ] {
             let mut v = on;
             if ui.checkbox(&mut v, label).on_hover_text(tip).changed() {
                 app.run("job.set_optimize", json!({ key: v }));
             }
         }
+        let start = o.start;
+        ui.horizontal(|ui| {
+            ui.label("Start near");
+            let mut xy = start.unwrap_or([0.0, 0.0]);
+            let mut changed = false;
+            for v in &mut xy {
+                changed |= committed(&ui.add(egui::DragValue::new(v).speed(0.5).suffix(" mm")));
+            }
+            if changed {
+                app.run("job.set_optimize", json!({ "start": xy }));
+            }
+            if start.is_some() && ui.small_button("Origin").on_hover_text("Back to the bed's origin").clicked() {
+                app.run("job.set_optimize", json!({ "default_start": true }));
+            }
+        });
     });
 }
 

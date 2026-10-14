@@ -94,7 +94,10 @@ pub enum PlanError {
 pub fn plan(doc: &Document) -> Result<Job, PlanError> {
     let mut job = Job::default();
     let mut total = 0usize;
-    let mut at = Point::ORIGIN;
+    let mut at = match doc.optimize.start {
+        Some([x, y]) if x.is_finite() && y.is_finite() => Point::new(x, y),
+        _ => Point::ORIGIN,
+    };
     for layer in doc.layers.iter().filter(|l| l.output) {
         validate(layer)?;
         let shapes: Vec<&Shape> = doc.shapes.iter().filter(|s| s.layer == layer.id).collect();
@@ -121,20 +124,36 @@ pub fn plan(doc: &Document) -> Result<Job, PlanError> {
                 }
                 None => layer,
             };
-            let mut ops = plan_layer(doc, layer_for_group, &group, at)?;
-            for op in &mut ops {
-                total = total.saturating_add(op.moves.len());
-                if let Some(last) = op.moves.last() {
-                    at = last.target();
+            // With "by group", each group of shapes is finished before the next one starts.
+            let buckets: Vec<Vec<&Shape>> = if doc.optimize.by_group { split_by_group(&group) } else { vec![group] };
+            for bucket in buckets {
+                let mut ops = plan_layer(doc, layer_for_group, &bucket, at)?;
+                for op in &mut ops {
+                    total = total.saturating_add(op.moves.len());
+                    if let Some(last) = op.moves.last() {
+                        at = last.target();
+                    }
                 }
+                if total > MAX_MOVES {
+                    return Err(PlanError::TooManyMoves);
+                }
+                job.ops.append(&mut ops);
             }
-            if total > MAX_MOVES {
-                return Err(PlanError::TooManyMoves);
-            }
-            job.ops.append(&mut ops);
         }
     }
     Ok(job)
+}
+
+/// Shapes bucketed by group, buckets in order of first appearance; ungrouped shapes share one bucket.
+fn split_by_group<'a>(shapes: &[&'a Shape]) -> Vec<Vec<&'a Shape>> {
+    let mut buckets: Vec<(Option<lightfoundry_doc::GroupId>, Vec<&'a Shape>)> = Vec::new();
+    for shape in shapes {
+        match buckets.iter_mut().find(|(g, _)| *g == shape.group) {
+            Some((_, v)) => v.push(shape),
+            None => buckets.push((shape.group, vec![shape])),
+        }
+    }
+    buckets.into_iter().map(|(_, v)| v).collect()
 }
 
 /// Appends the moves for one outline: an optional lead-in, the outline itself (with tabs on
