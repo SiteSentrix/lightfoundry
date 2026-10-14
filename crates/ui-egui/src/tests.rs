@@ -1349,3 +1349,19 @@ mod recent_files_tests {
         assert_eq!(h.app.session.doc.shapes.len(), 1);
     }
 }
+
+mod preset_ui_tests {
+    use super::*;
+
+    #[test]
+    fn the_presets_section_renders_with_and_without_presets() {
+        let mut h = Harness::new();
+        h.frame(vec![]);
+        h.app.run("layer.set", json!({"id": 0, "speed": 333}));
+        h.app.preset_name = "Test card".into();
+        h.app.run("preset.save", json!({"name": h.app.preset_name.clone(), "layer": 0}));
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert_eq!(h.app.session.doc.presets.len(), 1);
+    }
+}

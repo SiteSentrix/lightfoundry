@@ -116,6 +116,7 @@ pub struct LightFoundryApp {
     /// Percentages to cut off the left, top, right and bottom of the selected image.
     crop_pct: [f64; 4],
     sharpen_amount: f64,
+    preset_name: String,
     /// The project path last added to the recent list.
     recorded_path: Option<PathBuf>,
     allow_close: bool,
@@ -197,6 +198,7 @@ impl LightFoundryApp {
             recent,
             crop_pct: [0.0; 4],
             sharpen_amount: 1.0,
+            preset_name: String::new(),
             recorded_path: None,
             allow_close: false,
             last_title: String::new(),

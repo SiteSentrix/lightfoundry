@@ -795,6 +795,48 @@ mod import_tests {
     }
 
     #[test]
+    fn presets_are_saved_applied_replaced_deleted_and_persist_with_the_project() {
+        let mut s = Session::new();
+        s.execute("layer.set", &json!({"id": 0, "speed": 450, "max_power": 85, "passes": 2, "name": "Cut ply"})).unwrap();
+        s.execute("preset.save", &json!({"name": "  Birch 3 mm  ", "layer": 0})).unwrap();
+        s.execute("layer.set", &json!({"id": 1, "name": "Mark"})).unwrap();
+        s.execute("preset.apply", &json!({"name": "Birch 3 mm", "layer": 1})).unwrap();
+        let l = s.doc.layer(1).unwrap();
+        assert_eq!((l.speed, l.max_power, l.passes, l.name.as_str()), (450.0, 85.0, 2, "Mark"), "settings copied, name kept");
+
+        s.execute("layer.set", &json!({"id": 0, "speed": 100})).unwrap();
+        let v = s.execute("preset.save", &json!({"name": "Birch 3 mm", "layer": 0})).unwrap();
+        assert_eq!(v["count"], json!(1), "same name replaces");
+        let back = lightfoundry_format::from_bytes(&lightfoundry_format::to_bytes(&s.doc).unwrap()).unwrap();
+        assert_eq!(back.presets.len(), 1);
+        assert_eq!(back.presets[0].settings.speed, 100.0);
+
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(s.doc.presets[0].settings.speed, 450.0, "saving is one undo step");
+        for bad in [
+            ("preset.apply", json!({"name": "Nope", "layer": 0})),
+            ("preset.apply", json!({"name": "Birch 3 mm", "layer": 999})),
+            ("preset.save", json!({"name": "   ", "layer": 0})),
+            ("preset.save", json!({"name": "x", "layer": 999})),
+            ("preset.delete", json!({"name": "Nope"})),
+        ] {
+            assert!(s.execute(bad.0, &bad.1).is_err(), "{bad:?}");
+        }
+        s.execute("preset.delete", &json!({"name": "Birch 3 mm"})).unwrap();
+        assert!(s.doc.presets.is_empty());
+    }
+
+    #[test]
+    fn the_number_of_presets_is_capped() {
+        let mut s = Session::new();
+        for i in 0..lightfoundry_doc::MAX_PRESETS {
+            s.execute("preset.save", &json!({"name": format!("p{i}"), "layer": 0})).unwrap();
+        }
+        assert!(s.execute("preset.save", &json!({"name": "one too many", "layer": 0})).is_err());
+        assert!(s.execute("preset.save", &json!({"name": "p0", "layer": 0})).is_ok(), "replacing is still allowed at the cap");
+    }
+
+    #[test]
     fn the_gcode_dialect_is_a_machine_setting_that_changes_the_program() {
         let mut s = Session::new();
         s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 10})).unwrap();

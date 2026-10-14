@@ -14,7 +14,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 9  | Trace image to vectors; on-canvas crop handles; resample/resize (tone, crop, sharpen and seven dither modes are done) | Photo engraving results                                  |
 | 10 | Perforation/dashed cuts, ramp, per-layer overscan setting (tabs and lead-in/out are done) | Clean cuts of special materials                                     |
 | 13 | Keep several autosave generations; periodic recovery-health check (recent files are done) | Never lose work                                                     |
-| 14 | Material library (named presets; original entries only). Test grids are done        | Reusing settings for a known material                               |
+| 14 | Ship an original starter material library; share presets between projects (per-project presets and test grids are done) | Reusing settings for a known material                               |
 | 15 | Other controllers: verify the Marlin/Smoothieware dialects on hardware and add a link for them; Ruida is a large project | Reach beyond GRBL                                                   |
 | 16 | Camera overlay and print-and-cut alignment                                           | Placing work on printed or irregular material                       |
 | 17 | MCP server and JSON control channel on top of `Session::execute`                     | Agent-driven design, like the sibling apps                          |
