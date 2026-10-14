@@ -189,10 +189,36 @@ fn presets_section(app: &mut LightFoundryApp, ui: &mut egui::Ui, layer: u32) {
     });
 }
 
+/// Rectangles and ellipses from typed positions and sizes, for when dragging is not precise enough.
+fn create_by_numbers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    ui.separator();
+    ui.label(egui::RichText::new("Create by numbers").strong());
+    egui::Grid::new("create_numbers").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+        for (label, slot, min) in [("X", 0, -1e6), ("Y", 1, -1e6), ("Width", 2, 0.01), ("Height", 3, 0.01)] {
+            ui.label(label);
+            if let Some(v) = app.new_shape.get_mut(slot) {
+                ui.add(egui::DragValue::new(v).range(min..=1e5).speed(0.5).suffix(" mm").max_decimals(3));
+            }
+            ui.end_row();
+        }
+    });
+    let [x, y, w, h] = app.new_shape;
+    let layer = app.active_layer;
+    ui.horizontal(|ui| {
+        if ui.button("Rectangle").clicked() {
+            app.run("shape.rectangle", json!({ "x": x, "y": y, "width": w, "height": h, "layer": layer }));
+        }
+        if ui.button("Ellipse").clicked() {
+            app.run("shape.ellipse", json!({ "cx": x + w / 2.0, "cy": y + h / 2.0, "rx": w / 2.0, "ry": h / 2.0, "layer": layer }));
+        }
+    });
+}
+
 fn properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let sel = app.session.selection.clone();
     let Some(b) = app.session.doc.bounds_of(&sel) else {
         ui.weak("Nothing selected");
+        create_by_numbers(app, ui);
         return;
     };
     ui.label(format!("{} object{}", sel.len(), if sel.len() == 1 { "" } else { "s" }));

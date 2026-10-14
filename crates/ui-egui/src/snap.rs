@@ -36,6 +36,59 @@ impl SnapTargets {
     }
 }
 
+/// Most vertex targets taken from one shape, and from the whole drawing.
+pub const MAX_VERTEX_TARGETS_PER_SHAPE: usize = 200;
+pub const MAX_VERTEX_TARGETS: usize = 5000;
+
+impl SnapTargets {
+    /// Adds the lines through a point (a vertex or midpoint).
+    pub fn add_point(&mut self, p: Point) {
+        self.xs.push(p.x);
+        self.ys.push(p.y);
+    }
+}
+
+/// The points of a path worth snapping to, in workspace mm: every segment end, plus the midpoint
+/// of each straight segment. Stops after `cap` points.
+pub fn path_points(path: &kurbo::BezPath, transform: kurbo::Affine, cap: usize) -> Vec<Point> {
+    use kurbo::PathEl;
+    let mut out = Vec::new();
+    let mut at: Option<Point> = None;
+    let mut start: Option<Point> = None;
+    for el in path.elements() {
+        if out.len() >= cap {
+            break;
+        }
+        match *el {
+            PathEl::MoveTo(p) => {
+                out.push(transform * p);
+                at = Some(p);
+                start = Some(p);
+            }
+            PathEl::LineTo(p) => {
+                if let Some(a) = at {
+                    out.push(transform * a.midpoint(p));
+                }
+                out.push(transform * p);
+                at = Some(p);
+            }
+            PathEl::QuadTo(_, p) | PathEl::CurveTo(_, _, p) => {
+                out.push(transform * p);
+                at = Some(p);
+            }
+            PathEl::ClosePath => {
+                if let (Some(a), Some(s)) = (at, start) {
+                    out.push(transform * a.midpoint(s));
+                    at = Some(s);
+                }
+            }
+        }
+    }
+    out.truncate(cap);
+    out.retain(|p| p.x.is_finite() && p.y.is_finite());
+    out
+}
+
 /// The result of snapping one point: where it ended up and which target lines it locked onto
 /// (for drawing the alignment guides).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -166,6 +219,42 @@ mod tests {
         let mut t = SnapTargets::default();
         t.add_rect(Rect::new(100.0, 50.0, 140.0, 90.0));
         t
+    }
+
+    mod vertex_tests {
+        use kurbo::{Affine, BezPath};
+
+        use super::*;
+
+        #[test]
+        fn rectangles_give_corners_and_edge_midpoints_in_workspace_space() {
+            let path = lightfoundry_geom::rect_path(0.0, 0.0, 10.0, 4.0);
+            let pts = path_points(&path, Affine::translate((100.0, 50.0)), 100);
+            for want in [Point::new(100.0, 50.0), Point::new(110.0, 54.0), Point::new(105.0, 50.0), Point::new(110.0, 52.0)] {
+                assert!(pts.iter().any(|p| p.distance(want) < 1e-9), "{want:?} in {pts:?}");
+            }
+        }
+
+        #[test]
+        fn curves_contribute_endpoints_only_and_the_cap_and_bad_numbers_are_respected() {
+            let mut curve = BezPath::new();
+            curve.move_to((0.0, 0.0));
+            curve.curve_to((5.0, 30.0), (15.0, 30.0), (20.0, 0.0));
+            let pts = path_points(&curve, Affine::IDENTITY, 100);
+            assert_eq!(pts, vec![Point::new(0.0, 0.0), Point::new(20.0, 0.0)], "no control points");
+            let big = lightfoundry_geom::rect_path(0.0, 0.0, 10.0, 10.0);
+            assert_eq!(path_points(&big, Affine::IDENTITY, 3).len(), 3);
+            assert!(path_points(&big, Affine::IDENTITY, 0).is_empty());
+            assert!(path_points(&big, Affine::scale(f64::NAN), 100).is_empty(), "non-finite results are dropped");
+        }
+
+        #[test]
+        fn vertices_attract_on_both_axes() {
+            let mut t = SnapTargets::default();
+            t.add_point(Point::new(33.0, 44.0));
+            let s = snap_point(Point::new(32.0, 45.0), &SnapSettings::default(), &t, 2.0);
+            assert_eq!(s.point, Point::new(33.0, 44.0));
+        }
     }
 
     mod point_tests {

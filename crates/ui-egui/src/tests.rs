@@ -1392,3 +1392,35 @@ mod preset_ui_tests {
         assert_eq!(h.app.session.doc.presets.len(), 1);
     }
 }
+
+mod create_by_numbers_tests {
+    use super::*;
+
+    #[test]
+    fn typed_sizes_make_exact_shapes_on_the_active_layer() {
+        let mut h = Harness::new();
+        h.app.active_layer = 3;
+        h.app.new_shape = [20.0, 30.0, 40.0, 10.0];
+        h.frame(vec![]);
+        h.frame(vec![]); // renders the section: nothing is selected
+        let [x, y, w, hh] = h.app.new_shape;
+        h.app.run("shape.rectangle", json!({"x": x, "y": y, "width": w, "height": hh, "layer": h.app.active_layer}));
+        let b = h.app.session.doc.shapes[0].world_bounds().unwrap();
+        assert!((b.x0 - 20.0).abs() < 1e-6 && (b.y1 - 40.0).abs() < 1e-6 && (b.x1 - 60.0).abs() < 1e-6, "{b:?}");
+        assert_eq!(h.app.session.doc.shapes[0].layer, 3);
+    }
+
+    #[test]
+    fn snapping_reaches_path_vertices_that_are_not_on_the_bounding_box() {
+        let mut h = Harness::new();
+        h.app.run("path.create", json!({"nodes": [{"x": 100.0, "y": 100.0}, {"x": 180.0, "y": 100.0}, {"x": 120.0, "y": 140.0}], "closed": true}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: true };
+        h.app.tool = Tool::Rectangle;
+        h.frame(vec![]);
+        // x = 120 is only the triangle's lower vertex: its box edges are 100, 140 and 180.
+        h.drag(h.at(121.0, 60.0), h.at(200.0, 80.0));
+        let b = h.app.session.doc.shapes[1].world_bounds().unwrap();
+        assert!((b.x0 - 120.0).abs() < 1e-6, "{b:?}");
+    }
+}
