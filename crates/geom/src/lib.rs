@@ -154,7 +154,13 @@ pub fn rect_path(x: f64, y: f64, w: f64, h: f64) -> BezPath {
 /// Ellipse outline (cubic arcs) as a closed [`BezPath`].
 pub fn ellipse_path(cx: f64, cy: f64, rx: f64, ry: f64) -> BezPath {
     use kurbo::Shape;
-    kurbo::Ellipse::new((cx, cy), (rx.abs(), ry.abs()), 0.0).to_path(0.01)
+    let mut path = kurbo::Ellipse::new((cx, cy), (rx.abs(), ry.abs()), 0.0).to_path(0.01);
+    // kurbo leaves the outline open; without this the ellipse would not be a closed shape (no
+    // fill, no containment, no boolean).
+    if !matches!(path.elements().last(), Some(kurbo::PathEl::ClosePath)) {
+        path.close_path();
+    }
+    path
 }
 
 pub fn line_path(a: Point, b: Point) -> BezPath {
@@ -185,6 +191,14 @@ mod tests {
             let lines = flatten(&ellipse_path(0.0, 0.0, 10.0, 10.0), 0.01);
             let expected = 2.0 * std::f64::consts::PI * 10.0;
             assert!((lines[0].length() - expected).abs() < 0.2, "{}", lines[0].length());
+        }
+
+        #[test]
+        fn ellipses_and_circles_are_closed_shapes() {
+            let lines = flatten(&ellipse_path(5.0, 5.0, 4.0, 2.0), 0.01);
+            assert_eq!(lines.len(), 1);
+            assert!(lines[0].closed, "an ellipse must be a closed polyline");
+            assert!(lines[0].contains(Point::new(5.0, 5.0)) && !lines[0].contains(Point::new(5.0, 9.0)));
         }
 
         #[test]

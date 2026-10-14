@@ -99,6 +99,22 @@ fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             }
         }
         ui.separator();
+        ui.add_enabled_ui(app.session.selection.len() >= 2, |ui| {
+            ui.menu_button("Boolean", |ui| {
+                for (label, op) in [
+                    ("Union (weld)", "union"),
+                    ("Subtract (first minus the rest)", "difference"),
+                    ("Intersect", "intersect"),
+                    ("Exclusive or", "xor"),
+                ] {
+                    if ui.button(label).clicked() {
+                        app.run("path.boolean", json!({ "op": op }));
+                        ui.close();
+                    }
+                }
+            });
+        });
+        ui.separator();
         if ui.button("Flip Horizontal").clicked() {
             app.run("edit.flip", json!({ "axis": "horizontal" }));
             ui.close();

@@ -32,3 +32,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   the generated path; `text.create` / `text.edit` commands; Text tool and inspector editor in the UI.
   Clicking anywhere inside a text block selects it. Fixed a drag-select bug found while testing (a
   click that switched tools was re-handled as a selection click).
+- **2026-10-14 — path operations.** New `pathops` crate on `i_overlay`: boolean union / difference /
+  intersect / xor with even-odd holes, and offset (grow, shrink, round/miter/bevel joins; open paths
+  become an outline). `path.boolean` and `path.offset` commands, Arrange menu and Selection-panel
+  controls. Found and fixed, by using the app, that ellipses and circles were never closed shapes
+  (no fill, no booleans, no inner-first ordering); regression tests added at the geometry, planner
+  and engine layers.

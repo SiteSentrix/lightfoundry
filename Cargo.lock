@@ -1103,6 +1103,48 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
 
 [[package]]
+name = "i_float"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ecaff1ce29bcacd72cdf581ba6fce636ef4c4e0b2da7e7846dd0137d98141e2"
+dependencies = [
+ "libm",
+]
+
+[[package]]
+name = "i_key_sort"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c6c58d0c60705e66264ce0f788a69a2f21472aeb8188559e7c8c619dbdc10fa"
+
+[[package]]
+name = "i_overlay"
+version = "9.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bc8ccb58877c937614dbff9e59b9e87f49d3c45167f5c39c21fc3d9945a6c16"
+dependencies = [
+ "i_float",
+ "i_key_sort",
+ "i_shape",
+ "i_tree",
+]
+
+[[package]]
+name = "i_shape"
+version = "5.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa1878f91ef7921feaf1b2346253ebc5e661878b22d5715195c1d5dcf0f20ae5"
+dependencies = [
+ "i_float",
+]
+
+[[package]]
+name = "i_tree"
+version = "0.19.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "180cbc5c4af5d8f57b8096c3cf39efdac3642ece00ca54710db44db3536baed4"
+
+[[package]]
 name = "image"
 version = "0.25.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1411,6 +1453,7 @@ dependencies = [
  "lightfoundry-format",
  "lightfoundry-gcode",
  "lightfoundry-geom",
+ "lightfoundry-pathops",
  "lightfoundry-svg",
  "lightfoundry-text",
  "lightfoundry-toolpath",
@@ -1447,6 +1490,15 @@ version = "0.1.0"
 dependencies = [
  "kurbo",
  "serde",
+]
+
+[[package]]
+name = "lightfoundry-pathops"
+version = "0.1.0"
+dependencies = [
+ "i_overlay",
+ "lightfoundry-geom",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

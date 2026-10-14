@@ -129,6 +129,111 @@ mod edit_tests {
     }
 }
 
+mod path_ops_tests {
+    use super::*;
+
+    fn two_overlapping(s: &mut Session) -> (u64, u64) {
+        let a = s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 40, "height": 40})).unwrap()["id"].as_u64().unwrap();
+        let b = s.execute("shape.rectangle", &json!({"x": 20, "y": 20, "width": 40, "height": 40})).unwrap()["id"].as_u64().unwrap();
+        (a, b)
+    }
+
+    fn bounds_of_selection(s: &Session) -> lightfoundry_geom::Rect {
+        s.doc.bounds_of(&s.selection).unwrap()
+    }
+
+    #[test]
+    fn union_replaces_the_inputs_with_one_shape_and_is_one_undo_step() {
+        let mut s = Session::new();
+        let (a, b) = two_overlapping(&mut s);
+        let v = s.execute("path.boolean", &json!({"op": "union", "ids": [a, b]})).unwrap();
+        assert_eq!(s.doc.shapes.len(), 1);
+        let r = bounds_of_selection(&s);
+        assert_eq!((r.x0, r.y0, r.x1, r.y1), (0.0, 0.0, 60.0, 60.0));
+        assert_eq!(v["contours"], json!(1));
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(s.doc.shapes.len(), 2);
+    }
+
+    #[test]
+    fn difference_subtracts_the_later_shapes_and_can_keep_originals() {
+        let mut s = Session::new();
+        let (a, b) = two_overlapping(&mut s);
+        s.execute("path.boolean", &json!({"op": "difference", "ids": [a, b], "keep_originals": true})).unwrap();
+        assert_eq!(s.doc.shapes.len(), 3);
+        let r = bounds_of_selection(&s);
+        assert_eq!((r.x1, r.y1), (40.0, 40.0), "the L-shaped remainder stays within the first square");
+    }
+
+    #[test]
+    fn intersection_of_disjoint_shapes_is_an_error_that_changes_nothing() {
+        let mut s = Session::new();
+        let a = s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 5, "height": 5})).unwrap()["id"].as_u64().unwrap();
+        let b = s.execute("shape.rectangle", &json!({"x": 50, "y": 50, "width": 5, "height": 5})).unwrap()["id"].as_u64().unwrap();
+        let before = s.doc.clone();
+        assert!(s.execute("path.boolean", &json!({"op": "intersect", "ids": [a, b]})).is_err());
+        assert_eq!(s.doc, before);
+    }
+
+    #[test]
+    fn booleans_refuse_open_lines_images_and_single_shapes() {
+        let mut s = Session::new();
+        let a = s.execute("shape.rectangle", &json!({"width": 5, "height": 5})).unwrap()["id"].as_u64().unwrap();
+        let line = s.execute("shape.line", &json!({"x1": 0, "y1": 0, "x2": 9, "y2": 9})).unwrap()["id"].as_u64().unwrap();
+        assert!(s.execute("path.boolean", &json!({"op": "union", "ids": [a]})).is_err());
+        let err = s.execute("path.boolean", &json!({"op": "union", "ids": [a, line]})).unwrap_err().to_string();
+        assert!(err.contains("no closed outline"), "{err}");
+    }
+
+    #[test]
+    fn a_rectangle_and_an_ellipse_can_be_welded_and_the_circle_becomes_a_hole_when_subtracted() {
+        let mut s = Session::new();
+        let r = s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 60, "height": 60})).unwrap()["id"].as_u64().unwrap();
+        let e = s.execute("shape.ellipse", &json!({"cx": 30, "cy": 30, "rx": 10, "ry": 10})).unwrap()["id"].as_u64().unwrap();
+        s.execute("path.boolean", &json!({"op": "difference", "ids": [r, e], "keep_originals": true})).unwrap();
+        let result = s.doc.shape(*s.selection.first().unwrap()).unwrap();
+        let closed = result.world_polylines().iter().filter(|l| l.closed).count();
+        assert_eq!(closed, 2, "outer square plus the circular hole");
+        // Welding works with the ellipse too (it used to be rejected as an open shape).
+        assert!(s.execute("path.boolean", &json!({"op": "union", "ids": [r, e]})).is_ok());
+    }
+
+    #[test]
+    fn offset_keeps_originals_by_default_and_grows_the_shape() {
+        let mut s = Session::new();
+        let a = s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 20})).unwrap()["id"].as_u64().unwrap();
+        s.execute("path.offset", &json!({"ids": [a], "distance": 2, "join": "miter"})).unwrap();
+        assert_eq!(s.doc.shapes.len(), 2);
+        let r = bounds_of_selection(&s);
+        assert_eq!((r.x0, r.y0, r.x1, r.y1), (8.0, 8.0, 32.0, 32.0));
+        s.execute("path.offset", &json!({"distance": -2, "join": "miter", "keep_originals": false})).unwrap();
+        assert_eq!(s.doc.shapes.len(), 2, "the offset shape was replaced by its shrunken copy");
+        let r = bounds_of_selection(&s);
+        assert_eq!((r.x0, r.x1), (10.0, 30.0));
+    }
+
+    #[test]
+    fn offset_of_open_text_outlines_the_strokes_and_collapse_is_reported() {
+        let mut s = Session::new();
+        s.execute("text.create", &json!({"text": "I", "height": 10})).unwrap();
+        s.execute("path.offset", &json!({"distance": 0.5})).unwrap();
+        assert_eq!(s.doc.shapes.len(), 2);
+        let tiny = s.execute("shape.rectangle", &json!({"width": 2, "height": 2})).unwrap()["id"].as_u64().unwrap();
+        assert!(s.execute("path.offset", &json!({"ids": [tiny], "distance": -5})).is_err(), "collapsed");
+        assert!(s.execute("path.offset", &json!({"ids": [tiny], "distance": -0.5})).is_ok());
+    }
+
+    #[test]
+    fn offset_validates_its_distance() {
+        let mut s = Session::new();
+        let a = s.execute("shape.rectangle", &json!({"width": 5, "height": 5})).unwrap()["id"].as_u64().unwrap();
+        for d in [json!(1e9), json!("x"), json!(null)] {
+            assert!(s.execute("path.offset", &json!({"ids": [a], "distance": d})).is_err());
+        }
+        assert!(s.execute("path.offset", &json!({"distance": 1})).is_ok(), "uses the selection");
+    }
+}
+
 mod text_tests {
     use super::*;
 
