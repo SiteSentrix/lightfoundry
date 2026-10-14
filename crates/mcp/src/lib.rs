@@ -75,7 +75,7 @@ fn dispatch(session: &mut Session, method: &str, params: &Value) -> Result<Value
             let version = params.get("protocolVersion").and_then(Value::as_str).unwrap_or(DEFAULT_PROTOCOL);
             Ok(json!({
                 "protocolVersion": version,
-                "capabilities": { "tools": {} },
+                "capabilities": { "tools": {}, "resources": {}, "prompts": {} },
                 "serverInfo": { "name": "lightfoundry", "version": env!("CARGO_PKG_VERSION") },
                 "instructions": "Design and export laser jobs. Units are mm, y points down from the bed's top-left corner. Call document_summary to see the drawing; shape_* create shapes, layer_set changes cut settings, job_gcode generates the program (include=true to get the text).",
             }))
@@ -83,6 +83,10 @@ fn dispatch(session: &mut Session, method: &str, params: &Value) -> Result<Value
         "ping" => Ok(json!({})),
         "tools/list" => Ok(json!({ "tools": tool_list() })),
         "tools/call" => call_tool(session, params),
+        "resources/list" => Ok(json!({ "resources": resource_list() })),
+        "resources/read" => read_resource(session, params),
+        "prompts/list" => Ok(json!({ "prompts": prompt_list() })),
+        "prompts/get" => get_prompt(params),
         m if m.starts_with("notifications/") => Ok(Value::Null),
         _ => Err((METHOD_NOT_FOUND, format!("unknown method {method}"))),
     }
@@ -161,6 +165,78 @@ fn summary(s: &Session) -> Value {
         "selection": s.selection,
         "unsaved_changes": s.dirty,
     })
+}
+
+const DOCUMENT_URI: &str = "lightfoundry://document/summary";
+const GCODE_URI: &str = "lightfoundry://job/gcode";
+const COMMANDS_URI: &str = "lightfoundry://reference/commands";
+
+fn resource_list() -> Vec<Value> {
+    vec![
+        json!({ "uri": DOCUMENT_URI, "name": "Document summary", "description": "Machine, layers in use, selection and the shapes with their bounds", "mimeType": "application/json" }),
+        json!({ "uri": GCODE_URI, "name": "G-code for the current design", "description": "The program the job would run now (generated on read)", "mimeType": "text/plain" }),
+        json!({ "uri": COMMANDS_URI, "name": "Command reference", "description": "Every command with its parameters", "mimeType": "text/plain" }),
+    ]
+}
+
+fn read_resource(session: &mut Session, params: &Value) -> Result<Value, (i64, String)> {
+    let uri = params.get("uri").and_then(Value::as_str).ok_or((INVALID_PARAMS, "resources/read needs a uri".to_string()))?;
+    let (mime, text) = match uri {
+        DOCUMENT_URI => ("application/json", serde_json::to_string(&summary(session)).unwrap_or_default()),
+        GCODE_URI => match session.execute("job.gcode", &json!({ "include": true })) {
+            Ok(v) => ("text/plain", v["gcode"].as_str().unwrap_or_default().to_string()),
+            Err(e) => return Err((INVALID_PARAMS, format!("cannot generate G-code: {e}"))),
+        },
+        COMMANDS_URI => {
+            ("text/plain", commands().map(|c| format!("{} ({}): {}", tool_name(c.id), c.label, c.params_doc)).collect::<Vec<_>>().join("\n"))
+        }
+        _ => return Err((INVALID_PARAMS, format!("unknown resource {uri}"))),
+    };
+    Ok(json!({ "contents": [{ "uri": uri, "mimeType": mime, "text": text }] }))
+}
+
+/// Prompt templates: (name, description, arguments, text with `{name}` placeholders).
+const PROMPTS: &[(&str, &str, &[&str], &str)] = &[
+    (
+        "design_from_description",
+        "Design something for the laser from a description",
+        &["description"],
+        "Design this for a laser engraver/cutter: {description}\n\nWork in millimetres (y points down from the bed's top-left). Check the bed size with document_summary, build the shapes with the shape_* and text_create tools, put cuts and engravings on separate layers with layer_set (cuts: Line mode; engravings: Fill), then use job_estimate to report the time and ask before generating G-code.",
+    ),
+    (
+        "prepare_for_cutting",
+        "Check a design before it is sent to a machine",
+        &[],
+        "Review the current design before cutting. Use document_summary and the document resources. Check: everything is inside the bed; cut layers are Line mode with sensible speed/power for the material; engraved areas are Fill; nothing is on a layer that does not output; inner shapes are cut before outer ones; duplicates are removed. Report problems and fix only what is clearly wrong. Always recommend a Frame run at 0% power and a material test grid first.",
+    ),
+    (
+        "explain_job",
+        "Explain what the job will do and how long it will take",
+        &[],
+        "Call job_estimate and document_summary and explain in plain language what the job will do, layer by layer, how long each part takes, and anything surprising (very slow layers, many passes, travel-heavy order).",
+    ),
+];
+
+fn prompt_list() -> Vec<Value> {
+    PROMPTS
+        .iter()
+        .map(|(name, description, args, _)| {
+            let arguments: Vec<Value> = args.iter().map(|a| json!({ "name": a, "required": true })).collect();
+            json!({ "name": name, "description": description, "arguments": arguments })
+        })
+        .collect()
+}
+
+fn get_prompt(params: &Value) -> Result<Value, (i64, String)> {
+    let name = params.get("name").and_then(Value::as_str).ok_or((INVALID_PARAMS, "prompts/get needs a name".to_string()))?;
+    let (_, description, args, template) = PROMPTS.iter().find(|(n, ..)| *n == name).ok_or((INVALID_PARAMS, format!("unknown prompt {name}")))?;
+    let mut text = (*template).to_string();
+    for arg in *args {
+        let value =
+            params.get("arguments").and_then(|a| a.get(*arg)).and_then(Value::as_str).ok_or((INVALID_PARAMS, format!("missing argument {arg}")))?;
+        text = text.replace(&format!("{{{arg}}}"), value);
+    }
+    Ok(json!({ "description": description, "messages": [{ "role": "user", "content": { "type": "text", "text": text } }] }))
 }
 
 fn tool_name(id: &str) -> String {
@@ -294,6 +370,53 @@ mod tests {
             call(&mut s, "shape_rectangle", json!({"width": 5, "height": 5}));
             call(&mut s, "edit_undo", Value::Null);
             assert!(s.doc.shapes.is_empty());
+        }
+    }
+
+    mod resource_and_prompt_tests {
+        use super::*;
+
+        #[test]
+        fn resources_list_and_read_the_live_design() {
+            let mut s = Session::new();
+            let r = ask(&mut s, json!({"jsonrpc": "2.0", "id": 1, "method": "resources/list"}));
+            assert_eq!(r["result"]["resources"].as_array().unwrap().len(), 3);
+            call(&mut s, "shape_rectangle", json!({"x": 10, "y": 10, "width": 20, "height": 10}));
+            let read = |s: &mut Session, uri: &str| ask(s, json!({"jsonrpc": "2.0", "id": 2, "method": "resources/read", "params": {"uri": uri}}));
+            let doc = read(&mut s, DOCUMENT_URI);
+            let v: Value = serde_json::from_str(doc["result"]["contents"][0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(v["shape_count"], json!(1));
+            let g = read(&mut s, GCODE_URI);
+            assert!(g["result"]["contents"][0]["text"].as_str().unwrap().contains("G21"));
+            let c = read(&mut s, COMMANDS_URI);
+            assert!(c["result"]["contents"][0]["text"].as_str().unwrap().contains("shape_rectangle"));
+            assert_eq!(read(&mut s, "lightfoundry://nope")["error"]["code"], json!(INVALID_PARAMS));
+            assert_eq!(
+                ask(&mut s, json!({"jsonrpc": "2.0", "id": 3, "method": "resources/read", "params": {}}))["error"]["code"],
+                json!(INVALID_PARAMS)
+            );
+        }
+
+        #[test]
+        fn prompts_fill_in_their_arguments_and_refuse_missing_ones() {
+            let mut s = Session::new();
+            let list = ask(&mut s, json!({"jsonrpc": "2.0", "id": 1, "method": "prompts/list"}));
+            assert!(list["result"]["prompts"].as_array().unwrap().iter().any(|p| p["name"] == "design_from_description"));
+            let got = ask(
+                &mut s,
+                json!({"jsonrpc": "2.0", "id": 2, "method": "prompts/get", "params": {"name": "design_from_description", "arguments": {"description": "a 40 mm round coaster"}}}),
+            );
+            let text = got["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+            assert!(text.contains("a 40 mm round coaster") && !text.contains("{description}"));
+            for params in [json!({"name": "design_from_description"}), json!({"name": "nope"}), json!({})] {
+                assert!(
+                    ask(&mut s, json!({"jsonrpc": "2.0", "id": 3, "method": "prompts/get", "params": params})).get("error").is_some(),
+                    "{params}"
+                );
+            }
+            assert!(
+                ask(&mut s, json!({"jsonrpc": "2.0", "id": 4, "method": "prompts/get", "params": {"name": "explain_job"}})).get("result").is_some()
+            );
         }
     }
 
