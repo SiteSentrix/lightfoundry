@@ -168,6 +168,40 @@ mod translation_tests {
 mod engine_message_tests {
     use super::*;
 
+    /// Every error the engine gives for hostile input should be covered by the shipped list of
+    /// message templates, so a translator can translate it.
+    #[test]
+    fn the_shipped_message_list_covers_the_errors_commands_really_give() {
+        let strings: String = crate::i18n::ENGINE_MESSAGES.lines().map(|l| format!("{}:\"@@\"", serde_json::json!(l))).collect::<Vec<_>>().join(",");
+        let catalog = crate::i18n::parse(&format!("{{\"strings\":{{{strings}}}}}")).unwrap();
+        let hostile = [
+            serde_json::Value::Null,
+            json!({}),
+            json!([]),
+            json!("string"),
+            json!({"x": f64::MAX, "width": 1e308, "height": 1e-308}),
+            json!({"ids": [0, 1, 99999], "dx": 1e300}),
+            json!({"width": 0, "height": 0, "radius": 0, "sides": 4294967295u64, "degrees": 1e308}),
+            json!({"id": -1, "layer": 4294967295u64, "speed": "fast"}),
+            json!({"id": 999, "layer": 999, "text": "x", "path": 1, "line": 99999}),
+            json!({"path": "/nonexistent/x", "data": "abc"}),
+        ];
+        let mut unmatched = std::collections::BTreeSet::new();
+        for spec in lightfoundry_engine::commands() {
+            for params in &hostile {
+                let mut session = Session::new();
+                session.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 20})).unwrap();
+                if let Err(e) = session.execute(spec.id, params) {
+                    let text = e.to_string();
+                    if !catalog.translate_message(&text).contains("@@") {
+                        unmatched.insert(text);
+                    }
+                }
+            }
+        }
+        assert!(unmatched.is_empty(), "errors with no template in engine-messages.txt:\n{}", unmatched.into_iter().collect::<Vec<_>>().join("\n"));
+    }
+
     #[test]
     fn errors_from_the_engine_show_in_the_chosen_language_with_their_values() {
         let dir = temp_dir("engine-messages");

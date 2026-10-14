@@ -11,9 +11,9 @@
 //! in the Help menu writes every string seen so far with itself as the value, to start from.
 //! Messages that come from the engine (errors, command results) are not translated.
 
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, RwLock};
 
 /// Largest catalog file read, in bytes.
 pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
@@ -93,18 +93,22 @@ impl Pattern {
     }
 }
 
-static ACTIVE: RwLock<Option<Translation>> = RwLock::new(None);
-static SEEN: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+// The interface runs on one thread, so the catalog is per thread: nothing else can change it under a
+// frame being drawn, and tests that load different catalogs cannot disturb one another.
+thread_local! {
+    static ACTIVE: RefCell<Option<Translation>> = const { RefCell::new(None) };
+    static SEEN: RefCell<BTreeSet<String>> = const { RefCell::new(BTreeSet::new()) };
+}
 
 /// The text to show for `english`: its translation if the active catalog has one.
 pub fn tr(english: &str) -> String {
-    if let Ok(mut seen) = SEEN.lock()
-        && !seen.contains(english)
-    {
-        seen.insert(english.to_string());
-    }
-    let active = ACTIVE.read().unwrap_or_else(|e| e.into_inner());
-    active.as_ref().and_then(|t| t.strings.get(english)).map_or_else(|| english.to_string(), Clone::clone)
+    SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        if !seen.contains(english) {
+            seen.insert(english.to_string());
+        }
+    });
+    ACTIVE.with(|a| a.borrow().as_ref().and_then(|t| t.strings.get(english)).map_or_else(|| english.to_string(), Clone::clone))
 }
 
 /// Translates a message the program received rather than wrote, such as an engine error: the whole
@@ -116,21 +120,31 @@ pub fn tr_message(message: &str) -> String {
 }
 
 fn message_at(message: &str, depth: usize) -> String {
-    let active = ACTIVE.read().unwrap_or_else(|e| e.into_inner());
-    let Some(t) = active.as_ref() else { return message.to_string() };
-    if let Some(v) = t.strings.get(message) {
-        return v.clone();
+    ACTIVE.with(|a| a.borrow().as_ref().map_or_else(|| message.to_string(), |t| t.message(message, depth)))
+}
+
+impl Translation {
+    /// [`tr_message`] against this catalog alone.
+    #[cfg(test)]
+    pub(crate) fn translate_message(&self, message: &str) -> String {
+        self.message(message, 0)
     }
-    if depth >= 3 {
-        return message.to_string();
-    }
-    for p in &t.patterns {
-        if let Some(caps) = p.captures(message) {
-            let args: Vec<(&str, String)> = p.names.iter().map(String::as_str).zip(caps.iter().map(|c| message_at(c, depth + 1))).collect();
-            return fill(&p.value, &args);
+
+    fn message(&self, message: &str, depth: usize) -> String {
+        if let Some(v) = self.strings.get(message) {
+            return v.clone();
         }
+        if depth >= 3 {
+            return message.to_string();
+        }
+        for p in &self.patterns {
+            if let Some(caps) = p.captures(message) {
+                let args: Vec<(&str, String)> = p.names.iter().map(String::as_str).zip(caps.iter().map(|c| self.message(c, depth + 1))).collect();
+                return fill(&p.value, &args);
+            }
+        }
+        message.to_string()
     }
-    message.to_string()
 }
 
 /// Every message template the program's own errors can use, for translators (a list kept up to
@@ -177,17 +191,17 @@ pub(crate) use trf;
 
 /// Makes `translation` the one in use (`None` goes back to English).
 pub fn set_active(translation: Option<Translation>) {
-    *ACTIVE.write().unwrap_or_else(|e| e.into_inner()) = translation;
+    ACTIVE.with(|a| *a.borrow_mut() = translation);
 }
 
 /// The font file the active catalog asks for, if any.
 pub fn active_font() -> Option<PathBuf> {
-    ACTIVE.read().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|t| t.font.clone())
+    ACTIVE.with(|a| a.borrow().as_ref().and_then(|t| t.font.clone()))
 }
 
 /// The name of the active catalog, if there is one.
 pub fn active_name() -> Option<String> {
-    ACTIVE.read().unwrap_or_else(|e| e.into_inner()).as_ref().map(|t| t.name.clone())
+    ACTIVE.with(|a| a.borrow().as_ref().map(|t| t.name.clone()))
 }
 
 /// Reads a font file for the active catalog, refusing one that is too large.
@@ -204,7 +218,7 @@ pub fn read_font(path: &Path) -> Result<Vec<u8>, String> {
 
 /// Every string asked for so far, as a catalog with each string as its own translation.
 pub fn template() -> String {
-    let seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    let seen = SEEN.with(|s| s.borrow().clone());
     let strings: serde_json::Map<String, serde_json::Value> = seen
         .iter()
         .map(String::as_str)
