@@ -1118,6 +1118,28 @@ mod import_tests {
     }
 
     #[test]
+    fn resampling_changes_pixels_not_size_and_is_validated() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-resample-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("r.png");
+        image::GrayImage::from_fn(40, 20, |x, _| image::Luma([(x * 6) as u8])).save(&path).unwrap();
+        let mut s = Session::new();
+        let id = s.execute("file.import_image", &json!({"path": path, "width": 80})).unwrap()["id"].as_u64().unwrap();
+        let before = s.doc.shape(id).unwrap().world_bounds().unwrap();
+        let v = s.execute("image.resample", &json!({"scale": 0.5})).unwrap();
+        assert_eq!((v["width_px"].as_u64(), v["height_px"].as_u64()), (Some(20), Some(10)));
+        assert_eq!(s.doc.shape(id).unwrap().world_bounds().unwrap(), before, "the size on the bed is unchanged");
+        s.execute("image.resample", &json!({"scale": 3})).unwrap();
+        for bad in [json!({"scale": 0.0}), json!({"scale": 5}), json!({"scale": -1}), json!({"scale": "x"}), json!({})] {
+            assert!(s.execute("image.resample", &bad).is_err(), "{bad}");
+        }
+        s.execute("edit.undo", &Value::Null).unwrap();
+        s.execute("edit.undo", &Value::Null).unwrap();
+        let lightfoundry_doc::ShapeKind::Image { image, .. } = &s.doc.shape(id).unwrap().kind else { panic!("not an image") };
+        assert_eq!(image.width, 40);
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

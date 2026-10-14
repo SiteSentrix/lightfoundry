@@ -212,4 +212,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   `recovery.1.ext`, `recovery.2.ext`), every write is read back to confirm it parses (the status bar
   says so when it does not), startup offers the newest copy that still reads back, and saving or
   discarding removes them all.
+- **2026-10-14 — crop handles and resample.** With "Drag the edges on the canvas" on, the selected
+  picture's own edges (so rotated and flipped pictures work) can be dragged; the removed bands are
+  shaded and the percentages feed the Crop button. `image.resample` changes the pixel count (area
+  average when shrinking, bilinear when enlarging; 0.05x to 4x, 100 Mpixel cap) without changing the
+  size in mm.
 

@@ -569,6 +569,49 @@ impl RasterImage {
         RasterImage::new(x1 - x0, y1 - y0, gray)
     }
 
+    /// The picture at `new_w` x `new_h` pixels: areas are averaged when shrinking and bilinearly
+    /// interpolated when enlarging. `None` for an empty target or one with over 100 million pixels.
+    pub fn resampled(&self, new_w: u32, new_h: u32) -> Option<RasterImage> {
+        const MAX_PIXELS: u64 = 100_000_000;
+        if new_w == 0 || new_h == 0 || u64::from(new_w) * u64::from(new_h) > MAX_PIXELS {
+            return None;
+        }
+        let (w, h) = (self.width as usize, self.height as usize);
+        let (nw, nh) = (new_w as usize, new_h as usize);
+        let px = |x: usize, y: usize| f32::from(self.gray.get(y.min(h - 1) * w + x.min(w - 1)).copied().unwrap_or(255));
+        let mut out = Vec::with_capacity(nw * nh);
+        for ny in 0..nh {
+            // The source rows and columns this output pixel covers.
+            let (y0, y1) = (ny as f64 * h as f64 / nh as f64, (ny + 1) as f64 * h as f64 / nh as f64);
+            for nx in 0..nw {
+                let (x0, x1) = (nx as f64 * w as f64 / nw as f64, (nx + 1) as f64 * w as f64 / nw as f64);
+                let value = if x1 - x0 >= 1.0 || y1 - y0 >= 1.0 {
+                    // Shrinking: average everything covered, weighted by overlap.
+                    let (mut sum, mut weight) = (0.0f64, 0.0f64);
+                    for sy in y0.floor() as usize..(y1.ceil() as usize).min(h) {
+                        let wy = (y1.min(sy as f64 + 1.0) - y0.max(sy as f64)).max(0.0);
+                        for sx in x0.floor() as usize..(x1.ceil() as usize).min(w) {
+                            let wx = (x1.min(sx as f64 + 1.0) - x0.max(sx as f64)).max(0.0);
+                            sum += f64::from(px(sx, sy)) * wx * wy;
+                            weight += wx * wy;
+                        }
+                    }
+                    if weight > 0.0 { (sum / weight) as f32 } else { 255.0 }
+                } else {
+                    // Enlarging: interpolate between the four nearest source pixels.
+                    let (cx, cy) = (((x0 + x1) / 2.0 - 0.5).max(0.0), ((y0 + y1) / 2.0 - 0.5).max(0.0));
+                    let (ix, iy) = (cx.floor() as usize, cy.floor() as usize);
+                    let (fx, fy) = ((cx - ix as f64) as f32, (cy - iy as f64) as f32);
+                    let top = px(ix, iy) * (1.0 - fx) + px(ix + 1, iy) * fx;
+                    let bottom = px(ix, iy + 1) * (1.0 - fx) + px(ix + 1, iy + 1) * fx;
+                    top * (1.0 - fy) + bottom * fy
+                };
+                out.push(value.round().clamp(0.0, 255.0) as u8);
+            }
+        }
+        RasterImage::new(new_w, new_h, out)
+    }
+
     /// Unsharp mask: adds `amount` times the difference from a 3x3 blur (edges are clamped), which
     /// makes outlines crisper before dithering. `amount` is limited to 0..=5.
     pub fn sharpened(&self, amount: f64) -> RasterImage {
@@ -860,6 +903,25 @@ mod tests {
         v.as_object_mut().unwrap().remove("job_origin");
         let doc: Document = serde_json::from_value(v).unwrap();
         assert_eq!(doc.job_origin, JobOrigin::default());
+    }
+
+    #[test]
+    fn resampling_averages_when_shrinking_and_interpolates_when_enlarging() {
+        let img = RasterImage::new(4, 2, vec![0, 100, 200, 100, 0, 100, 200, 100]).unwrap();
+        let half = img.resampled(2, 1).unwrap();
+        assert_eq!(half.gray, vec![50, 150], "each output pixel is the mean of a 2x2 block");
+        let same = img.resampled(4, 2).unwrap();
+        assert_eq!(same.gray, img.gray, "the same size changes nothing");
+        let flat = RasterImage::new(3, 3, vec![77; 9]).unwrap();
+        for (w, h) in [(1, 1), (2, 5), (7, 7), (30, 3)] {
+            let r = flat.resampled(w, h).unwrap();
+            assert!(r.gray.iter().all(|v| *v == 77), "a flat picture stays flat at {w}x{h}");
+        }
+        let big = img.resampled(8, 4).unwrap();
+        assert!(big.gray[0] <= big.gray[1] && big.gray[1] <= big.gray[2], "a gradient stays monotonic: {:?}", big.gray);
+        assert!(img.resampled(0, 5).is_none() && img.resampled(5, 0).is_none() && img.resampled(20_000, 20_000).is_none());
+        let one = RasterImage::new(1, 1, vec![9]).unwrap();
+        assert_eq!(one.resampled(3, 3).unwrap().gray, vec![9; 9]);
     }
 
     #[test]

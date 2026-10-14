@@ -2,6 +2,7 @@
 //! `Session::execute`, so everything the UI can do an agent or script can do too.
 
 mod canvas;
+mod crop_ui;
 mod geometry;
 mod head_ui;
 mod menus;
@@ -131,7 +132,11 @@ pub struct LightFoundryApp {
     recent: recent::Recent,
     /// Percentages to cut off the left, top, right and bottom of the selected image.
     crop_pct: [f64; 4],
+    /// Dragging the edges of the selected picture on the canvas shows and sets `crop_pct`.
+    crop_mode: bool,
+    crop_drag: Option<usize>,
     sharpen_amount: f64,
+    resample_scale: f64,
     trace_threshold: f64,
     preset_name: String,
     resume_line: usize,
@@ -251,7 +256,10 @@ impl LightFoundryApp {
             pending_action: None,
             recent,
             crop_pct: [0.0; 4],
+            crop_mode: false,
+            crop_drag: None,
             sharpen_amount: 1.0,
+            resample_scale: 0.5,
             trace_threshold: 128.0,
             preset_name: String::new(),
             resume_line: 1,
@@ -779,6 +787,9 @@ impl LightFoundryApp {
         if escape {
             if self.move_head_mode {
                 self.move_head_mode = false;
+            } else if self.crop_mode {
+                self.crop_mode = false;
+                self.crop_drag = None;
             } else if self.marks.pick.is_some() {
                 self.marks.pick = None;
             } else if self.pen.is_some() || self.node_drag.is_some() {
