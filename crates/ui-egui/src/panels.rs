@@ -41,6 +41,7 @@ pub fn inspector(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             image_properties(app, ui);
             shape_operations(app, ui);
             array_section(app, ui);
+            override_section(app, ui);
         });
         egui::CollapsingHeader::new("Laser").default_open(true).show(ui, |ui| laser(app, ui));
     });
@@ -245,6 +246,7 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     });
 
     job_origin(app, ui);
+    test_grid_section(app, ui);
     ui.separator();
     connection(app, ui);
     job_controls(app, ui);
@@ -694,4 +696,76 @@ fn array_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         let params = json!({ "count": app.array_count, "radius": app.array_radius });
         app.run("arrange.circular", params);
     }
+}
+
+/// Per-shape cut settings that replace the layer's.
+fn override_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let sel = app.session.selection.clone();
+    let Some(first) = sel.first().and_then(|id| app.session.doc.shape(*id)) else { return };
+    let layer = app.session.doc.layer(first.layer).cloned();
+    let current = first.cut;
+    ui.separator();
+    ui.horizontal(|ui| {
+        let mut on = current.is_some();
+        if ui.checkbox(&mut on, "Own cut settings").on_hover_text("Use these settings for the selected shapes instead of their layer's").changed() {
+            if on {
+                // Start from the layer's values so switching it on changes nothing until edited.
+                let (speed, power) = layer.as_ref().map_or((1000.0, 50.0), |l| (l.speed, l.max_power));
+                app.run("shape.cut_override", json!({ "speed": speed, "max_power": power }));
+            } else {
+                app.run("shape.cut_override", json!({ "clear": true }));
+            }
+        }
+    });
+    let Some(c) = current else { return };
+    let (speed, power, passes) = (c.speed.unwrap_or(0.0), c.max_power.unwrap_or(0.0), c.passes.unwrap_or(1));
+    egui::Grid::new("override_grid").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+        ui.label("Speed");
+        if let Some(v) = number(ui, speed, 1.0..=100_000.0, " mm/min") {
+            app.run("shape.cut_override", json!({ "speed": v }));
+        }
+        ui.end_row();
+        ui.label("Power");
+        if let Some(v) = number(ui, power, 0.0..=100.0, " %") {
+            app.run("shape.cut_override", json!({ "max_power": v }));
+        }
+        ui.end_row();
+        ui.label("Passes");
+        let mut n = passes;
+        let r = ui.add(egui::DragValue::new(&mut n).range(1..=1000));
+        if committed(&r) && n != passes {
+            app.run("shape.cut_override", json!({ "passes": n }));
+        }
+        ui.end_row();
+    });
+}
+
+/// A speed × power matrix of squares for finding settings on a new material.
+fn test_grid_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    ui.collapsing("Material test grid", |ui| {
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut app.grid_cols).range(1..=20).prefix("speeds "));
+            ui.add(egui::DragValue::new(&mut app.grid_rows).range(1..=20).prefix("powers "));
+            ui.add(egui::DragValue::new(&mut app.grid_size).range(1.0..=100.0).suffix(" mm"));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Speed");
+            ui.add(egui::DragValue::new(&mut app.grid_speed.0).range(1.0..=100_000.0));
+            ui.label("to");
+            ui.add(egui::DragValue::new(&mut app.grid_speed.1).range(1.0..=100_000.0).suffix(" mm/min"));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Power");
+            ui.add(egui::DragValue::new(&mut app.grid_power.0).range(0.0..=100.0));
+            ui.label("to");
+            ui.add(egui::DragValue::new(&mut app.grid_power.1).range(0.0..=100.0).suffix(" %"));
+        });
+        if ui.button("Create on the active layer").on_hover_text("Squares use the active layer's mode; labels go on the next layer").clicked() {
+            let params = json!({
+                "cols": app.grid_cols, "rows": app.grid_rows, "size": app.grid_size, "layer": app.active_layer,
+                "speed_min": app.grid_speed.0, "speed_max": app.grid_speed.1, "power_min": app.grid_power.0, "power_max": app.grid_power.1,
+            });
+            app.run("generate.test_grid", params);
+        }
+    });
 }

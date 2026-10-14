@@ -61,6 +61,7 @@ fn create(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         layer: p.layer,
         transform: Affine::translate((p.x, p.y)),
         kind: ShapeKind::Text { content: p.text, style: settings, path },
+        cut: None,
     };
     let id = s.doc.add_shape(shape);
     s.selection = vec![id];
@@ -103,7 +104,7 @@ fn edit(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     Ok(json!({ "id": id, "unsupported": unsupported }))
 }
 
-fn generate(text: &str, s: &TextSettings) -> Result<(lightfoundry_geom::BezPath, Vec<char>), EngineError> {
+pub(super) fn generate(text: &str, s: &TextSettings) -> Result<(lightfoundry_geom::BezPath, Vec<char>), EngineError> {
     if text.trim().is_empty() {
         return Err(EngineError::BadParams("text is empty".into()));
     }

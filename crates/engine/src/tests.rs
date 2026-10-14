@@ -129,6 +129,108 @@ mod edit_tests {
     }
 }
 
+mod override_and_test_grid_tests {
+    use super::*;
+
+    #[test]
+    fn a_cut_override_changes_one_shape_and_can_be_cleared_and_merged() {
+        let mut s = Session::new();
+        let a = s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 10})).unwrap()["id"].as_u64().unwrap();
+        s.execute("shape.rectangle", &json!({"x": 100, "y": 10, "width": 20, "height": 10})).unwrap();
+        s.execute("shape.cut_override", &json!({"ids": [a], "speed": 250, "max_power": 85})).unwrap();
+        s.execute("shape.cut_override", &json!({"ids": [a], "passes": 2})).unwrap();
+        let c = s.doc.shape(a).unwrap().cut.unwrap();
+        assert_eq!((c.speed, c.max_power, c.passes), (Some(250.0), Some(85.0), Some(2)), "later calls merge");
+        s.execute("machine.set", &json!({"origin": "top_left"})).unwrap();
+        let g = s.execute("job.gcode", &json!({"include": true})).unwrap();
+        let text = g["gcode"].as_str().unwrap();
+        assert!(text.contains("F250") && text.contains("S850") && text.contains("F1000") && text.contains("S600"), "both settings appear\n{text}");
+        s.execute("shape.cut_override", &json!({"ids": [a], "clear": true})).unwrap();
+        assert!(s.doc.shape(a).unwrap().cut.is_none());
+        for bad in [json!({"ids": [a], "speed": 0}), json!({"ids": [a], "max_power": 150}), json!({"ids": [a], "min_power": "x"}), json!({"ids": []})]
+        {
+            assert!(s.execute("shape.cut_override", &bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_test_grid_varies_speed_across_and_power_down_with_labels() {
+        let mut s = Session::new();
+        let v = s
+            .execute(
+                "generate.test_grid",
+                &json!({"cols": 4, "rows": 3, "speed_min": 200, "speed_max": 800, "power_min": 20, "power_max": 80, "size": 8, "gap": 2}),
+            )
+            .unwrap();
+        assert_eq!(v["cells"], json!(12));
+        let cells: Vec<_> = s.doc.shapes.iter().filter(|sh| sh.cut.is_some()).collect();
+        assert_eq!(cells.len(), 12);
+        let c = |r: usize, col: usize| cells[r * 4 + col].cut.unwrap();
+        assert_eq!((c(0, 0).speed, c(0, 0).max_power), (Some(200.0), Some(20.0)));
+        assert_eq!((c(0, 3).speed, c(2, 0).max_power), (Some(800.0), Some(80.0)));
+        assert_eq!(c(1, 1).speed, Some(400.0), "evenly spaced");
+        assert_eq!(c(1, 1).max_power, Some(50.0));
+        let b = cells[5].world_bounds().unwrap();
+        assert_eq!((b.x0, b.y0), (30.0, 30.0), "pitch is size + gap from the origin 20,20");
+        let labels: Vec<_> = s.doc.shapes.iter().filter(|sh| matches!(sh.kind, lightfoundry_doc::ShapeKind::Text { .. })).collect();
+        assert_eq!(labels.len(), 4 + 3, "one label per column and row");
+        assert!(labels.iter().all(|l| l.layer == 1), "labels go on the next layer so they do not use the cell settings");
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert!(s.doc.shapes.is_empty(), "one undo step");
+    }
+
+    #[test]
+    fn a_test_grid_becomes_one_op_per_distinct_setting_in_the_gcode() {
+        let mut s = Session::new();
+        s.execute("machine.set", &json!({"origin": "top_left"})).unwrap();
+        s.execute("layer.set", &json!({"id": 0, "mode": "fill", "interval": 1})).unwrap();
+        s.execute(
+            "generate.test_grid",
+            &json!({"cols": 3, "rows": 2, "speed_min": 300, "speed_max": 900, "power_min": 30, "power_max": 60, "labels": false}),
+        )
+        .unwrap();
+        let g = s.execute("job.gcode", &json!({"include": true})).unwrap();
+        let text = g["gcode"].as_str().unwrap();
+        for f in ["F300", "F600", "F900"] {
+            assert!(text.contains(f), "{f}");
+        }
+        for sv in ["S300", "S600"] {
+            assert!(text.contains(sv), "{sv}");
+        }
+        assert_eq!(text.matches("pass 1").count(), 6, "six cells, six ops");
+    }
+
+    #[test]
+    fn test_grids_are_bounded_and_validated() {
+        let mut s = Session::new();
+        for bad in [
+            json!({"cols": 0}),
+            json!({"cols": 21}),
+            json!({"size": 0.1}),
+            json!({"size": 1e9}),
+            json!({"speed_min": 0}),
+            json!({"power_max": 150}),
+            json!({"layer": 99}),
+            json!({"label_layer": 99}),
+            json!({"x": f64::MAX}),
+        ] {
+            assert!(s.execute("generate.test_grid", &bad).is_err(), "{bad}");
+        }
+        assert!(s.doc.shapes.is_empty(), "failed grids leave nothing behind");
+        assert!(s.execute("generate.test_grid", &json!({})).is_ok(), "defaults work and derive from the layer");
+        assert_eq!(s.doc.shapes.iter().filter(|sh| sh.cut.is_some()).count(), 25);
+    }
+
+    #[test]
+    fn overrides_survive_saving() {
+        let mut s = Session::new();
+        let id = s.execute("shape.rectangle", &json!({"width": 5, "height": 5})).unwrap()["id"].as_u64().unwrap();
+        s.execute("shape.cut_override", &json!({"speed": 123, "max_power": 45})).unwrap();
+        let back = lightfoundry_format::from_bytes(&lightfoundry_format::to_bytes(&s.doc).unwrap()).unwrap();
+        assert_eq!(back.shape(id).unwrap().cut, s.doc.shape(id).unwrap().cut);
+    }
+}
+
 mod array_tests {
     use super::*;
 

@@ -63,3 +63,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   (`lead_in`, `lead_out`: approach from the scrap side — outside a part, inside a hole — starting
   mid-edge so the lead never runs along the cut itself; shortened to stay on the bed for absolute
   placement). Found by test: a lead at a corner ran along the adjacent edge.
+- **2026-10-14 — overrides and test grids.** `Shape::cut` (`CutOverride`: speed, power, passes)
+  replaces the layer's settings for one shape; the planner groups shapes by override and plans each
+  group with the effective settings. `shape.cut_override` and `generate.test_grid` (speed across,
+  power down, one square per cell with its own settings, labels on the next layer; bounded) with a
+  Material test grid section in the Laser panel and an Own cut settings section in the Selection
+  panel. Process note: a gate failure in the previous commit slipped through a shell pipeline; the
+  gate script now stops on failure.
