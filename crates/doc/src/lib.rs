@@ -159,6 +159,11 @@ pub struct Layer {
     pub interval: f64,
     /// Fill scan angle in degrees.
     pub scan_angle: f64,
+    /// Kerf compensation for outlines, mm. Closed outlines are offset by this distance before
+    /// cutting: positive grows the outer outline and shrinks holes (the path sits outside a part
+    /// and inside a hole, so both come out the right size once the beam has taken its width).
+    #[serde(default)]
+    pub kerf_offset: f64,
     pub bidirectional: bool,
     pub dither: Dither,
     pub output: bool,
@@ -178,6 +183,7 @@ impl Layer {
             passes: 1,
             interval: 0.1,
             scan_angle: 0.0,
+            kerf_offset: 0.0,
             bidirectional: true,
             dither: Dither::FloydSteinberg,
             output: true,

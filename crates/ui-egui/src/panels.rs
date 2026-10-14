@@ -94,6 +94,7 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ("Min power", "min_power", layer.min_power, 0.0..=100.0, " %"),
             ("Interval", "interval", layer.interval, 0.005..=10.0, " mm"),
             ("Scan angle", "scan_angle", layer.scan_angle, -360.0..=360.0, "°"),
+            ("Kerf offset", "kerf_offset", layer.kerf_offset, -50.0..=50.0, " mm"),
         ] {
             ui.label(label);
             if let Some(v) = number(ui, value, range, suffix) {
