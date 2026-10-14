@@ -515,6 +515,21 @@ mod image_tests {
     }
 
     #[test]
+    fn crop_percentages_do_not_follow_the_selection_to_another_picture() {
+        let mut h = Harness::new();
+        let a = add_gradient(&mut h, Affine::translate((20.0, 20.0)));
+        let b = add_gradient(&mut h, Affine::translate((120.0, 20.0)));
+        h.app.run("edit.select", json!({"ids": [a]}));
+        h.frame(vec![]);
+        h.app.crop_pct = [10.0, 20.0, 30.0, 40.0];
+        h.frame(vec![]);
+        assert_eq!(h.app.crop_pct, [10.0, 20.0, 30.0, 40.0], "kept while the same picture stays selected");
+        h.app.run("edit.select", json!({"ids": [b]}));
+        h.frame(vec![]);
+        assert_eq!(h.app.crop_pct, [0.0; 4]);
+    }
+
+    #[test]
     fn crop_mode_ends_when_the_selection_is_not_a_single_picture_and_edges_use_the_pictures_own_axes() {
         use crate::crop_ui::{edge_at, pct_for};
         let mut h = Harness::new();

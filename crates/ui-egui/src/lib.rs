@@ -135,6 +135,8 @@ pub struct LightFoundryApp {
     /// Dragging the edges of the selected picture on the canvas shows and sets `crop_pct`.
     crop_mode: bool,
     crop_drag: Option<usize>,
+    /// The picture the crop percentages belong to.
+    crop_target: Option<u64>,
     sharpen_amount: f64,
     resample_scale: f64,
     trace_threshold: f64,
@@ -258,6 +260,7 @@ impl LightFoundryApp {
             crop_pct: [0.0; 4],
             crop_mode: false,
             crop_drag: None,
+            crop_target: None,
             sharpen_amount: 1.0,
             resample_scale: 0.5,
             trace_threshold: 128.0,
@@ -285,6 +288,7 @@ impl LightFoundryApp {
         self.watch_close_and_title(ui.ctx());
         self.track_recent();
         self.poll_upload(ui.ctx());
+        self.forget_crop_for_other_pictures();
         self.poll_serial(ui.ctx());
         if !self.has_modal() {
             self.handle_shortcuts(ui.ctx());
@@ -361,6 +365,22 @@ impl LightFoundryApp {
         if ctx.input(|i| i.viewport().close_requested()) && self.session.dirty && !self.allow_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.pending_action = Some(PendingAction::Close);
+        }
+    }
+
+    /// Crop percentages belong to one picture: selecting another (or nothing) starts them afresh.
+    fn forget_crop_for_other_pictures(&mut self) {
+        let current = match self.session.selection.as_slice() {
+            [id] if crop_ui::selected_image(self).is_some() => Some(*id),
+            _ => None,
+        };
+        if current != self.crop_target {
+            self.crop_target = current;
+            self.crop_pct = [0.0; 4];
+            self.crop_drag = None;
+            if current.is_none() {
+                self.crop_mode = false;
+            }
         }
     }
 

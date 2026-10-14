@@ -1,6 +1,6 @@
 # Parity with the target application
 
-> **Last updated:** 2026-10-13 · **Target:** LightBurn-class laser software (GRBL first)
+> **Last updated:** 2026-10-14 · **Target:** LightBurn-class laser software (GRBL first)
 > **Method:** self-assessed, deliberately low, all numbers *estimated* (nothing measured against the
 > target; the clean-room rule forbids running it). Behaviour reference so far: general laser and GRBL
 > conventions plus the GRBL project's public documentation. Before closing a gap, cite the public
@@ -8,16 +8,16 @@
 
 | Area                  | Score | Shipped                                                                 | Missing (highlights)                                                                                     |
 |-----------------------|------:|-------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
-| Drawing tools         |  55% | rectangle (rounded), ellipse, line, polygon, editable text (stroke font), grid/circular arrays, groups, join, boolean ops, offset, node editing and a pen/Bézier tool; move, resize, rotate, flip, align | outline fonts (Fill-mode text) |
-| Import                |   40% | SVG, DXF (basic entities), raster images with thumbnails and tone adjustments (brightness, contrast, gamma, negative) | AI/PDF/EPS, DXF splines/ellipses/text/blocks, image trace, crop/resize-resample, sharpen, SVG text/images |
-| Layers & cut settings |  55% | 16 layers; line, fill, fill+line, image; speed, power, passes, interval, kerf offset, tabs/bridges, lead-in/out; per-shape settings override; material test grid generator | sub-layers, perforation, ramp, Z offset, per-layer overscan, material library |
-| Toolpath planning     |  40% | inner-first, nearest neighbour, scan fill, dithered raster, kerf, tabs, lead-in/out, estimate | cut-order optimiser options, remove overlaps, start-point choice, cut selected only |
-| Output                |   35% | GRBL G-code (M3/M4, origin flip, bounds refusal), frame, job origin (absolute / user origin / current position, 9-point anchor) | GRBL 0.9 variants, Smoothieware/Marlin, Ruida/Trocen/TopWisdom, galvo, rotary |
-| Machine control       |   45% | persistent link: status/position, jog, home, unlock, set/go to origin, pause/resume, stop, console, streaming with progress, simulator | machine settings ($$) editor, jog by dragging on canvas, camera, auto-reconnect, run-from-line |
+| Drawing tools         |  70% | rectangle (rounded), ellipse, line, polygon, star, editable text (stroke font or filled outline fonts with kerning, text on a path), grid/circular arrays, groups, join, boolean ops, offset, node editing, pen/Bézier tool, create by numbers; move, resize, rotate, flip, align, distribute | vertical/RTL layout controls, font fallback, weld/trim tools beyond booleans |
+| Import                |  55% | SVG, DXF (basic entities), raster images with thumbnails, tone adjustments, crop (with canvas handles), resample, sharpen, trace to vectors | AI/PDF/EPS, DXF splines/ellipses/text/blocks, curve-fitted and colour tracing, SVG text/images |
+| Layers & cut settings |  75% | 16 layers; line, fill, fill+line, image; speed, power, passes, interval, kerf offset, tabs/bridges, lead-in/out, perforation, cross-hatch, overscan, power ramp, Z offset and per-pass step; seven dither modes; per-shape overrides; presets (per project and shared) and starter presets; material test grid | sub-layers, a measured material library |
+| Toolpath planning     |  60% | inner-first, nearest neighbour, duplicate removal, order by group, chosen start point, scan fill, dithered raster, kerf, tabs, lead-in/out, estimate by layer, cut selected only | overlapping-segment removal, acceleration-aware times |
+| Output                |  55% | GRBL G-code (M3/M4, origin flip, bounds refusal), Marlin-laser and Smoothieware dialects (untested on hardware), Z moves, rotary Y scaling, frame, job origin (absolute / user origin / current position, 9-point anchor), run from a chosen line | Ruida/Trocen/TopWisdom, galvo, chuck rotary |
+| Machine control       |  65% | persistent link: status/position, jog, home, unlock, set/go to origin, pause/resume, stop, console, streaming with progress, simulator, controller settings (the dollar-dollar report) editor, head shown on the canvas and click to move, auto-reconnect, Web Serial in the browser | camera capture, verification on real hardware |
 | Preview               |   45% | toolpath preview with travel toggle, timeline playback and scrubbing with a head marker, time per layer | acceleration-aware times, speed/power colouring, 3D                                                    |
-| Files & workflow      |   40% | native JSON project, atomic save, undo/redo (200), autosave and crash recovery, unsaved-changes prompts, dirty title | recent files, templates, material library, print-and-cut, camera alignment, scripting |
-| UI                    |  35% | menus, tool bar, canvas pan/zoom/grid, rulers, guides, snapping (grid, edges/centres, guides), Shift constraints, layer palette, inspector, groups, undo | keyboard map editor, i18n, theming, accessibility, layer list reorder by drag |
-| Robustness            |   60% | no-panic lints, rollback on failure, hostile-input tests, safe streaming | fuzzing harnesses, data recovery, soak tests on real hardware                                            |
+| Files & workflow      |  65% | native JSON project, atomic save, undo/redo (200), autosave with three generations and read-back checks, crash recovery, unsaved-changes prompts, recent files, print-and-cut two-mark alignment, MCP server and JSON scripting, browser build with file open/save | templates, scripting UI |
+| UI                    |  45% | menus, tool bar, canvas pan/zoom/grid, rulers, guides, snapping (grid, edges/centres, vertices, guides), Shift constraints, layer palette, inspector, groups, undo, web build | keyboard map editor, i18n, theming, accessibility, layer list reorder by drag |
+| Robustness            |  75% | no-panic lints, rollback on failure, hostile-input tests, mutation fuzz tests plus cargo-fuzz targets (found two real bugs), real-time-byte refusal in G-code, safe streaming | soak tests on real hardware, running the coverage-guided fuzzers |
 
 **Not yet verified on real hardware.** Everything on the machine side has been exercised against the
 built-in simulator and unit tests only. Treat the first run on a real machine as a test: use Frame,
@@ -25,7 +25,7 @@ low power, and stay present.
 
 ## Evidence of what ships
 
-- 286 tests across the workspace (`cargo test --workspace`); gates in `cargo xtask ci`.
+- 473 tests across the workspace (`cargo test --workspace`); gates in `cargo xtask ci`.
 - End-to-end: `lightfoundry-cli gcode demo.svg` → G-code; the desktop app was driven under Xvfb
   (draw with each tool, generate, start on the simulator, progress and completion shown; jog pad
   clicks moved the simulated head the expected way and the console logged each `$J=` line).
