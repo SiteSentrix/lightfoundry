@@ -3,11 +3,11 @@ use lightfoundry_doc::Origin;
 use lightfoundry_geom::{Affine, Point, Rect};
 use serde_json::json;
 
-use crate::nodes_ui;
 use crate::snap::{self, SnapSettings, SnapTargets};
 use crate::theme::{on_dark, parse_hex};
 use crate::view::View;
 use crate::{LightFoundryApp, Tool};
+use crate::{nodes_ui, timeline_ui};
 
 /// Pointer-distance (screen points) within which handles and edges are hit.
 pub(crate) const HIT_PX: f32 = 6.0;
@@ -484,17 +484,26 @@ fn crosses(pts: &[Pos2], clip: egui::Rect) -> bool {
 }
 
 fn draw_preview(app: &LightFoundryApp, painter: &egui::Painter, view: &View) {
+    let now = app.player.position.and_then(|t| app.preview.timeline.at(t));
     for seg in &app.preview.segments {
-        if seg.power <= 0.0 && !app.show_travel {
+        let travel = seg.power <= 0.0;
+        if travel && !app.show_travel {
             continue;
         }
-        let stroke = if seg.power <= 0.0 {
-            Stroke::new(1.0, app.tokens.travel)
-        } else {
-            let base = app.session.doc.layer(seg.layer).map_or(Color32::WHITE, |l| on_dark(parse_hex(&l.color)));
-            Stroke::new(1.0, base.gamma_multiply(0.4 + 0.6 * (seg.power / 100.0).clamp(0.0, 1.0)))
+        let (stroke, end) = match timeline_ui::reveal(seg, now) {
+            timeline_ui::Reveal::Hidden => {
+                // The part of the job still to come stays visible, faintly.
+                (Stroke::new(1.0, app.tokens.travel.gamma_multiply(0.25)), seg.b)
+            }
+            timeline_ui::Reveal::Full => (preview_stroke(app, seg), seg.b),
+            timeline_ui::Reveal::Partial(f) => (preview_stroke(app, seg), seg.a.lerp(seg.b, f64::from(f))),
         };
-        painter.line_segment([view.to_screen(seg.a), view.to_screen(seg.b)], stroke);
+        painter.line_segment([view.to_screen(seg.a), view.to_screen(end)], stroke);
+    }
+    if let Some(now) = now
+        && let Some(head) = timeline_ui::head_position(&app.preview.segments, now)
+    {
+        timeline_ui::draw_head(painter, view.to_screen(head), app.tokens.selection);
     }
     if let Some(err) = &app.preview.error {
         painter.text(
@@ -513,6 +522,14 @@ fn draw_preview(app: &LightFoundryApp, painter: &egui::Painter, view: &View) {
             app.tokens.travel,
         );
     }
+}
+
+fn preview_stroke(app: &LightFoundryApp, seg: &crate::geometry::PreviewSegment) -> Stroke {
+    if seg.power <= 0.0 {
+        return Stroke::new(1.0, app.tokens.travel);
+    }
+    let base = app.session.doc.layer(seg.layer).map_or(Color32::WHITE, |l| on_dark(parse_hex(&l.color)));
+    Stroke::new(1.0, base.gamma_multiply(0.4 + 0.6 * (seg.power / 100.0).clamp(0.0, 1.0)))
 }
 
 fn draw_overlays(

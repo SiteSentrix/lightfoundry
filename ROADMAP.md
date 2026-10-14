@@ -87,3 +87,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   Nodes tool (drag nodes and handles, double-click a segment to insert, Delete) and Pen tool
   (click corners, drag out smooth nodes, click the first node to close, Enter/double-click/right
   click to finish, Escape to cancel), both snapping. 319 tests.
+- **2026-10-14 — timeline preview.** `toolpath::Timeline` (per-operation start, per-pass time,
+  per-layer totals, `at(t)` to find operation/pass/offset; `estimate` is now derived from it and
+  carries the head position across operations). `job.estimate` also returns per-layer times. The
+  preview has a bottom bar with Play/Pause, Show all, a scrubber, playback speed (auto = 30 s per
+  job) and a per-layer time breakdown; done moves are drawn bright, the rest faintly, with a head
+  marker. Tests: timeline maths, reveal/head logic, playback to the end.
+

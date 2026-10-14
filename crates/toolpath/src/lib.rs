@@ -6,10 +6,12 @@ mod fill;
 mod order;
 mod raster;
 mod tabs;
+mod timeline;
 
 pub use fill::fill_segments;
 pub use order::order_polylines;
 pub use raster::{Grid, dither, sample_grid};
+pub use timeline::{LayerTime, Moment, OpTime, Timeline, move_seconds};
 
 use lightfoundry_doc::{Document, Layer, LayerId, LayerMode, Shape, ShapeKind};
 use lightfoundry_geom::{Point, Polyline, Rect, bounds_of_polylines};
@@ -209,28 +211,8 @@ pub struct Estimate {
 }
 
 pub fn estimate(job: &Job, rapid_speed: f64) -> Estimate {
-    let rapid = if rapid_speed.is_finite() && rapid_speed > 0.0 { rapid_speed } else { 6000.0 };
-    let mut e = Estimate::default();
-    for op in &job.ops {
-        let mut at = Point::ORIGIN;
-        for _ in 0..op.passes.max(1) {
-            for m in &op.moves {
-                let d = at.distance(m.target());
-                match m {
-                    Move::Travel(_) => {
-                        e.travel_mm += d;
-                        e.seconds += d / (rapid / 60.0);
-                    }
-                    Move::Cut { .. } => {
-                        e.cut_mm += d;
-                        e.seconds += d / (op.speed.max(1.0) / 60.0);
-                    }
-                }
-                at = m.target();
-            }
-        }
-    }
-    e
+    let t = Timeline::new(job, rapid_speed);
+    Estimate { seconds: t.total, cut_mm: t.cut_mm(), travel_mm: t.travel_mm() }
 }
 
 fn validate(layer: &Layer) -> Result<(), PlanError> {

@@ -4,7 +4,7 @@
 use lightfoundry_doc::{LayerId, ShapeId};
 use lightfoundry_engine::Session;
 use lightfoundry_geom::{Point, Polyline, Rect, bounds_of_polylines};
-use lightfoundry_toolpath::{Move, plan};
+use lightfoundry_toolpath::{Move, Timeline, move_seconds, plan};
 
 /// Preview segments drawn at most; huge raster jobs are truncated for display only.
 pub const MAX_PREVIEW_SEGMENTS: usize = 400_000;
@@ -69,6 +69,10 @@ pub struct PreviewSegment {
     pub layer: LayerId,
     /// 0 for travel and zero-power moves.
     pub power: f32,
+    /// Index of the planned operation, and when in a pass of it the move starts and ends (seconds).
+    pub op: u32,
+    pub t0: f32,
+    pub t1: f32,
 }
 
 #[derive(Default)]
@@ -77,6 +81,7 @@ pub struct PreviewCache {
     pub segments: Vec<PreviewSegment>,
     pub error: Option<String>,
     pub truncated: bool,
+    pub timeline: Timeline,
 }
 
 impl PreviewCache {
@@ -88,12 +93,18 @@ impl PreviewCache {
         self.segments.clear();
         self.error = None;
         self.truncated = false;
+        self.timeline = Timeline::default();
         match plan(&s.doc) {
             Err(e) => self.error = Some(e.to_string()),
             Ok(job) => {
+                let rapid = s.doc.machine.rapid_speed;
+                self.timeline = Timeline::new(&job, rapid);
                 // The head's real start position is unknown, so the first move draws nothing.
                 let mut at: Option<Point> = None;
-                'ops: for op in &job.ops {
+                // Time follows the same path as the timeline model: from the origin, across operations.
+                let mut timed = Point::ORIGIN;
+                'ops: for (index, op) in job.ops.iter().enumerate() {
+                    let mut local = 0.0_f64;
                     for m in &op.moves {
                         if self.segments.len() >= MAX_PREVIEW_SEGMENTS {
                             self.truncated = true;
@@ -103,9 +114,13 @@ impl PreviewCache {
                             Move::Travel(_) => 0.0,
                             Move::Cut { power, .. } => *power as f32,
                         };
+                        let dt = move_seconds(timed, m, op.speed, rapid);
                         if let Some(a) = at {
-                            self.segments.push(PreviewSegment { a, b: m.target(), layer: op.layer, power });
+                            let (t0, t1) = (local as f32, (local + dt) as f32);
+                            self.segments.push(PreviewSegment { a, b: m.target(), layer: op.layer, power, op: index as u32, t0, t1 });
                         }
+                        local += dt;
+                        timed = m.target();
                         at = Some(m.target());
                     }
                 }
