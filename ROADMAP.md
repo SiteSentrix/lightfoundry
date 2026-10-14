@@ -323,3 +323,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   messages translated too (`i18n::tr_message`). `cargo xtask messages` scans the sources for
   `#[error]` texts and `EngineError` constructors into `crates/ui-egui/engine-messages.txt` (about
   135 templates), `cargo xtask ci` fails if it is stale, and "Save translation template" includes them.
+- **2026-10-14 — message list verified.** A test runs every command with hostile parameters and checks
+  each error against the shipped template list (all covered; serde's own parameter messages are
+  covered by the wrapper entry `bad parameters: {0}`). The catalog is now per thread (the interface
+  has one), so tests that load different catalogs cannot disturb each other.
