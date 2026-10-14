@@ -140,3 +140,51 @@ mod glyph_table_tests {
         assert_eq!(unique.len(), 26);
     }
 }
+
+mod vertical_tests {
+    use super::*;
+
+    fn vertical(text: &str, style: &TextStyle) -> TextLayout {
+        layout_vertical(text, style, |c| layout(c, style)).unwrap()
+    }
+
+    #[test]
+    fn letters_stack_downward_in_one_column() {
+        let s = TextStyle { height: 10.0, ..TextStyle::default() };
+        let b = vertical("HHH", &s).path.bounding_box();
+        assert!(b.height() > 2.0 * 10.0 * 1.5, "three rows tall: {b:?}");
+        assert!(b.width() < 10.0, "one column wide: {b:?}");
+    }
+
+    #[test]
+    fn the_first_line_is_the_rightmost_column() {
+        let s = TextStyle::default();
+        let both = vertical("I\nH", &s);
+        let b = both.path.bounding_box();
+        let first = vertical("I", &s).path.bounding_box();
+        assert!(b.width() > first.width() * 2.0, "two columns: {b:?}");
+        // The I is narrow and sits in the right column: its centre is right of the H's.
+        let h = vertical("H", &s).path.bounding_box();
+        assert!(first.center().x - h.center().x < 1e-9, "each is centred on its own column alone");
+        assert!(b.x1 > h.x1, "the columns do not overlap");
+    }
+
+    #[test]
+    fn spaces_leave_a_gap_and_unsupported_characters_are_reported() {
+        let s = TextStyle::default();
+        let tight = vertical("HH", &s).path.bounding_box().height();
+        let spaced = vertical("H H", &s).path.bounding_box().height();
+        assert!(spaced > tight);
+        assert!(!vertical("\u{4e2d}", &s).unsupported.is_empty());
+    }
+
+    #[test]
+    fn hostile_input_is_refused_or_harmless() {
+        let s = TextStyle::default();
+        assert_eq!(layout_vertical("A", &TextStyle { height: f64::NAN, ..s.clone() }, |c| layout(c, &s)), Err(TextError::BadHeight));
+        assert_eq!(layout_vertical("A", &TextStyle { line_spacing: -1.0, ..s.clone() }, |c| layout(c, &s)), Err(TextError::BadSpacing));
+        assert_eq!(layout_vertical(&"A".repeat(MAX_CHARS + 1), &s, |c| layout(c, &s)), Err(TextError::TooLong));
+        assert!(layout_vertical("", &s, |c| layout(c, &s)).unwrap().path.elements().is_empty());
+        assert!(layout_vertical("\n\n", &s, |c| layout(c, &s)).is_ok());
+    }
+}

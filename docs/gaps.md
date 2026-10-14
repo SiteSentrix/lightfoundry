@@ -7,7 +7,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 |----|--------------------------------------------------------------------------------------|---------------------------------------------------------------------|
 | 1  | Verify on real GRBL hardware (jog, frame, short cut), fix what it finds              | Everything machine-side is only simulator-tested                    |
 | 2  | Resume after a power loss with a saved job position (run-from-line, auto-reconnect and the $$ editor are done) | Day-to-day machine ownership                                        |
-| 4  | Vertical and right-to-left text layout controls; font fallback when a font lacks a character (kerning, ligatures and shaping are done) | Typography beyond plain filled text |
+| 4  | Mixed left-to-right/right-to-left lines (bidi) and font fallback when a font lacks a character (kerning, ligatures, shaping, single-direction right-to-left runs and vertical stacking are done) | Typography beyond plain filled text |
 | 8  | Per-shape cut order overrides (order by group, a chosen start point and overlapping-edge removal are done) | Quality and time |
 | 9  | Least-squares curve fitting and colour-aware tracing (gentle-bend smoothing is done) (tone, crop with canvas handles, resample, sharpen, seven dither modes and basic tracing are done) | Photo engraving results                                  |
 | 10 | Ramp along fills and images (tabs, lead-in/out, perforation, outline ramp, overscan and speed-dependent overscan are done) | Clean cuts of special materials                                     |

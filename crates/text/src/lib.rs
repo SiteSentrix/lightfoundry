@@ -111,6 +111,49 @@ pub fn layout(text: &str, style: &TextStyle) -> Result<TextLayout, TextError> {
     Ok(TextLayout { path, unsupported })
 }
 
+/// Stacks the letters top to bottom, one column per line of text with the first line rightmost (the
+/// way vertical East Asian text runs). `one` lays out a single character, so this works with the
+/// stroke font and with outline fonts alike. Each letter is centred in its column; alignment does
+/// not apply. `letter_spacing` widens the gap between rows and `line_spacing` that between columns.
+pub fn layout_vertical(text: &str, style: &TextStyle, mut one: impl FnMut(&str) -> Result<TextLayout, TextError>) -> Result<TextLayout, TextError> {
+    use kurbo::{Affine, Shape};
+    if !(style.height.is_finite() && (MIN_HEIGHT_MM..=MAX_HEIGHT_MM).contains(&style.height)) {
+        return Err(TextError::BadHeight);
+    }
+    let ok = |v: f64| v.is_finite() && (0.0..=10.0).contains(&v);
+    if !(ok(style.letter_spacing) && ok(style.line_spacing)) {
+        return Err(TextError::BadSpacing);
+    }
+    if text.chars().count() > MAX_CHARS {
+        return Err(TextError::TooLong);
+    }
+    let columns: Vec<&str> = text.lines().collect();
+    let row_step = style.height * (1.0 + 0.5 * style.letter_spacing);
+    let col_step = style.height * (0.5 + style.line_spacing);
+    let mut path = BezPath::new();
+    let mut unsupported: Vec<char> = Vec::new();
+    for (c, line) in columns.iter().enumerate() {
+        let centre_x = (columns.len() - 1 - c) as f64 * col_step + col_step / 2.0;
+        for (r, ch) in line.chars().enumerate() {
+            let mut buf = [0u8; 4];
+            let laid = one(ch.encode_utf8(&mut buf))?;
+            for u in laid.unsupported {
+                if !unsupported.contains(&u) {
+                    unsupported.push(u);
+                }
+            }
+            if laid.path.elements().is_empty() {
+                continue;
+            }
+            let b = laid.path.bounding_box();
+            let mut glyph = laid.path;
+            glyph.apply_affine(Affine::translate((centre_x - (b.x0 + b.x1) / 2.0, r as f64 * row_step)));
+            path.extend(glyph);
+        }
+    }
+    Ok(TextLayout { path, unsupported })
+}
+
 /// Gap between letters in glyph units.
 pub(crate) const GAP: f64 = 2.0;
 

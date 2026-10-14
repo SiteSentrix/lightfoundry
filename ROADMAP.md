@@ -282,3 +282,6 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — overscan from speed.** Machine > Overscan "from speed" (`machine.set`
   `overscan_by_speed`) sizes the run-up and run-out of fills and pictures as v²/2a from the layer's
   speed and the machine acceleration, wherever a layer has no overscan of its own; capped at 50 mm.
+- **2026-10-14 — vertical text.** Text objects can be stacked top to bottom (`vertical` on
+  `text.create`/`text.edit`, "Vertical" in the text inspector): one column per line, first line
+  rightmost, each letter centred in its column; works with the stroke font and outline fonts.

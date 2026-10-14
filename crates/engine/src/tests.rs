@@ -1302,6 +1302,23 @@ mod import_tests {
     }
 
     #[test]
+    fn vertical_text_is_a_toggle_that_changes_the_shape_and_undoes() {
+        let mut s = Session::new();
+        let id = s.execute("text.create", &json!({"text": "ABC", "height": 10})).unwrap()["id"].as_u64().unwrap();
+        let size = |s: &Session| {
+            let b = s.doc.shape(id).unwrap().world_bounds().unwrap();
+            (b.width(), b.height())
+        };
+        let (w, h) = size(&s);
+        assert!(w > h);
+        s.execute("text.edit", &json!({"id": id, "vertical": true})).unwrap();
+        let (w2, h2) = size(&s);
+        assert!(h2 > w2, "stacked: {w2} x {h2}");
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(size(&s), (w, h));
+    }
+
+    #[test]
     fn overscan_by_speed_is_a_machine_switch_that_undoes() {
         let mut s = Session::new();
         s.execute("machine.set", &json!({"overscan_by_speed": true, "acceleration": 500})).unwrap();

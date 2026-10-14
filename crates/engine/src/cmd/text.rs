@@ -13,7 +13,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Text",
         menu: "Create",
         shortcut: Some("T"),
-        params_doc: "{text, x, y, height? (cap height mm, default 10), letter_spacing?, line_spacing?, align?: left|center|right, layer?}  (single-line stroke font), font? (path to a .ttf/.otf file: draws filled outlines; use a Fill layer to engrave them)",
+        params_doc: "{text, x, y, height? (cap height mm, default 10), letter_spacing?, line_spacing?, align?: left|center|right, layer?}  (single-line stroke font), font? (path to a .ttf/.otf file: draws filled outlines; use a Fill layer to engrave them), vertical? (stack letters top to bottom, one column per line, first line rightmost)",
         mutates: true,
         run: create,
     },
@@ -31,7 +31,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Edit Text",
         menu: "Edit",
         shortcut: None,
-        params_doc: "{id? (default: the selected text), text?, height?, letter_spacing?, line_spacing?, align?, font? (path, or \"\" for the built-in font)}",
+        params_doc: "{id? (default: the selected text), text?, height?, letter_spacing?, line_spacing?, align?, font? (path, or \"\" for the built-in font), vertical?}",
         mutates: true,
         run: edit,
     },
@@ -49,6 +49,7 @@ struct CreateParams {
     line_spacing: Option<f64>,
     align: Option<TextAlign>,
     font: Option<String>,
+    vertical: Option<bool>,
     #[serde(default)]
     layer: LayerId,
 }
@@ -63,6 +64,7 @@ fn create(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         line_spacing: p.line_spacing.unwrap_or(defaults.line_spacing),
         align: p.align.unwrap_or(defaults.align),
         font: p.font.filter(|f| !f.is_empty()),
+        vertical: p.vertical.unwrap_or(defaults.vertical),
     };
     let (path, unsupported) = generate(&p.text, &settings)?;
     let name = p.text.lines().next().unwrap_or("Text").chars().take(24).collect::<String>();
@@ -89,6 +91,7 @@ struct EditParams {
     line_spacing: Option<f64>,
     align: Option<TextAlign>,
     font: Option<String>,
+    vertical: Option<bool>,
 }
 
 fn edit(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
@@ -112,6 +115,7 @@ fn edit(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     if let Some(f) = p.font {
         new_style.font = (!f.is_empty()).then_some(f);
     }
+    new_style.vertical = p.vertical.unwrap_or(new_style.vertical);
     let new_content = p.text.unwrap_or_else(|| content.clone());
     let (new_path, unsupported) = generate(&new_content, &new_style)?;
     *content = new_content;
@@ -134,14 +138,13 @@ pub(super) fn generate(text: &str, s: &TextSettings) -> Result<(lightfoundry_geo
             TextAlign::Right => Align::Right,
         },
     };
-    let l = match &s.font {
-        Some(path) => {
-            let data = read_font(path)?;
-            lightfoundry_text::layout_outline(&data, text, &style)
-        }
-        None => layout(text, &style),
-    }
-    .map_err(|e| EngineError::BadParams(e.to_string()))?;
+    let font = s.font.as_deref().map(read_font).transpose()?;
+    let one = |t: &str, st: &TextStyle| match &font {
+        Some(data) => lightfoundry_text::layout_outline(data, t, st),
+        None => layout(t, st),
+    };
+    let l = if s.vertical { lightfoundry_text::layout_vertical(text, &style, |c| one(c, &style)) } else { one(text, &style) }
+        .map_err(|e| EngineError::BadParams(e.to_string()))?;
     Ok((l.path, l.unsupported))
 }
 
