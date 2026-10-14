@@ -32,7 +32,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Trace Image to Vectors",
         menu: "Edit",
         shortcut: None,
-        params_doc: "{id?, threshold? (0..255, default 128: pixels darker than this are traced, after the image's tone adjustments), tolerance? (pixels, default 1), min_area? (pixels squared, default 4), layer?, keep_image? (default true), smooth? (default false: curves instead of straight steps)}  — adds a path shape that follows the dark areas, on top of the picture",
+        params_doc: "{id?, threshold? (0..255, default 128: pixels darker than this are traced, after the image's tone adjustments), tolerance? (pixels, default 1), min_area? (pixels squared, default 4), layer?, keep_image? (default true), smooth? (default false: curves instead of straight steps), levels? (1..8, default 1: that many nested outlines for light-to-dark tonal bands)}  — adds a path shape that follows the dark areas, on top of the picture",
         mutates: true,
         run: trace,
     },
@@ -207,6 +207,13 @@ struct TraceParams {
     /// Turn gentle bends into curves (corners sharper than 60 degrees stay corners).
     #[serde(default)]
     smooth: bool,
+    /// Tonal bands: this many outlines, each around pixels darker than a share of the threshold.
+    #[serde(default = "one")]
+    levels: u32,
+}
+
+fn one() -> u32 {
+    1
 }
 
 fn default_threshold() -> f64 {
@@ -225,6 +232,9 @@ fn yes() -> bool {
     true
 }
 
+/// Most tonal bands one trace may make.
+const MAX_TRACE_LEVELS: u32 = 8;
+
 /// Bends sharper than this stay corners when tracing with `smooth`.
 const SMOOTH_CORNER_DEG: f64 = 60.0;
 
@@ -237,16 +247,8 @@ fn trace(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let shape = s.doc.shape(id).ok_or_else(|| EngineError::NotFound(format!("shape {id} does not exist")))?;
     let ShapeKind::Image { image, width_mm, height_mm, adjust } = &shape.kind else { return Err(not_an_image(id)) };
     let (w, h) = (image.width as usize, image.height as usize);
-    let loops = lightfoundry_toolpath::trace(
-        w,
-        h,
-        |x, y| image.gray.get(y * w + x).is_some_and(|g| adjust.apply(f32::from(*g)) < threshold as f32),
-        tolerance,
-        min_area,
-    )
-    .ok_or_else(|| EngineError::BadParams("that picture is too large or too detailed to trace".into()))?;
-    if loops.is_empty() {
-        return Err(EngineError::BadParams("nothing in the picture is darker than the threshold".into()));
+    if !(1..=MAX_TRACE_LEVELS).contains(&p.levels) {
+        return Err(EngineError::BadParams(format!("levels must be between 1 and {MAX_TRACE_LEVELS}")));
     }
     let layer = p.layer.unwrap_or(shape.layer);
     if s.doc.layer(layer).is_none() {
@@ -255,19 +257,40 @@ fn trace(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     // Pixel units to the picture's own millimetres, then wherever the picture sits.
     let to_local = Affine::scale_non_uniform(*width_mm / w as f64, *height_mm / h as f64);
     let place = shape.transform * to_local;
-    let path = if p.smooth {
-        let subpaths = loops.iter().map(|l| lightfoundry_geom::nodes::smooth_polyline(&l.points, l.closed, SMOOTH_CORNER_DEG)).collect();
-        lightfoundry_geom::nodes::NodePath { subpaths }.to_bez()
-    } else {
-        super::pathops::polylines_to_path(&loops)
-    };
-    let mut traced = Shape::path("Traced", layer, path);
-    traced.transform = place;
-    let count = loops.len();
-    let new_id = s.doc.add_shape(traced);
+    // Lightest band first, so the darkest outlines end up on top.
+    let mut traced = Vec::new();
+    for k in 1..=p.levels {
+        let limit = (threshold * f64::from(k) / f64::from(p.levels)) as f32;
+        let loops = lightfoundry_toolpath::trace(
+            w,
+            h,
+            |x, y| image.gray.get(y * w + x).is_some_and(|g| adjust.apply(f32::from(*g)) < limit),
+            tolerance,
+            min_area,
+        )
+        .ok_or_else(|| EngineError::BadParams("that picture is too large or too detailed to trace".into()))?;
+        if loops.is_empty() {
+            continue;
+        }
+        let path = if p.smooth {
+            let subpaths = loops.iter().map(|l| lightfoundry_geom::nodes::smooth_polyline(&l.points, l.closed, SMOOTH_CORNER_DEG)).collect();
+            lightfoundry_geom::nodes::NodePath { subpaths }.to_bez()
+        } else {
+            super::pathops::polylines_to_path(&loops)
+        };
+        let name = if p.levels == 1 { "Traced".to_string() } else { format!("Traced {k}/{}", p.levels) };
+        let mut shape = Shape::path(name, layer, path);
+        shape.transform = place;
+        traced.push((shape, loops.len()));
+    }
+    if traced.is_empty() {
+        return Err(EngineError::BadParams("nothing in the picture is darker than the threshold".into()));
+    }
+    let count: usize = traced.iter().map(|(_, n)| n).sum();
+    let ids: Vec<ShapeId> = traced.into_iter().map(|(shape, _)| s.doc.add_shape(shape)).collect();
     if !p.keep_image {
         s.doc.shapes.retain(|x| x.id != id);
     }
-    s.selection = vec![new_id];
-    Ok(json!({ "id": new_id, "outlines": count }))
+    s.selection = ids.clone();
+    Ok(json!({ "id": ids.last(), "ids": ids, "outlines": count }))
 }
