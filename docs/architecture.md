@@ -88,6 +88,15 @@ command and rolls the document back. Importers and parsers cap input sizes and c
 `command_sweep_never_panics` test fires hostile parameters at every registered command and checks
 document invariants afterwards.
 
+## Autosave and recovery
+
+While the document has unsaved changes the UI writes a recovery copy (`file.autosave`, through the
+same atomic writer as Save) at most every 20 s, and schedules a repaint so an idle window still gets
+there. The copy is removed once the work is saved or knowingly discarded. A leftover copy found at
+startup is offered back (`file.recover` reopens it untitled and unsaved) and is not overwritten
+while the question is open. The location comes from the `Platform` (the desktop app uses the
+per-user data folder).
+
 ## UI
 
 `ui-egui` is a thin front end: tools turn gestures into commands (`shape.*`, `edit.move`,

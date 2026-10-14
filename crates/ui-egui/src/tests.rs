@@ -51,6 +51,221 @@ impl Harness {
     }
 }
 
+/// A platform with a private recovery folder, and canned answers for dialogs.
+struct RecoveryPlatform {
+    file: std::path::PathBuf,
+    open_answer: Option<std::path::PathBuf>,
+}
+
+impl Platform for RecoveryPlatform {
+    fn pick_open(&self, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+        self.open_answer.clone()
+    }
+
+    fn pick_save(&self, _: &str, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+        None
+    }
+
+    fn recovery_file(&self) -> Option<std::path::PathBuf> {
+        Some(self.file.clone())
+    }
+
+    fn clear_recovery(&self) {
+        let _ = std::fs::remove_file(&self.file);
+    }
+
+    fn serial_ports(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn open_serial(&self, _: &str) -> Result<Box<dyn lightfoundry_device::Transport + Send>, String> {
+        Err("none".into())
+    }
+}
+
+fn temp_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("lf-ui-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+fn harness_with(platform: RecoveryPlatform) -> Harness {
+    let mut h = Harness { ctx: egui::Context::default(), app: LightFoundryApp::new(Session::new(), Box::new(platform)), time: 0.0 };
+    h.frame(vec![]);
+    h.frame(vec![]);
+    h
+}
+
+mod recovery_tests {
+    use super::*;
+
+    #[test]
+    fn changes_are_autosaved_and_the_copy_is_removed_once_saved() {
+        let dir = temp_dir("autosave");
+        let file = dir.join("recovery.lightfoundry");
+        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None });
+        h.app.autosave_interval = Duration::ZERO;
+        h.frame(vec![]);
+        assert!(!file.exists(), "nothing to save yet");
+        h.app.run("shape.rectangle", json!({"width": 20, "height": 10}));
+        h.frame(vec![]);
+        assert!(file.exists(), "a changed document is written to the recovery file");
+        let copy = lightfoundry_format::load(&file).unwrap();
+        assert_eq!(copy.shapes.len(), 1);
+        h.app.run("shape.ellipse", json!({"cx": 50, "cy": 50, "rx": 5, "ry": 5}));
+        h.frame(vec![]);
+        assert_eq!(lightfoundry_format::load(&file).unwrap().shapes.len(), 2, "it follows later edits");
+        let saved = dir.join("saved.lightfoundry");
+        h.app.run("file.save", json!({"path": saved}));
+        h.frame(vec![]);
+        assert!(!file.exists(), "saving removes the recovery copy");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_idle_window_still_gets_a_repaint_scheduled_so_autosave_can_fire() {
+        let dir = temp_dir("repaint");
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("recovery.lightfoundry"), open_answer: None });
+        h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
+        h.app.last_autosave = Instant::now(); // pretend we just autosaved: the next one is due in the future
+        h.time += 0.016;
+        let input = RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), SCREEN)), time: Some(h.time), ..Default::default() };
+        let app = &mut h.app;
+        let output = h.ctx.run_ui(input, |ui| app.ui(ui));
+        let delay = output.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.repaint_delay).unwrap_or(Duration::MAX);
+        output.drop_without_applying_deltas();
+        assert!(delay <= AUTOSAVE_INTERVAL, "a repaint must be requested within the autosave interval, got {delay:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_leftover_copy_is_offered_and_recovered_as_unsaved_work() {
+        let dir = temp_dir("recover");
+        let file = dir.join("recovery.lightfoundry");
+        let mut previous = Session::new();
+        previous.execute("shape.rectangle", &json!({"width": 30, "height": 30})).unwrap();
+        previous.execute("file.autosave", &json!({"path": file})).unwrap();
+
+        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None });
+        assert!(h.app.pending_recovery.is_some(), "found at startup");
+        h.app.autosave_interval = Duration::ZERO;
+        h.app.run("shape.line", json!({"x1": 0, "y1": 0, "x2": 5, "y2": 5})); // typing behind the prompt must not clobber the copy
+        h.frame(vec![]);
+        assert_eq!(lightfoundry_format::load(&file).unwrap().shapes.len(), 1, "the previous session's copy is untouched");
+
+        h.app.answer_recovery(true);
+        assert!(h.app.pending_recovery.is_none());
+        assert_eq!(h.app.session.doc.shapes.len(), 1);
+        assert!(h.app.session.dirty && h.app.session.path.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discarding_the_offer_removes_the_copy() {
+        let dir = temp_dir("discard");
+        let file = dir.join("recovery.lightfoundry");
+        Session::new().execute("file.autosave", &json!({"path": file})).unwrap();
+        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None });
+        assert!(h.app.pending_recovery.is_some());
+        h.app.answer_recovery(false);
+        assert!(h.app.pending_recovery.is_none() && !file.exists());
+        assert!(h.app.session.doc.shapes.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn corrupt_recovery_files_are_reported_not_fatal() {
+        let dir = temp_dir("corrupt");
+        let file = dir.join("recovery.lightfoundry");
+        std::fs::write(&file, b"half a project").unwrap();
+        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None });
+        h.app.answer_recovery(true);
+        assert!(matches!(&h.app.status, Some((_, true))), "the failure is shown");
+        assert!(h.app.session.doc.shapes.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+mod unsaved_changes_tests {
+    use super::*;
+
+    #[test]
+    fn new_on_a_clean_document_just_happens_but_a_dirty_one_asks() {
+        let dir = temp_dir("confirm");
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None });
+        h.app.request(PendingAction::New);
+        assert!(h.app.pending_action.is_none(), "nothing to lose");
+        h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
+        h.app.request(PendingAction::New);
+        assert_eq!(h.app.pending_action, Some(PendingAction::New));
+        assert_eq!(h.app.session.doc.shapes.len(), 1, "the document is untouched while the question is open");
+        h.frame(vec![]); // the dialog renders
+        assert!(h.app.has_modal());
+        h.app.answer_unsaved(Answer::Cancel);
+        assert!(h.app.pending_action.is_none() && h.app.session.doc.shapes.len() == 1, "cancel changes nothing");
+        h.app.request(PendingAction::New);
+        h.app.answer_unsaved(Answer::Save); // no file dialog answer and no path: nothing gets saved
+        assert_eq!(h.app.pending_action, Some(PendingAction::New), "a save that did not happen keeps the question open");
+        assert_eq!(h.app.session.doc.shapes.len(), 1);
+        h.app.answer_unsaved(Answer::Discard);
+        assert!(h.app.session.doc.shapes.is_empty() && h.app.pending_action.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_first_then_continuing_works_when_the_document_has_a_path() {
+        let dir = temp_dir("savefirst");
+        let target = dir.join("work.lightfoundry");
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None });
+        h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
+        h.app.run("file.save", json!({"path": target}));
+        h.app.run("shape.rectangle", json!({"width": 4, "height": 4}));
+        h.app.request(PendingAction::New);
+        h.app.answer_unsaved(Answer::Save);
+        assert!(h.app.session.doc.shapes.is_empty(), "the new document replaced it");
+        assert_eq!(lightfoundry_format::load(&target).unwrap().shapes.len(), 2, "after the changes were saved");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn shortcuts_are_blocked_while_a_question_is_open() {
+        let dir = temp_dir("modal");
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None });
+        h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
+        h.app.request(PendingAction::New);
+        h.frame(vec![Event::Key { key: egui::Key::Delete, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+        assert_eq!(h.app.session.doc.shapes.len(), 1, "Delete must not act behind the dialog");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_title_shows_the_name_and_an_unsaved_marker() {
+        let mut s = Session::new();
+        assert_eq!(window_title(&s), "Untitled — LightFoundry");
+        s.execute("shape.rectangle", &json!({"width": 5, "height": 5})).unwrap();
+        assert_eq!(window_title(&s), "*Untitled — LightFoundry");
+        s.path = Some("/tmp/boxes.lightfoundry".into());
+        s.dirty = false;
+        assert_eq!(window_title(&s), "boxes.lightfoundry — LightFoundry");
+    }
+
+    #[test]
+    fn a_close_request_on_unsaved_work_becomes_a_question() {
+        let dir = temp_dir("close");
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None });
+        h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
+        h.time += 0.016;
+        let mut input = RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), SCREEN)), time: Some(h.time), ..Default::default() };
+        input.viewports.entry(egui::ViewportId::ROOT).or_default().events.push(egui::ViewportEvent::Close);
+        let app = &mut h.app;
+        h.ctx.run_ui(input, |ui| app.ui(ui)).drop_without_applying_deltas();
+        assert_eq!(h.app.pending_action, Some(PendingAction::Close));
+        assert!(!h.app.allow_close);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
 mod frame_tests {
     use super::*;
 

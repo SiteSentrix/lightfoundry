@@ -12,6 +12,7 @@ mod view;
 pub use platform::{NoPlatform, Platform};
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use lightfoundry_device::{JobState, Link, SimulatedGrbl, Snapshot};
 use lightfoundry_doc::LayerId;
@@ -71,11 +72,32 @@ pub struct LightFoundryApp {
     target: Target,
     ports: Vec<String>,
     frame_power: f64,
+    autosave_interval: Duration,
+    autosave_revision: Option<u64>,
+    last_autosave: Instant,
+    /// A recovery file found at startup that the person has not yet decided about.
+    pending_recovery: Option<PathBuf>,
+    /// An action waiting for "save changes?" to be answered.
+    pending_action: Option<PendingAction>,
+    allow_close: bool,
+    last_title: String,
 }
+
+/// Actions that would discard unsaved changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PendingAction {
+    New,
+    Open,
+    Close,
+}
+
+/// How often a changed document is written to the recovery file.
+pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(20);
 
 impl LightFoundryApp {
     pub fn new(session: Session, platform: Box<dyn Platform>) -> Self {
         let ports = platform.serial_ports();
+        let pending_recovery = platform.recovery_file().filter(|p| p.exists());
         Self {
             session,
             platform,
@@ -105,18 +127,189 @@ impl LightFoundryApp {
             target: Target::Simulator,
             ports,
             frame_power: 0.0,
+            autosave_interval: AUTOSAVE_INTERVAL,
+            autosave_revision: None,
+            last_autosave: Instant::now(),
+            pending_recovery,
+            pending_action: None,
+            allow_close: false,
+            last_title: String::new(),
         }
     }
 
     /// Draws one frame. Called from the host's `eframe::App::ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.poll_link(ui.ctx());
-        self.handle_shortcuts(ui.ctx());
+        self.autosave_tick(ui.ctx());
+        self.watch_close_and_title(ui.ctx());
+        if !self.has_modal() {
+            self.handle_shortcuts(ui.ctx());
+        }
         menus::menu_bar(self, ui);
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
         egui::Panel::left("tools").resizable(false).exact_size(84.0).show(ui, |ui| panels::toolbar(self, ui));
         egui::Panel::right("inspector").default_size(300.0).show(ui, |ui| panels::inspector(self, ui));
         egui::CentralPanel::default().show(ui, |ui| canvas::show(self, ui));
+        self.dialogs(ui.ctx());
+    }
+
+    fn has_modal(&self) -> bool {
+        self.pending_recovery.is_some() || self.pending_action.is_some()
+    }
+
+    /// Writes the recovery copy while there are unsaved changes, and removes it once they are saved.
+    fn autosave_tick(&mut self, ctx: &egui::Context) {
+        let Some(path) = self.platform.recovery_file() else { return };
+        // Until the person has decided about the previous session's copy, do not overwrite it.
+        if self.pending_recovery.is_some() {
+            return;
+        }
+        if !self.session.dirty {
+            if self.autosave_revision.take().is_some() {
+                self.platform.clear_recovery();
+            }
+            return;
+        }
+        if self.autosave_revision == Some(self.session.revision) {
+            return;
+        }
+        // egui only repaints on input; without this an idle window would never get to autosave.
+        let wait = self.autosave_interval.saturating_sub(self.last_autosave.elapsed());
+        if !wait.is_zero() {
+            ctx.request_repaint_after(wait);
+            return;
+        }
+        self.last_autosave = Instant::now();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent); // a missing folder surfaces as the save error below
+        }
+        match self.session.execute("file.autosave", &serde_json::json!({ "path": path })) {
+            Ok(_) => self.autosave_revision = Some(self.session.revision),
+            Err(e) => log::warn!("autosave failed: {e}"),
+        }
+    }
+
+    /// Keeps the window title current and turns a close request on unsaved work into a question.
+    fn watch_close_and_title(&mut self, ctx: &egui::Context) {
+        let title = window_title(&self.session);
+        if title != self.last_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.last_title = title;
+        }
+        if ctx.input(|i| i.viewport().close_requested()) && self.session.dirty && !self.allow_close {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.pending_action = Some(PendingAction::Close);
+        }
+    }
+
+    /// Asks before discarding unsaved work, then runs `action`.
+    pub(crate) fn request(&mut self, action: PendingAction) {
+        if self.session.dirty {
+            self.pending_action = Some(action);
+        } else {
+            self.proceed(action);
+        }
+    }
+
+    fn proceed(&mut self, action: PendingAction) {
+        match action {
+            PendingAction::New => {
+                self.run("file.new", Value::Null);
+                self.platform.clear_recovery();
+                self.autosave_revision = None;
+                self.view = None;
+            }
+            PendingAction::Open => {
+                if let Some(path) = self.platform.pick_open("Open project", &["lightfoundry"]) {
+                    self.run("file.open", serde_json::json!({ "path": path }));
+                    self.platform.clear_recovery();
+                    self.autosave_revision = None;
+                    self.view = None;
+                }
+            }
+            PendingAction::Close => {
+                self.allow_close = true;
+                self.platform.clear_recovery();
+            }
+        }
+    }
+
+    /// The person's answer to "recover unsaved work?".
+    fn answer_recovery(&mut self, recover: bool) {
+        let Some(path) = self.pending_recovery.take() else { return };
+        if recover {
+            self.run("file.recover", serde_json::json!({ "path": path }));
+            self.view = None;
+        } else {
+            self.platform.clear_recovery();
+        }
+    }
+
+    /// The person's answer to "save changes first?". Saving that does not complete (cancelled file
+    /// dialog, failed write) keeps the question open: the work is never dropped by accident.
+    fn answer_unsaved(&mut self, answer: Answer) {
+        let Some(action) = self.pending_action else { return };
+        match answer {
+            Answer::Save => {
+                if menus::save(self, false) {
+                    self.pending_action = None;
+                    self.proceed(action);
+                }
+            }
+            Answer::Discard => {
+                self.pending_action = None;
+                self.proceed(action);
+            }
+            Answer::Cancel => self.pending_action = None,
+        }
+    }
+
+    fn dialogs(&mut self, ctx: &egui::Context) {
+        if self.pending_recovery.is_some() {
+            let mut choice = None;
+            egui::Modal::new(egui::Id::new("recovery")).show(ctx, |ui| {
+                ui.heading("Recover unsaved work?");
+                ui.label("LightFoundry found work from a previous session that was never saved.");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Recover").clicked() {
+                        choice = Some(true);
+                    }
+                    if ui.button("Discard").clicked() {
+                        choice = Some(false);
+                    }
+                });
+            });
+            if let Some(recover) = choice {
+                self.answer_recovery(recover);
+            }
+            return;
+        }
+        let Some(action) = self.pending_action else { return };
+        let name = self.session.path.as_ref().and_then(|p| p.file_name()).map_or("Untitled".to_string(), |n| n.to_string_lossy().into_owned());
+        let mut answer = None;
+        egui::Modal::new(egui::Id::new("unsaved")).show(ctx, |ui| {
+            ui.heading("Unsaved changes");
+            ui.label(format!("Save changes to {name} first?"));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Save").clicked() {
+                    answer = Some(Answer::Save);
+                }
+                if ui.button("Discard").clicked() {
+                    answer = Some(Answer::Discard);
+                }
+                if ui.button("Cancel").clicked() {
+                    answer = Some(Answer::Cancel);
+                }
+            });
+        });
+        if let Some(answer) = answer {
+            self.answer_unsaved(answer);
+        }
+        if action == PendingAction::Close && self.allow_close {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
     }
 
     /// Runs a command, reporting failures in the status bar instead of dropping them.
@@ -290,3 +483,15 @@ impl LightFoundryApp {
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) enum Answer {
+    Save,
+    Discard,
+    Cancel,
+}
+
+/// `name — LightFoundry`, with `*` while there are unsaved changes.
+pub(crate) fn window_title(session: &Session) -> String {
+    let name = session.path.as_ref().and_then(|p| p.file_name()).map_or("Untitled".to_string(), |n| n.to_string_lossy().into_owned());
+    format!("{}{name} — LightFoundry", if session.dirty { "*" } else { "" })
+}

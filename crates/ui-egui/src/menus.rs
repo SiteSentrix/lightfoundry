@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use crate::LightFoundryApp;
+use crate::{LightFoundryApp, PendingAction};
 
 pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     egui::Panel::top("menu").show(ui, |ui| {
@@ -23,13 +23,10 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 
 fn file_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     if item(ui, "New", "Ctrl+N") {
-        app.run("file.new", Value::Null);
+        app.request(PendingAction::New);
     }
-    if item(ui, "Open…", "Ctrl+O")
-        && let Some(path) = app.pick_open("Open project", &["lightfoundry"])
-    {
-        app.run("file.open", json!({ "path": path }));
-        app.view = None;
+    if item(ui, "Open…", "Ctrl+O") {
+        app.request(PendingAction::Open);
     }
     let can_save = true;
     if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() {
@@ -153,15 +150,18 @@ fn item(ui: &mut egui::Ui, label: &str, shortcut: &str) -> bool {
     clicked
 }
 
-fn save(app: &mut LightFoundryApp, always_ask: bool) {
+/// Saves (asking for a path when needed). Returns whether the document was saved.
+pub(crate) fn save(app: &mut LightFoundryApp, always_ask: bool) -> bool {
     let path = if always_ask || app.session.path.is_none() { app.pick_save("Save project", "project.lightfoundry", &["lightfoundry"]) } else { None };
     let params = path.map_or(Value::Null, |p| json!({ "path": p }));
     if (always_ask && params.is_null()) || (app.session.path.is_none() && params.is_null()) {
-        return;
+        return false;
     }
     if app.run("file.save", params).is_some() {
         app.say("Saved");
+        return true;
     }
+    false
 }
 
 fn import(app: &mut LightFoundryApp, command: &str, title: &str, exts: &[&str]) {
