@@ -1112,6 +1112,47 @@ mod select_tests {
     }
 }
 
+mod shortcut_tests {
+    use super::*;
+    use crate::shortcuts::{Action, Chord};
+
+    fn press(key: egui::Key, modifiers: Modifiers) -> Event {
+        Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }
+    }
+
+    #[test]
+    fn a_rebound_shortcut_runs_the_command_and_the_old_one_stops() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 20, "height": 20}));
+        h.app.run("edit.select_all", serde_json::Value::Null);
+        let chord = Chord { command: true, shift: false, alt: true, key: egui::Key::J };
+        h.app.shortcuts.set(Action::Duplicate, chord).unwrap();
+        h.frame(vec![press(egui::Key::D, Modifiers::COMMAND)]);
+        assert_eq!(h.app.session.doc.shapes.len(), 1, "the old chord no longer duplicates");
+        h.frame(vec![press(egui::Key::J, Modifiers::COMMAND | Modifiers::ALT)]);
+        assert_eq!(h.app.session.doc.shapes.len(), 2);
+    }
+
+    #[test]
+    fn capturing_a_new_chord_binds_it_and_reports_conflicts() {
+        let mut h = Harness::new();
+        h.app.shortcuts_open = true;
+        h.app.capturing = Some(Action::Group);
+        h.frame(vec![press(egui::Key::A, Modifiers::COMMAND)]);
+        assert!(h.app.capturing.is_none());
+        assert!(h.app.shortcut_error.as_deref().is_some_and(|e| e.contains("Select all")), "{:?}", h.app.shortcut_error);
+        assert_eq!(h.app.shortcuts.get(Action::Group).key, egui::Key::G);
+        h.app.capturing = Some(Action::Group);
+        h.frame(vec![press(egui::Key::K, Modifiers::COMMAND)]);
+        assert_eq!(h.app.shortcuts.get(Action::Group).key, egui::Key::K);
+        assert!(h.app.shortcut_error.is_none());
+        h.app.capturing = Some(Action::Group);
+        h.frame(vec![press(egui::Key::Escape, Modifiers::NONE)]);
+        assert!(h.app.capturing.is_none());
+        assert_eq!(h.app.shortcuts.get(Action::Group).key, egui::Key::K, "Escape cancels");
+    }
+}
+
 mod machine_tests {
     use std::time::{Duration, Instant};
 

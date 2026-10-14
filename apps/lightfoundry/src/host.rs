@@ -33,6 +33,10 @@ impl Platform for DesktopPlatform {
         Some(data_dir()?.join("LightFoundry").join("recent.json"))
     }
 
+    fn shortcuts_file(&self) -> Option<PathBuf> {
+        Some(data_dir()?.join("LightFoundry").join("shortcuts.json"))
+    }
+
     fn clear_recovery(&self) {
         if let Some(path) = self.recovery_file()
             && let Err(e) = std::fs::remove_file(&path)

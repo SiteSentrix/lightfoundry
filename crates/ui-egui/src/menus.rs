@@ -170,20 +170,31 @@ fn recent_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 
 fn edit_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let (can_undo, can_redo) = (app.session.can_undo(), app.session.can_redo());
-    if ui.add_enabled(can_undo, egui::Button::new("Undo")).clicked() {
+    use crate::shortcuts::Action;
+    if ui.add_enabled(can_undo, egui::Button::new("Undo").shortcut_text(app.shortcuts.text(Action::Undo))).clicked() {
         app.run("edit.undo", Value::Null);
         ui.close();
     }
-    if ui.add_enabled(can_redo, egui::Button::new("Redo")).clicked() {
+    if ui.add_enabled(can_redo, egui::Button::new("Redo").shortcut_text(app.shortcuts.text(Action::Redo))).clicked() {
         app.run("edit.redo", Value::Null);
         ui.close();
     }
     ui.separator();
-    for (label, id) in [("Select All", "edit.select_all"), ("Duplicate", "edit.duplicate"), ("Delete", "edit.delete")] {
-        if ui.add_enabled(id == "edit.select_all" || !app.session.selection.is_empty(), egui::Button::new(label)).clicked() {
+    for (label, id, action) in [
+        ("Select All", "edit.select_all", Some(Action::SelectAll)),
+        ("Duplicate", "edit.duplicate", Some(Action::Duplicate)),
+        ("Delete", "edit.delete", None),
+    ] {
+        let shortcut = action.map_or("Del".to_string(), |a| app.shortcuts.text(a));
+        if ui.add_enabled(id == "edit.select_all" || !app.session.selection.is_empty(), egui::Button::new(label).shortcut_text(shortcut)).clicked() {
             app.run(id, Value::Null);
             ui.close();
         }
+    }
+    ui.separator();
+    if ui.button("Keyboard shortcuts…").clicked() {
+        app.shortcuts_open = true;
+        ui.close();
     }
 }
 
@@ -237,11 +248,11 @@ fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             });
         });
         ui.separator();
-        if ui.add(egui::Button::new("Group").shortcut_text("Ctrl+G")).clicked() {
+        if ui.add(egui::Button::new("Group").shortcut_text(app.shortcuts.text(crate::shortcuts::Action::Group))).clicked() {
             app.run("edit.group", json!({}));
             ui.close();
         }
-        if ui.add(egui::Button::new("Ungroup").shortcut_text("Ctrl+Shift+G")).clicked() {
+        if ui.add(egui::Button::new("Ungroup").shortcut_text(app.shortcuts.text(crate::shortcuts::Action::Ungroup))).clicked() {
             app.run("edit.ungroup", json!({}));
             ui.close();
         }
