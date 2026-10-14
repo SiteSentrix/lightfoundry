@@ -349,6 +349,7 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         ui.collapsing("G-code", |ui| {
             let lines = gcode.lines().count();
             ui.weak(format!("{lines} lines"));
+            resume_controls(app, ui, &gcode, lines);
             egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
                 // Show the head only: a raster job can be millions of lines.
                 let head: String = gcode.lines().take(300).collect::<Vec<_>>().join("\n");
@@ -447,6 +448,28 @@ fn job_origin(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     });
 }
 
+/// Start the job part-way through: the head goes to where it would have been, with the beam off.
+fn resume_controls(app: &mut LightFoundryApp, ui: &mut egui::Ui, gcode: &str, lines: usize) {
+    app.resume_line = app.resume_line.clamp(1, lines.max(1));
+    ui.horizontal(|ui| {
+        ui.label("Run from line");
+        ui.add(egui::DragValue::new(&mut app.resume_line).range(1..=lines.max(1)).speed(1.0));
+        let enabled = app.link.is_some() && !app.job_active() && app.resume_line > 1;
+        if ui
+            .add_enabled(enabled, egui::Button::new("Start here"))
+            .on_hover_text("Moves the laser to where it would be at that line with the beam off, then carries on. The origin must already be set the way the first run had it.")
+            .clicked()
+            && let Some(v) = app.run("job.resume", json!({ "line": app.resume_line, "include": true }))
+            && let Some(text) = v["gcode"].as_str()
+        {
+            app.start_job(text.to_string());
+        }
+    });
+    if let Some(l) = gcode.lines().nth(app.resume_line.saturating_sub(1)) {
+        ui.weak(egui::RichText::new(l).monospace());
+    }
+}
+
 fn connection(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let connected = app.link.is_some();
     ui.horizontal(|ui| {
@@ -474,6 +497,10 @@ fn connection(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             app.connect();
         }
     });
+    ui.checkbox(&mut app.auto_reconnect, "Reconnect automatically").on_hover_text("Retry a lost USB connection; a job is never resumed by itself");
+    if app.reconnect.is_some() {
+        ui.colored_label(app.tokens.error, "Connection lost, reconnecting…");
+    }
     if let Some(s) = &app.snap {
         let state = s.status.as_ref().map_or("…".to_string(), |st| format!("{:?}", st.state));
         let pos = s.status.as_ref().and_then(|st| st.position).map_or(String::new(), |(x, y, _)| format!("   X {x:.2}  Y {y:.2}"));

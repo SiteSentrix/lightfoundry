@@ -161,4 +161,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   controller panicked on a non-ASCII G-code word, and a program containing GRBL's real-time bytes
   (0x18 soft reset, `?`, `!`, `~`) would have been streamed as is; the streamer and the console
   now refuse such lines, comments included, before anything is sent.
+- **2026-10-14 — auto-reconnect and run-from-line.** A lost serial connection is retried with
+  doubling waits (up to 8 tries, 30 s apart at most); Disconnect cancels it and nothing is ever
+  resumed by itself. `gcode::resume_from` rebuilds position, feed, power, spindle mode and air from
+  the skipped lines and never repeats `G92`; `job.resume` and a "Run from line" control in the
+  G-code section start a job part-way through, with the beam off for the approach move.
 
