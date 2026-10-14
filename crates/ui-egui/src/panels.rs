@@ -877,6 +877,7 @@ fn image_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 
 fn crop_and_sharpen(app: &mut LightFoundryApp, ui: &mut egui::Ui, id: u64) {
     ui.collapsing("Crop and sharpen", |ui| {
+        ui.checkbox(&mut app.crop_mode, "Drag the edges on the canvas").on_hover_text("Escape leaves this mode");
         egui::Grid::new("image_crop").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
             for (label, slot) in ["Cut off left", "Cut off top", "Cut off right", "Cut off bottom"].into_iter().zip(app.crop_pct.iter_mut()) {
                 ui.label(label);
@@ -890,6 +891,7 @@ fn crop_and_sharpen(app: &mut LightFoundryApp, ui: &mut egui::Ui, id: u64) {
             && app.run("image.crop", json!({ "id": id, "left": left, "top": top, "right": right, "bottom": bottom })).is_some()
         {
             app.crop_pct = [0.0; 4];
+            app.crop_mode = false;
         }
         ui.horizontal(|ui| {
             ui.add(egui::DragValue::new(&mut app.sharpen_amount).range(0.0..=5.0).speed(0.05).max_decimals(2));
@@ -897,7 +899,13 @@ fn crop_and_sharpen(app: &mut LightFoundryApp, ui: &mut egui::Ui, id: u64) {
                 app.run("image.sharpen", json!({ "id": id, "amount": app.sharpen_amount }));
             }
         });
-        ui.weak("Both change the stored picture (Undo brings it back).");
+        ui.horizontal(|ui| {
+            ui.add(egui::DragValue::new(&mut app.resample_scale).range(0.05..=4.0).speed(0.01).max_decimals(2).suffix("×"));
+            if ui.button("Resample").on_hover_text("Change the number of pixels (not the size in mm)").clicked() {
+                app.run("image.resample", json!({ "id": id, "scale": app.resample_scale }));
+            }
+        });
+        ui.weak("These change the stored picture (Undo brings it back).");
     });
     ui.collapsing("Trace to vectors", |ui| {
         ui.horizontal(|ui| {

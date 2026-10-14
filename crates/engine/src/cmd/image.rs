@@ -37,6 +37,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         run: trace,
     },
     CommandSpec {
+        id: "image.resample",
+        label: "Resample Image",
+        menu: "Edit",
+        shortcut: None,
+        params_doc: "{id?, scale (0.05..4: pixels per original pixel, in each direction)}  — changes the pixel count, not the size in mm; shrinking a picture finer than the layer's line interval makes jobs smaller",
+        mutates: true,
+        run: resample,
+    },
+    CommandSpec {
         id: "image.sharpen",
         label: "Sharpen Image",
         menu: "Edit",
@@ -86,6 +95,27 @@ fn crop(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     // What remains stays exactly where it was on the bed.
     shape.transform *= Affine::translate(shift);
     Ok(json!({ "width_mm": new_w, "height_mm": new_h }))
+}
+
+#[derive(Deserialize)]
+struct ResampleParams {
+    id: Option<ShapeId>,
+    scale: f64,
+}
+
+fn resample(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: ResampleParams = parse(params)?;
+    let id = target_image(s, p.id)?;
+    let scale = in_range("scale", p.scale, 0.05, 4.0)?;
+    let shape = s.doc.shape_mut(id).ok_or_else(|| EngineError::NotFound(format!("shape {id} does not exist")))?;
+    let ShapeKind::Image { image, .. } = &mut shape.kind else { return Err(not_an_image(id)) };
+    let scaled = |n: u32| ((f64::from(n) * scale).round() as u32).max(1);
+    let new = image
+        .resampled(scaled(image.width), scaled(image.height))
+        .ok_or_else(|| EngineError::BadParams("that would make the picture too large".into()))?;
+    let (w, h) = (new.width, new.height);
+    *image = Arc::new(new);
+    Ok(json!({ "width_px": w, "height_px": h }))
 }
 
 #[derive(Deserialize)]

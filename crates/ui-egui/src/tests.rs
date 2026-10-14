@@ -486,6 +486,53 @@ mod image_tests {
     }
 
     #[test]
+    fn dragging_a_picture_edge_in_crop_mode_sets_the_percentage_and_applying_crops() {
+        let mut h = Harness::new();
+        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: false };
+        let id = add_gradient(&mut h, Affine::translate((20.0, 20.0))); // 40 x 40 mm at (20, 20)
+        h.app.run("edit.select", json!({"ids": [id]}));
+        h.app.crop_mode = true;
+        h.frame(vec![]);
+        h.frame(vec![]);
+        // Grab the left edge (x = 20) and pull it to x = 30: a quarter of the width.
+        h.drag(h.at(20.0, 40.0), h.at(30.0, 40.0));
+        assert!((h.app.crop_pct[0] - 25.0).abs() < 1.5, "{:?}", h.app.crop_pct);
+        assert!(h.app.crop_pct[1..].iter().all(|p| *p == 0.0));
+        assert_eq!(h.app.crop_drag, None, "released");
+        // Then the bottom edge (y = 60) up to y = 50.
+        h.drag(h.at(40.0, 60.0), h.at(40.0, 50.0));
+        assert!((h.app.crop_pct[3] - 25.0).abs() < 1.5, "{:?}", h.app.crop_pct);
+        assert_eq!(h.app.session.selection, vec![id], "the drag did not move or deselect the picture");
+        let before = h.app.session.doc.shape(id).unwrap().world_bounds().unwrap();
+        assert_eq!((before.x0, before.y1), (20.0, 60.0));
+
+        let [l, t, r, b] = h.app.crop_pct.map(|p| p / 100.0);
+        h.app.run("image.crop", json!({"id": id, "left": l, "top": t, "right": r, "bottom": b}));
+        let after = h.app.session.doc.shape(id).unwrap().world_bounds().unwrap();
+        assert!((after.x0 - 30.0).abs() < 1.0 && (after.y1 - 50.0).abs() < 1.0, "{after:?}");
+        h.frame(vec![Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
+        assert!(!h.app.crop_mode, "Escape leaves crop mode");
+    }
+
+    #[test]
+    fn crop_mode_ends_when_the_selection_is_not_a_single_picture_and_edges_use_the_pictures_own_axes() {
+        use crate::crop_ui::{edge_at, pct_for};
+        let mut h = Harness::new();
+        h.app.crop_mode = true;
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert!(!h.app.crop_mode, "nothing selected, nothing to crop");
+        // A picture turned a quarter: its local left edge is now at the top of the screen.
+        let t = Affine::translate((50.0, 50.0)) * Affine::rotate(std::f64::consts::FRAC_PI_2);
+        let view = h.app.view.unwrap();
+        let top_of_screen = view.to_screen(t * Point::new(0.0, 20.0)); // middle of the local left edge
+        assert_eq!(edge_at(&view, t, 40.0, 40.0, top_of_screen), Some(0));
+        assert!((pct_for(0, t, 40.0, 40.0, t * Point::new(10.0, 20.0)) - 25.0).abs() < 1e-9);
+        assert_eq!(pct_for(0, t, 40.0, 40.0, Point::new(f64::NAN, 0.0)), 0.0);
+        assert_eq!(pct_for(2, t, 40.0, 40.0, t * Point::new(-100.0, 0.0)), 95.0, "capped");
+    }
+
+    #[test]
     fn rotated_and_flipped_images_render_and_are_selectable() {
         let mut h = Harness::new();
         let id = add_gradient(&mut h, Affine::translate((80.0, 80.0)) * Affine::rotate(0.7) * Affine::scale_non_uniform(-1.0, 1.0));
