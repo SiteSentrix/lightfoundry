@@ -11,7 +11,6 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 8  | Cut-order: by group, choose the start point, remove overlapping segments (not only identical outlines) | Quality and time                                                    |
 | 9  | Smoother (curve-fitted) tracing and colour-aware tracing; on-canvas crop handles; resample/resize (tone, crop, sharpen, seven dither modes and basic threshold tracing are done) | Photo engraving results                                  |
 | 10 | Ramp along fills and images; speed-dependent overscan (tabs, lead-in/out, perforation, outline ramp and overscan are done) | Clean cuts of special materials                                     |
-| 13 | Keep several autosave generations; periodic recovery-health check (recent files are done) | Never lose work                                                     |
 | 14 | Ship an original starter material library; share presets between projects (per-project presets and test grids are done) | Reusing settings for a known material                               |
 | 15 | Other controllers: verify the Marlin/Smoothieware dialects on hardware and add a link for them; Ruida is a large project | Reach beyond GRBL                                                   |
 | 16 | Live camera capture and lens calibration (two-point print-and-cut alignment is done; a photo of the bed can serve as a backdrop on a non-output layer) | Placing work on printed or irregular material                       |

@@ -208,4 +208,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   beyond fill lines, kept inside the bed with absolute placement; also overrides the machine's
   setting for pictures) and `ramp_length` (outline power rises from the layer's minimum to full
   over that distance in half-millimetre steps, so the pierce point does not scorch).
+- **2026-10-14 — autosave generations.** The autosave keeps the three newest copies (`recovery.ext`,
+  `recovery.1.ext`, `recovery.2.ext`), every write is read back to confirm it parses (the status bar
+  says so when it does not), startup offers the newest copy that still reads back, and saving or
+  discarding removes them all.
 

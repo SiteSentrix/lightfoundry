@@ -1841,3 +1841,60 @@ mod async_serial_tests {
         assert!(h.app.reconnect.is_none(), "no automatic reconnect for hosts that need a click to open a device");
     }
 }
+
+mod autosave_generation_tests {
+    use super::*;
+    use crate::recovery::{GENERATIONS, generation_path, newest_readable, rotate};
+
+    #[test]
+    fn rotation_keeps_a_few_copies_newest_first_and_drops_the_oldest() {
+        let dir = temp_dir("generations");
+        let base = dir.join("recovery.lightfoundry");
+        for i in 0..5 {
+            rotate(&base);
+            std::fs::write(&base, format!("copy {i}")).unwrap();
+        }
+        let read = |n| std::fs::read_to_string(generation_path(&base, n)).unwrap();
+        assert_eq!((read(0), read(1), read(2)), ("copy 4".to_string(), "copy 3".to_string(), "copy 2".to_string()));
+        assert!(!generation_path(&base, GENERATIONS).exists(), "no copy beyond the limit");
+        assert_eq!(generation_path(&base, 1).file_name().unwrap(), "recovery.1.lightfoundry");
+        rotate(&dir.join("nothing-here.lightfoundry")); // nothing to rotate is fine
+    }
+
+    #[test]
+    fn a_damaged_newest_copy_falls_back_to_an_older_readable_one_and_all_copies_are_cleared_when_saved() {
+        let dir = temp_dir("fallback");
+        let base = dir.join("recovery.lightfoundry");
+        let mut good = lightfoundry_doc::Document::default();
+        good.add_shape(lightfoundry_doc::Shape::path("r", 0, lightfoundry_geom::rect_path(0.0, 0.0, 5.0, 5.0)));
+        lightfoundry_format::save(&generation_path(&base, 1), &good).unwrap();
+        std::fs::write(&base, b"{ truncated").unwrap();
+        assert_eq!(newest_readable(&base), Some(generation_path(&base, 1)));
+
+        let mut h = harness_with(RecoveryPlatform { file: base.clone(), open_answer: None, recent: None });
+        assert_eq!(h.app.pending_recovery, Some(generation_path(&base, 1)), "the readable older copy is offered");
+        h.app.answer_recovery(true);
+        assert_eq!(h.app.session.doc.shapes.len(), 1);
+        assert!(h.app.session.dirty);
+        h.app.run("file.save", json!({"path": dir.join("saved.lightfoundry")}));
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert!(!base.exists() && !generation_path(&base, 1).exists(), "saved work leaves no stale backups");
+    }
+
+    #[test]
+    fn autosaves_rotate_in_the_running_app_and_every_write_is_checked() {
+        let dir = temp_dir("running");
+        let base = dir.join("recovery.lightfoundry");
+        let mut h = harness_with(RecoveryPlatform { file: base.clone(), open_answer: None, recent: None });
+        h.app.autosave_interval = Duration::ZERO;
+        for i in 0..3 {
+            h.app.run("shape.rectangle", json!({"x": i * 10, "width": 5, "height": 5}));
+            h.frame(vec![]);
+        }
+        assert!(base.exists() && generation_path(&base, 1).exists() && generation_path(&base, 2).exists());
+        let counts: Vec<usize> = (0..3).map(|n| lightfoundry_format::load(&generation_path(&base, n)).unwrap().shapes.len()).collect();
+        assert_eq!(counts, vec![3, 2, 1]);
+        assert!(!matches!(&h.app.status, Some((m, true)) if m.contains("backup")));
+    }
+}
