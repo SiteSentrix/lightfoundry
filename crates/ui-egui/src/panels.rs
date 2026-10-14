@@ -260,6 +260,7 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     job_controls(app, ui);
     if app.link.is_some() {
         jog_pad(app, ui);
+        crate::settings_ui::section(app, ui);
         console(app, ui);
     }
     if let Some(gcode) = app.session.last_gcode.clone() {
@@ -294,7 +295,7 @@ fn number(ui: &mut egui::Ui, value: f64, range: std::ops::RangeInclusive<f64>, s
     (committed(&r) && (v - value).abs() > 1e-9).then_some(v)
 }
 
-fn committed(r: &egui::Response) -> bool {
+pub(crate) fn committed(r: &egui::Response) -> bool {
     r.drag_stopped() || r.lost_focus() || (r.changed() && !r.dragged() && !r.has_focus())
 }
 

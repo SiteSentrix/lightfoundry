@@ -8,6 +8,7 @@ mod nodes_ui;
 mod panels;
 mod platform;
 mod recent;
+mod settings_ui;
 pub(crate) mod snap;
 mod theme;
 mod timeline_ui;

@@ -5,6 +5,7 @@
 //! (see the `serial` feature).
 
 mod link;
+pub mod settings;
 mod sim;
 mod status;
 mod stream;

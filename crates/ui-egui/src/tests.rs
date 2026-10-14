@@ -1064,6 +1064,40 @@ mod machine_tests {
     }
 
     #[test]
+    fn controller_settings_are_read_edited_and_checked_against_the_document() {
+        use crate::settings_ui::{Advice, advice};
+        let mut h = connected();
+        h.app.link_do(|l| l.request_settings());
+        pump(&mut h, "the settings", |h| h.app.snap.as_ref().is_some_and(|s| s.settings.len() > 20));
+        assert_eq!(h.app.snap.as_ref().and_then(|s| s.settings.get(&32)).map(String::as_str), Some("1"));
+
+        let settings = h.app.snap.as_ref().map(|s| s.settings.clone()).unwrap();
+        let machine = h.app.session.doc.machine.clone();
+        assert_eq!(advice(&settings, &machine), vec![Advice::BedDiffers(200.0, 200.0)], "the simulator's travel is 200 mm, the document's bed 400");
+
+        h.app.link_do(|l| l.write_setting(32, 0.0));
+        pump(&mut h, "laser mode off", |h| h.app.snap.as_ref().and_then(|s| s.settings.get(&32)).is_some_and(|v| v == "0"));
+        let settings = h.app.snap.as_ref().map(|s| s.settings.clone()).unwrap();
+        assert!(advice(&settings, &machine).contains(&Advice::LaserModeOff));
+        h.frame(vec![]); // the section draws with warnings present
+    }
+
+    #[test]
+    fn advice_ignores_missing_and_hostile_values() {
+        use std::collections::BTreeMap;
+
+        use crate::settings_ui::{Advice, advice};
+        let machine = lightfoundry_doc::Machine::default();
+        assert!(advice(&BTreeMap::new(), &machine).is_empty());
+        let junk: BTreeMap<u32, String> = [(30, "NaN"), (32, "x"), (130, "inf"), (131, "-5")].into_iter().map(|(k, v)| (k, v.to_string())).collect();
+        assert!(advice(&junk, &machine).is_empty());
+        let huge: BTreeMap<u32, String> = [(30, "1e30")].into_iter().map(|(k, v)| (k, v.to_string())).collect();
+        assert!(advice(&huge, &machine).is_empty(), "an absurd S max is not offered");
+        let s: BTreeMap<u32, String> = [(30, "255")].into_iter().map(|(k, v)| (k, v.to_string())).collect();
+        assert_eq!(advice(&s, &machine), vec![Advice::SMaxDiffers(255)]);
+    }
+
+    #[test]
     fn simulator_job_runs_to_completion_and_reports() {
         let mut h = connected();
         h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 20, "height": 20}));
