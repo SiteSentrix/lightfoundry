@@ -5,6 +5,7 @@
 mod fill;
 mod order;
 mod raster;
+mod tabs;
 
 pub use fill::fill_segments;
 pub use order::order_polylines;
@@ -99,6 +100,66 @@ pub fn plan(doc: &Document) -> Result<Job, PlanError> {
     Ok(job)
 }
 
+/// Appends the moves for one outline: an optional lead-in, the outline itself (with tabs on
+/// material outlines when the layer asks for them), and an optional lead-out.
+fn emit_outline(moves: &mut Vec<Move>, doc: &Document, layer: &Layer, pl: &Polyline, depth: usize, power: f64) {
+    let Some(first) = pl.points.first().copied() else { return };
+    if !pl.closed {
+        moves.push(Move::Travel(first));
+        moves.extend(pl.points.iter().skip(1).map(|p| Move::Cut { to: *p, power }));
+        return;
+    }
+    // Leads need a start in the middle of an edge (see `restart_mid_edge`).
+    let restarted;
+    let (pl, first) = if layer.lead_in > 0.0 || layer.lead_out > 0.0 {
+        restarted = tabs::restart_mid_edge(pl);
+        (&restarted, restarted.points.first().copied().unwrap_or(first))
+    } else {
+        (pl, first)
+    };
+    let lead = |len: f64| tabs::lead_point(pl, depth, len).map(|p| keep_in_bed(doc, first, p));
+    match lead(layer.lead_in) {
+        Some(entry) => {
+            moves.push(Move::Travel(entry));
+            moves.push(Move::Cut { to: first, power });
+        }
+        None => moves.push(Move::Travel(first)),
+    }
+    let pieces = if layer.tab_count > 0 && depth % 2 == 0 { tabs::split_for_tabs(pl, layer.tab_count, layer.tab_width) } else { None };
+    match pieces {
+        Some(pieces) => {
+            for piece in &pieces {
+                let p = if piece.on { power } else { 0.0 };
+                moves.extend(piece.points.iter().skip(1).map(|pt| Move::Cut { to: *pt, power: p }));
+            }
+        }
+        None => {
+            moves.extend(pl.points.iter().skip(1).map(|p| Move::Cut { to: *p, power }));
+            moves.push(Move::Cut { to: first, power });
+        }
+    }
+    if let Some(exit) = lead(layer.lead_out) {
+        moves.push(Move::Cut { to: exit, power });
+    }
+}
+
+/// With absolute placement the bed edges are known: shorten a lead that would leave the bed.
+fn keep_in_bed(doc: &Document, from: Point, to: Point) -> Point {
+    if doc.job_origin.start_from != lightfoundry_doc::StartFrom::Absolute {
+        return to;
+    }
+    let (w, h) = (doc.machine.bed_width, doc.machine.bed_height);
+    let mut t: f64 = 1.0;
+    for (a, b, hi) in [(from.x, to.x, w), (from.y, to.y, h)] {
+        if b < 0.0 && a != b {
+            t = t.min(a / (a - b));
+        } else if b > hi && a != b {
+            t = t.min((hi - a) / (b - a));
+        }
+    }
+    from.lerp(to, t.clamp(0.0, 1.0))
+}
+
 /// Offsets closed outlines by the layer's kerf compensation; open paths are left as they are.
 fn apply_kerf(layer: &Layer, lines: &[Polyline]) -> Result<Vec<Polyline>, PlanError> {
     if layer.kerf_offset == 0.0 {
@@ -165,6 +226,11 @@ fn validate(layer: &Layer) -> Result<(), PlanError> {
     if !(layer.kerf_offset.is_finite() && layer.kerf_offset.abs() <= 50.0) {
         return Err(bad("kerf offset"));
     }
+    for (value, what) in [(layer.tab_width, "tab width"), (layer.lead_in, "lead-in"), (layer.lead_out, "lead-out")] {
+        if !(value.is_finite() && (0.0..=1000.0).contains(&value)) {
+            return Err(bad(what));
+        }
+    }
     Ok(())
 }
 
@@ -189,15 +255,11 @@ fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) ->
     }
     if matches!(layer.mode, LayerMode::Line | LayerMode::FillAndLine) && !outlines.is_empty() {
         let mut moves = Vec::new();
-        for pl in order_polylines(outlines, start) {
-            let Some(first) = pl.points.first() else { continue };
-            moves.push(Move::Travel(*first));
-            for p in pl.points.iter().skip(1) {
-                moves.push(Move::Cut { to: *p, power });
-            }
-            if pl.closed {
-                moves.push(Move::Cut { to: *first, power });
-            }
+        let ordered = order_polylines(outlines, start);
+        // Nesting is quadratic; very large jobs skip tabs and leads rather than stall.
+        let depths = if ordered.len() <= 4000 { tabs::nesting_depths(&ordered) } else { vec![0; ordered.len()] };
+        for (pl, depth) in ordered.iter().zip(depths) {
+            emit_outline(&mut moves, doc, layer, pl, depth, power);
         }
         ops.push(mk(OpKind::Line, moves));
     }

@@ -102,6 +102,9 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ("Interval", "interval", layer.interval, 0.005..=10.0, " mm"),
             ("Scan angle", "scan_angle", layer.scan_angle, -360.0..=360.0, "°"),
             ("Kerf offset", "kerf_offset", layer.kerf_offset, -50.0..=50.0, " mm"),
+            ("Tab width", "tab_width", layer.tab_width, 0.0..=1000.0, " mm"),
+            ("Lead-in", "lead_in", layer.lead_in, 0.0..=1000.0, " mm"),
+            ("Lead-out", "lead_out", layer.lead_out, 0.0..=1000.0, " mm"),
         ] {
             ui.label(label);
             if let Some(v) = number(ui, value, range, suffix) {
@@ -109,6 +112,14 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             }
             ui.end_row();
         }
+
+        ui.label("Tabs");
+        let mut tabs = layer.tab_count;
+        let r = ui.add(egui::DragValue::new(&mut tabs).range(0..=1000));
+        if committed(&r) && tabs != layer.tab_count {
+            app.run("layer.set", json!({ "id": layer.id, "tab_count": tabs }));
+        }
+        ui.end_row();
 
         ui.label("Passes");
         let mut passes = layer.passes;

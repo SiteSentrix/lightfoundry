@@ -58,3 +58,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — arrays.** `arrange.grid` and `arrange.circular` (pitch = size + gap; arc or full
   circle; bounded to 10,000 copies, one undo step) and a corner radius on rectangles
   (`shape.rectangle radius`, Rectangle tool option); Array section in the Selection panel.
+- **2026-10-14 — tabs and leads.** Per-layer tabs (`tab_count`, `tab_width`: laser-off gaps spread
+  evenly on outer outlines only, never on holes, declined when they do not fit) and lead-in/out
+  (`lead_in`, `lead_out`: approach from the scrap side — outside a part, inside a hole — starting
+  mid-edge so the lead never runs along the cut itself; shortened to stay on the bed for absolute
+  placement). Found by test: a lead at a corner ran along the adjacent edge.
