@@ -39,6 +39,8 @@ pub struct StreamReport {
 /// bytes of GRBL's RX buffer they occupy. Shared by [`stream_program`] and the persistent link.
 pub(crate) struct JobStream {
     lines: Vec<String>,
+    /// The program line number (1-based, as in the source text) of each prepared line.
+    numbers: Vec<usize>,
     in_flight: VecDeque<usize>,
     in_flight_bytes: usize,
     next: usize,
@@ -47,7 +49,8 @@ pub(crate) struct JobStream {
 
 impl JobStream {
     pub(crate) fn new(program: &str) -> Result<Self, DeviceError> {
-        Ok(Self { lines: prepare(program)?, in_flight: VecDeque::new(), in_flight_bytes: 0, next: 0, acked: 0 })
+        let (numbers, lines): (Vec<usize>, Vec<String>) = prepare_numbered(program)?.into_iter().unzip();
+        Ok(Self { lines, numbers, in_flight: VecDeque::new(), in_flight_bytes: 0, next: 0, acked: 0 })
     }
 
     pub(crate) fn progress(&self) -> Progress {
@@ -81,14 +84,17 @@ impl JobStream {
     pub(crate) fn on_response(&mut self, resp: &str) -> Result<bool, DeviceError> {
         let resp = resp.trim();
         if resp == "ok" {
-            self.in_flight_bytes -= self.in_flight.pop_front().unwrap_or(0);
+            // An acknowledgement with nothing in flight (a leftover from before a reset, or a
+            // duplicate) does not belong to any streamed line.
+            let Some(cost) = self.in_flight.pop_front() else { return Ok(false) };
+            self.in_flight_bytes = self.in_flight_bytes.saturating_sub(cost);
             self.acked += 1;
             Ok(true)
         } else if let Some(code) = resp.strip_prefix("error:") {
             let index = self.acked;
             Err(DeviceError::Grbl {
                 code: code.trim().parse().unwrap_or(0),
-                line: index + 1,
+                line: self.numbers.get(index).copied().unwrap_or(index + 1),
                 text: self.lines.get(index).cloned().unwrap_or_default(),
             })
         } else if let Some(code) = resp.strip_prefix("ALARM:") {
@@ -110,6 +116,23 @@ pub fn stream_program(
     mut on_progress: impl FnMut(Progress),
 ) -> Result<StreamReport, DeviceError> {
     let mut job = JobStream::new(program)?;
+    let result = run_stream(transport, &mut job, options, cancel, &mut on_progress);
+    if let Err(e) = &result
+        && !matches!(e, DeviceError::Cancelled | DeviceError::Io(_))
+    {
+        // Giving up on a job must not leave queued moves running with the laser on.
+        let _ = transport.write_all(&[realtime::SOFT_RESET]);
+    }
+    result
+}
+
+fn run_stream(
+    transport: &mut dyn Transport,
+    job: &mut JobStream,
+    options: &StreamOptions,
+    cancel: &AtomicBool,
+    on_progress: &mut impl FnMut(Progress),
+) -> Result<StreamReport, DeviceError> {
     let mut last_activity = Instant::now();
 
     while !job.is_done() {
@@ -145,7 +168,13 @@ pub(crate) fn forbidden_byte(line: &str) -> Option<u8> {
 }
 
 /// Strips comments and blank lines; refuses lines GRBL would truncate.
+#[cfg(test)]
 pub(crate) fn prepare(program: &str) -> Result<Vec<String>, DeviceError> {
+    Ok(prepare_numbered(program)?.into_iter().map(|(_, l)| l).collect())
+}
+
+/// Like [`prepare`], keeping each line's number in the original program.
+pub(crate) fn prepare_numbered(program: &str) -> Result<Vec<(usize, String)>, DeviceError> {
     let mut out = Vec::new();
     for (i, raw) in program.lines().enumerate() {
         // GRBL acts on these bytes wherever they appear, comments included.
@@ -161,7 +190,7 @@ pub(crate) fn prepare(program: &str) -> Result<Vec<String>, DeviceError> {
         if code.len() > MAX_LINE_BYTES {
             return Err(DeviceError::LineTooLong { line: i + 1, len: code.len() });
         }
-        out.push(code.to_string());
+        out.push((i + 1, code.to_string()));
     }
     Ok(out)
 }
@@ -251,6 +280,47 @@ mod tests {
             sim.fail_on("G1 X999");
             let err = stream_program(&mut sim, "G21\nG1 X999 Y0\nG0 X0\n", &StreamOptions::default(), &AtomicBool::new(false), |_| {}).unwrap_err();
             assert!(matches!(err, DeviceError::Grbl { line: 2, .. }), "{err}");
+        }
+
+        #[test]
+        fn error_lines_use_the_programs_own_numbering_even_after_comments_and_blanks() {
+            let mut sim = SimulatedGrbl::new();
+            sim.fail_on("G1 X999");
+            let program = "; header\n; more header\n\nG21\n(note)\nG1 X999 Y0\nG0 X0\n";
+            let err = stream_program(&mut sim, program, &StreamOptions::default(), &AtomicBool::new(false), |_| {}).unwrap_err();
+            assert!(matches!(err, DeviceError::Grbl { line: 6, .. }), "{err}");
+        }
+
+        #[test]
+        fn giving_up_on_a_job_resets_the_controller_so_queued_moves_stop() {
+            let mut sim = SimulatedGrbl::new();
+            sim.fail_on("G1 X999");
+            let _ = stream_program(&mut sim, "G21\nG1 X5 S900\nG1 X999\nG0 X0\n", &StreamOptions::default(), &AtomicBool::new(false), |_| {})
+                .unwrap_err();
+            assert!(sim.was_reset(), "an error must stop motion and switch the laser off");
+
+            let mut sim = SimulatedGrbl::new();
+            sim.alarm_on("G1");
+            let _ = stream_program(&mut sim, "G1 X1\n", &StreamOptions::default(), &AtomicBool::new(false), |_| {}).unwrap_err();
+            assert!(sim.was_reset());
+
+            let mut sim = SimulatedGrbl::new();
+            sim.go_silent();
+            let options = StreamOptions { idle_timeout: Duration::from_millis(60), ..StreamOptions::default() };
+            let err = stream_program(&mut sim, "G1 X1\n", &options, &AtomicBool::new(false), |_| {}).unwrap_err();
+            assert!(matches!(err, DeviceError::Timeout(_)));
+            assert!(sim.was_reset(), "a controller that stops answering mid-job is reset too");
+        }
+
+        #[test]
+        fn stray_acknowledgements_are_not_counted_as_streamed_lines() {
+            let mut job = JobStream::new("G0 X1\nG0 X2\n").unwrap();
+            assert!(!job.on_response("ok").unwrap(), "nothing is in flight");
+            assert!(!job.is_done() && job.progress().acknowledged == 0);
+            let mut sim = SimulatedGrbl::new();
+            job.pump(&mut sim).unwrap();
+            assert!(job.on_response("ok").unwrap());
+            assert_eq!(job.progress().acknowledged, 1);
         }
 
         #[test]

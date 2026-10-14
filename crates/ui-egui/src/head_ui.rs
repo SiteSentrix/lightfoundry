@@ -38,7 +38,11 @@ pub fn head_world(app: &LightFoundryApp) -> Option<Point> {
     if !mappable(&app.session.doc) {
         return None;
     }
-    let (x, y, _) = app.snap.as_ref()?.status.as_ref()?.position?;
+    let status = app.snap.as_ref()?.status.as_ref()?;
+    if status.position_is_work {
+        return None; // work coordinates move with the offset; the bed position is unknown
+    }
+    let (x, y, _) = status.position?;
     Some(machine_to_world(&app.session.doc.machine, x, y))
 }
 

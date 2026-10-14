@@ -4,6 +4,7 @@
 //! No UI and no OS serial code lives here; real serial ports implement [`Transport`] elsewhere
 //! (see the `serial` feature).
 
+pub mod linebuf;
 mod link;
 pub mod settings;
 mod sim;
@@ -52,6 +53,8 @@ pub enum DeviceError {
     LineTooLong { line: usize, len: usize },
     #[error("line {line} contains byte 0x{byte:02x}, which the controller would act on as a real-time command or cannot parse")]
     ForbiddenByte { line: usize, byte: u8 },
+    #[error("the machine entered an alarm state; clear it (unlock/home) before running again")]
+    MachineAlarm,
     #[error("no response from the controller for {0} s")]
     Timeout(u64),
     #[error("job cancelled")]

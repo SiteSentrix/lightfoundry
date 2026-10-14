@@ -262,3 +262,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   light and dark token sets, and layer colours are lightened for the dark canvas or darkened (hue
   kept) for the light one so white and pale layers stay visible.
 
+- **2026-10-14 — review fixes (device, gcode).** Stop while finishing now soft-resets; an alarm during
+  finishing is reported; the serial reader caps its line buffer (4 KiB) and resyncs after overflow;
+  a stream that aborts soft-resets the controller; stray `ok`s are ignored; errors carry source line
+  numbers; jogs use G53 and a work-position flag picks `WPos` versus `MPos`; run-from-line restores
+  `G92` and the spindle line; G-code refuses bad feeds, NaN power and out-of-extent relative moves.

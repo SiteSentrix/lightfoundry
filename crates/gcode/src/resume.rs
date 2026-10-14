@@ -26,8 +26,10 @@ struct State {
     s: Option<f64>,
     f: Option<f64>,
     z: Option<f64>,
-    /// `M3` or `M4`, as the program set it.
-    spindle: Option<&'static str>,
+    /// The program's own spindle/laser-on line (`M4 S0`, `M3 I S0`, ...), as it last set it.
+    spindle_line: Option<String>,
+    /// A `G92` (work zero) was among the skipped lines.
+    zero_set: bool,
     air: bool,
     relative: bool,
 }
@@ -53,8 +55,12 @@ pub fn resume_from(program: &str, line: usize) -> Result<String, ResumeError> {
     let _ = writeln!(out, "; LightFoundry resume from line {line}");
     out.push_str("G21\nG90\n");
     // Power stays at zero until the first cutting move says otherwise.
-    out.push_str(st.spindle.map_or("M4 S0", |m| if m == "M3" { "M3 S0" } else { "M4 S0" }));
-    out.push('\n');
+    // Power stays at zero until the first cutting move says otherwise. The program's own line is
+    // replayed (Marlin's inline `I` and so on); firmwares with no such line get none.
+    if let Some(line) = &st.spindle_line {
+        out.push_str(&with_power_zero(line));
+        out.push('\n');
+    }
     if st.air {
         out.push_str("M8\n");
     }
@@ -68,7 +74,7 @@ pub fn resume_from(program: &str, line: usize) -> Result<String, ResumeError> {
     for raw in lines.iter().skip(line - 1) {
         let code = code_of(raw);
         // The skipped part set zero (G92) already; doing it again would move the origin.
-        if code.starts_with("G92") {
+        if st.zero_set && code.starts_with("G92") {
             continue;
         }
         if fix_first_cut && code.starts_with("G1") {
@@ -87,6 +93,16 @@ pub fn resume_from(program: &str, line: usize) -> Result<String, ResumeError> {
         out.push('\n');
     }
     Ok(out)
+}
+
+/// The spindle line with its power set to zero (added when it has none).
+fn with_power_zero(line: &str) -> String {
+    let mut words: Vec<String> = line.split_whitespace().map(String::from).collect();
+    match words.iter_mut().find(|w| w.starts_with('S')) {
+        Some(w) => *w = "S0".to_string(),
+        None => words.push("S0".to_string()),
+    }
+    words.join(" ")
 }
 
 fn code_of(raw: &str) -> &str {
@@ -112,15 +128,15 @@ fn track(st: &mut State, raw: &str) -> Option<()> {
     match first {
         "G90" => st.relative = false,
         "G91" => st.relative = true,
-        "M3" => st.spindle = Some("M3"),
-        "M4" => st.spindle = Some("M4"),
+        "M3" | "M4" => st.spindle_line = Some(code.to_string()),
         "M8" => st.air = true,
         "M9" => st.air = false,
         "M5" => st.s = Some(0.0),
         _ => {}
     }
     if first == "G92" {
-        return Some(()); // work zero is set once, before the part that is skipped
+        st.zero_set = true; // work zero was set in the part that is skipped; it must not be set again
+        return Some(());
     }
     let motion = matches!(first, "G0" | "G1");
     for w in code.split_whitespace().skip(usize::from(!motion && !matches!(first, "M3" | "M4"))) {
@@ -176,9 +192,29 @@ mod tests {
     }
 
     #[test]
+    fn the_origin_command_is_kept_when_the_skipped_part_never_ran_it() {
+        // The G92 is on line 5: resuming at or before it must still set the work zero.
+        for line in 1..=5 {
+            assert!(resume_from(PROGRAM, line).unwrap().contains("G92 X0 Y0"), "line {line}");
+        }
+        assert!(!resume_from(PROGRAM, 6).unwrap().contains("G92"), "after it, it must not run twice");
+    }
+
+    #[test]
+    fn marlin_and_smoothie_programs_keep_their_own_spindle_handling() {
+        let marlin = "G21\nG90\nM3 I S0\nG0 X5 Y5\nG1 X9 S100 F500\nG1 Y9\n";
+        let r = resume_from(marlin, 6).unwrap();
+        assert!(r.contains("\nM3 I S0\n") && !r.contains("M4"), "{r}");
+        let smoothie = "G21\nG90\nG0 X5 Y5\nG1 X9 S0.25 F500\nG1 Y9\n";
+        let r = resume_from(smoothie, 5).unwrap();
+        assert!(!r.contains("M3") && !r.contains("M4"), "no spindle command may appear: {r}");
+        assert!(r.contains("G1 Y9 S0.25 F500"), "{r}");
+    }
+
+    #[test]
     fn resuming_from_the_first_line_is_the_whole_program_minus_the_origin_command() {
         let r = resume_from(PROGRAM, 1).unwrap();
-        assert!(r.contains("G0 X10 Y10") && r.contains("M8") && !r.contains("G92"));
+        assert!(r.contains("G0 X10 Y10") && r.contains("M8"));
         assert!(!r.contains("G0 X50 Y50\nM4"), "{r}");
     }
 

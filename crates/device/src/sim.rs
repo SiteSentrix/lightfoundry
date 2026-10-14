@@ -30,11 +30,25 @@ pub struct SimulatedGrbl {
     settings: BTreeMap<u32, String>,
     /// Never sleep (for hosts without threads, which poll instead of waiting).
     non_blocking: bool,
+    /// Report an alarm state in status reports once any motion line has been accepted.
+    alarm_when_busy: bool,
+    busy_until_reset: bool,
 }
 
 impl SimulatedGrbl {
     pub fn new() -> Self {
         SimulatedGrbl { settings: default_settings(), ..Self::default() }
+    }
+
+    /// After the first accepted line, status reports say `Alarm` (a limit switch tripping mid-job).
+    pub fn alarm_after_last_line(&mut self) {
+        self.alarm_when_busy = true;
+    }
+
+    /// Reports `Run` after the first accepted line until a soft reset: a machine still moving
+    /// although every line has been acknowledged.
+    pub fn stay_busy_until_reset(&mut self) {
+        self.busy_until_reset = true;
     }
 
     /// Makes reads return at once instead of waiting out their timeout, and ignores the latency.
@@ -166,17 +180,27 @@ impl SimulatedGrbl {
             self.position.0 += x.unwrap_or(0.0);
             self.position.1 += y.unwrap_or(0.0);
         } else {
+            // G53 addresses machine coordinates, ignoring the work offset.
+            let offset = if body.contains("G53") { (0.0, 0.0) } else { self.offset };
             if let Some(x) = x {
-                self.position.0 = self.offset.0 + x;
+                self.position.0 = offset.0 + x;
             }
             if let Some(y) = y {
-                self.position.1 = self.offset.1 + y;
+                self.position.1 = offset.1 + y;
             }
         }
     }
 
     fn status_line(&self) -> String {
-        let state = if self.held { "Hold:0" } else { "Idle" };
+        let state = if self.alarm_when_busy && !self.received.is_empty() {
+            "Alarm"
+        } else if self.busy_until_reset && !self.received.is_empty() && !self.reset {
+            "Run"
+        } else if self.held {
+            "Hold:0"
+        } else {
+            "Idle"
+        };
         format!("<{state}|MPos:{:.3},{:.3},0.000|FS:0,0>", self.position.0, self.position.1)
     }
 }
