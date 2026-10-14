@@ -22,6 +22,8 @@ pub struct Session {
     pub dirty: bool,
     /// Bumped on every change to the document; lets the UI cache derived data (previews).
     pub revision: u64,
+    /// Output only the selected shapes (generate, estimate, frame and preview all follow it).
+    pub job_selection_only: bool,
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
 }
@@ -38,7 +40,28 @@ impl Session {
     }
 
     pub fn with_document(doc: Document) -> Self {
-        Session { doc, selection: Vec::new(), last_gcode: None, path: None, dirty: false, revision: 0, undo: Vec::new(), redo: Vec::new() }
+        Session {
+            doc,
+            selection: Vec::new(),
+            last_gcode: None,
+            path: None,
+            dirty: false,
+            revision: 0,
+            job_selection_only: false,
+            undo: Vec::new(),
+            redo: Vec::new(),
+        }
+    }
+
+    /// The document as the job sees it: all of it, or only the selected shapes when the person has
+    /// chosen to cut just the selection.
+    pub fn job_doc(&self) -> std::borrow::Cow<'_, Document> {
+        if !self.job_selection_only {
+            return std::borrow::Cow::Borrowed(&self.doc);
+        }
+        let mut doc = self.doc.clone();
+        doc.shapes.retain(|s| self.selection.contains(&s.id));
+        std::borrow::Cow::Owned(doc)
     }
 
     /// Runs a command by id. Mutating commands are one undo step; a failure or panic leaves the

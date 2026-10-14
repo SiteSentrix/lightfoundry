@@ -910,6 +910,30 @@ mod import_tests {
     }
 
     #[test]
+    fn cutting_only_the_selection_limits_gcode_estimate_and_frame() {
+        let mut s = Session::new();
+        let a = s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 10})).unwrap()["id"].as_u64().unwrap();
+        s.execute("shape.rectangle", &json!({"x": 200, "y": 100, "width": 40, "height": 30})).unwrap();
+        let frame = |s: &mut Session| s.execute("job.frame", &json!({})).unwrap()["bounds"].clone();
+        assert_eq!(frame(&mut s), json!([10.0, 10.0, 240.0, 130.0]));
+        let all_time = s.execute("job.estimate", &Value::Null).unwrap()["seconds"].as_f64().unwrap();
+
+        s.execute("edit.select", &json!({"ids": [a]})).unwrap();
+        s.execute("job.set_scope", &json!({"selection_only": true})).unwrap();
+        assert_eq!(frame(&mut s), json!([10.0, 10.0, 30.0, 20.0]));
+        assert!(s.execute("job.estimate", &Value::Null).unwrap()["seconds"].as_f64().unwrap() < all_time);
+        let gcode = s.execute("job.gcode", &json!({"include": true})).unwrap()["gcode"].as_str().unwrap().to_string();
+        assert!(!gcode.contains("X200") && !gcode.contains("X240"), "{gcode}");
+
+        s.execute("edit.select", &json!({"ids": []})).unwrap();
+        assert!(s.execute("job.frame", &json!({})).is_err(), "nothing selected, nothing to frame");
+        assert_eq!(s.doc.shapes.len(), 2, "the document itself is untouched");
+        s.execute("job.set_scope", &json!({"selection_only": false})).unwrap();
+        assert_eq!(frame(&mut s), json!([10.0, 10.0, 240.0, 130.0]));
+        assert!(s.execute("job.set_scope", &json!({"selection_only": "yes"})).is_err());
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {
