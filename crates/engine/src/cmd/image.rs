@@ -32,7 +32,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Trace Image to Vectors",
         menu: "Edit",
         shortcut: None,
-        params_doc: "{id?, threshold? (0..255, default 128: pixels darker than this are traced, after the image's tone adjustments), tolerance? (pixels, default 1), min_area? (pixels squared, default 4), layer?, keep_image? (default true)}  — adds a path shape that follows the dark areas, on top of the picture",
+        params_doc: "{id?, threshold? (0..255, default 128: pixels darker than this are traced, after the image's tone adjustments), tolerance? (pixels, default 1), min_area? (pixels squared, default 4), layer?, keep_image? (default true), smooth? (default false: curves instead of straight steps)}  — adds a path shape that follows the dark areas, on top of the picture",
         mutates: true,
         run: trace,
     },
@@ -204,6 +204,9 @@ struct TraceParams {
     layer: Option<LayerId>,
     #[serde(default = "yes")]
     keep_image: bool,
+    /// Turn gentle bends into curves (corners sharper than 60 degrees stay corners).
+    #[serde(default)]
+    smooth: bool,
 }
 
 fn default_threshold() -> f64 {
@@ -221,6 +224,9 @@ fn default_min_area() -> f64 {
 fn yes() -> bool {
     true
 }
+
+/// Bends sharper than this stay corners when tracing with `smooth`.
+const SMOOTH_CORNER_DEG: f64 = 60.0;
 
 fn trace(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let p: TraceParams = parse(params)?;
@@ -249,7 +255,13 @@ fn trace(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     // Pixel units to the picture's own millimetres, then wherever the picture sits.
     let to_local = Affine::scale_non_uniform(*width_mm / w as f64, *height_mm / h as f64);
     let place = shape.transform * to_local;
-    let mut traced = Shape::path("Traced", layer, super::pathops::polylines_to_path(&loops));
+    let path = if p.smooth {
+        let subpaths = loops.iter().map(|l| lightfoundry_geom::nodes::smooth_polyline(&l.points, l.closed, SMOOTH_CORNER_DEG)).collect();
+        lightfoundry_geom::nodes::NodePath { subpaths }.to_bez()
+    } else {
+        super::pathops::polylines_to_path(&loops)
+    };
+    let mut traced = Shape::path("Traced", layer, path);
     traced.transform = place;
     let count = loops.len();
     let new_id = s.doc.add_shape(traced);

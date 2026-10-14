@@ -1235,6 +1235,32 @@ mod import_tests {
     }
 
     #[test]
+    fn smooth_tracing_of_a_disc_gives_curves_with_fewer_nodes_than_corners() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-smooth-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("disc.png");
+        image::GrayImage::from_fn(60, 60, |x, y| {
+            let (dx, dy) = (f64::from(x) - 29.5, f64::from(y) - 29.5);
+            image::Luma([if dx * dx + dy * dy < 20.0 * 20.0 { 0 } else { 255 }])
+        })
+        .save(&path)
+        .unwrap();
+        let mut s = Session::new();
+        let pic = s.execute("file.import_image", &json!({"path": path, "width": 60})).unwrap()["id"].as_u64().unwrap();
+        let count = |s: &Session, id: u64| match &s.doc.shape(id).unwrap().kind {
+            lightfoundry_doc::ShapeKind::Path { path } => path.elements().iter().filter(|e| matches!(e, kurbo::PathEl::CurveTo(..))).count(),
+            other => panic!("{other:?}"),
+        };
+        let plain = s.execute("image.trace", &json!({"id": pic, "tolerance": 1.0})).unwrap()["id"].as_u64().unwrap();
+        let smooth = s.execute("image.trace", &json!({"id": pic, "tolerance": 1.0, "smooth": true})).unwrap()["id"].as_u64().unwrap();
+        assert_eq!(count(&s, plain), 0, "straight steps");
+        assert!(count(&s, smooth) > 8, "curves: {}", count(&s, smooth));
+        let (a, b) = (s.doc.shape(plain).unwrap().world_bounds().unwrap(), s.doc.shape(smooth).unwrap().world_bounds().unwrap());
+        assert!((a.width() - b.width()).abs() < 1.5 && (a.height() - b.height()).abs() < 1.5, "{a:?} vs {b:?}");
+        s.execute("node.insert", &json!({"id": smooth, "segment": 0, "t": 0.5})).unwrap(); // and the result is editable
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

@@ -237,4 +237,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — shared preset library.** `preset.export` / `preset.import` (validated, names
   already present kept) and a per-user `presets.json` (via `Platform::preset_library_file`): the
   Presets section can save the project's presets to the library and add the library's to a project.
+- **2026-10-14 — smooth tracing.** `image.trace` takes `smooth`: `geom::nodes::smooth_polyline`
+  turns bends gentler than 60 degrees into smooth nodes (handles a third of the way to each
+  neighbour) and keeps sharper ones as corners, so traced discs and lettering come out as editable
+  curves with the node tool.
 

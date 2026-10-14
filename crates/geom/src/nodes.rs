@@ -69,6 +69,49 @@ pub struct OnPath {
     pub distance: f64,
 }
 
+/// Turns a closed or open polyline into curves: vertices where the line bends gently become smooth
+/// nodes whose handles follow the line (a third of the way to each neighbour); sharper bends
+/// (turning more than `corner_deg` degrees) stay corners.
+pub fn smooth_polyline(points: &[Point], closed: bool, corner_deg: f64) -> SubPath {
+    let n = points.len();
+    let limit = corner_deg.clamp(0.0, 180.0).to_radians();
+    let mut nodes = Vec::with_capacity(n);
+    for (i, p) in points.iter().enumerate() {
+        let prev = if i > 0 {
+            Some(points[i - 1])
+        } else if closed {
+            points.last().copied()
+        } else {
+            None
+        };
+        let next = if i + 1 < n {
+            Some(points[i + 1])
+        } else if closed {
+            points.first().copied()
+        } else {
+            None
+        };
+        let (Some(a), Some(b)) = (prev, next) else {
+            nodes.push(Node::corner(*p));
+            continue;
+        };
+        let (d_in, d_out) = (*p - a, b - *p);
+        let (l_in, l_out) = (d_in.hypot(), d_out.hypot());
+        if l_in < 1e-12 || l_out < 1e-12 {
+            nodes.push(Node::corner(*p));
+            continue;
+        }
+        let turn = (d_in.x * d_out.y - d_in.y * d_out.x).atan2(d_in.x * d_out.x + d_in.y * d_out.y).abs();
+        if turn > limit {
+            nodes.push(Node::corner(*p));
+            continue;
+        }
+        let tangent = (b - a) / (b - a).hypot().max(1e-12);
+        nodes.push(Node { p: *p, in_h: Some(-tangent * (l_in / 3.0)), out_h: Some(tangent * (l_out / 3.0)), smooth: true });
+    }
+    SubPath { nodes, closed }
+}
+
 impl NodePath {
     /// Builds the editable form of `path`. Quadratics become cubics; a closing curve back to the
     /// start folds into the first node's handle.

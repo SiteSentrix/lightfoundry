@@ -235,3 +235,44 @@ mod edit_tests {
         assert_eq!(np, NodePath::from_bez(&rect_path(0.0, 0.0, 10.0, 10.0)).unwrap(), "failed edits change nothing");
     }
 }
+
+mod smoothing_tests {
+    use kurbo::Shape;
+
+    use super::*;
+
+    fn circle_points(n: usize, r: f64) -> Vec<Point> {
+        (0..n)
+            .map(|i| Point::new(r * (i as f64 * std::f64::consts::TAU / n as f64).cos(), r * (i as f64 * std::f64::consts::TAU / n as f64).sin()))
+            .collect()
+    }
+
+    #[test]
+    fn gentle_bends_become_smooth_nodes_and_sharp_ones_stay_corners() {
+        let sub = smooth_polyline(&circle_points(12, 50.0), true, 60.0);
+        assert!(sub.closed && sub.nodes.len() == 12 && sub.nodes.iter().all(|n| n.smooth && n.in_h.is_some() && n.out_h.is_some()));
+        let square = [Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 10.0), Point::new(0.0, 10.0)];
+        let sharp = smooth_polyline(&square, true, 60.0);
+        assert!(sharp.nodes.iter().all(|n| !n.smooth && n.in_h.is_none()), "90 degree bends stay corners");
+        let open = smooth_polyline(&circle_points(6, 5.0)[..4], false, 100.0);
+        assert!(!open.nodes[0].smooth && !open.nodes[3].smooth, "the ends of an open line are corners");
+        assert!(open.nodes[1].smooth && open.nodes[2].smooth);
+    }
+
+    #[test]
+    fn the_curve_stays_close_to_the_polygon_and_degenerate_input_is_safe() {
+        let pts = circle_points(16, 40.0);
+        let path = NodePath { subpaths: vec![smooth_polyline(&pts, true, 60.0)] }.to_bez();
+        let b = path.bounding_box();
+        assert!((b.width() - 80.0).abs() < 2.0 && (b.height() - 80.0).abs() < 2.0, "{b:?}");
+        for odd in [
+            vec![],
+            vec![Point::new(1.0, 1.0)],
+            vec![Point::new(1.0, 1.0); 5],
+            vec![Point::new(f64::NAN, 0.0), Point::new(1.0, 1.0), Point::new(2.0, 0.0)],
+        ] {
+            let _ = NodePath { subpaths: vec![smooth_polyline(&odd, true, 60.0)] }.to_bez();
+        }
+        assert_eq!(smooth_polyline(&[], false, 60.0).nodes.len(), 0);
+    }
+}
