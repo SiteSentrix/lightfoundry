@@ -1,0 +1,71 @@
+[package]
+name = "lightfoundry-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+lightfoundry-fuzzkit = { path = "../crates/fuzzkit" }
+
+[workspace]
+
+
+[[bin]]
+name = "svg"
+path = "fuzz_targets/svg.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dxf"
+path = "fuzz_targets/dxf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "project"
+path = "fuzz_targets/project.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "controller_line"
+path = "fuzz_targets/controller_line.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gcode_program"
+path = "fuzz_targets/gcode_program.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mcp_message"
+path = "fuzz_targets/mcp_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "text_layout"
+path = "fuzz_targets/text_layout.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "command"
+path = "fuzz_targets/command.rs"
+test = false
+doc = false
+bench = false

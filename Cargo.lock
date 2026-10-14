@@ -1476,6 +1476,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "lightfoundry-fuzzkit"
+version = "0.1.0"
+dependencies = [
+ "lightfoundry-device",
+ "lightfoundry-dxf",
+ "lightfoundry-engine",
+ "lightfoundry-format",
+ "lightfoundry-mcp",
+ "lightfoundry-svg",
+ "lightfoundry-text",
+ "serde_json",
+]
+
+[[package]]
 name = "lightfoundry-gcode"
 version = "0.1.0"
 dependencies = [

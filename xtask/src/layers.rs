@@ -35,6 +35,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("mcp", Class::Layer(6)),
     ("ui-egui", Class::Layer(UI_LAYER)),
     ("testkit", Class::Testkit),
+    ("fuzzkit", Class::Exempt),
     ("lightfoundry", Class::Exempt),
     ("cli", Class::Exempt),
     ("xtask", Class::Exempt),
