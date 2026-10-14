@@ -130,4 +130,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   the midpoints of straight segments (capped at 200 per shape, 5000 overall; text excluded), and
   the Selection panel offers "Create by numbers" (x, y, width, height) for rectangles and ellipses
   on the active layer.
+- **2026-10-14 — perforation.** Layers have `perf_cut` / `perf_gap` (mm; both > 0): outlines, open
+  or closed, are cut as dashes with rapid moves over the gaps (laser off), replacing tabs when
+  both are set. Lengths below 0.05 mm, non-finite values and absurd piece counts fall back to a
+  solid line (or a plan error for bad settings).
 

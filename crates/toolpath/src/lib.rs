@@ -4,6 +4,7 @@
 
 mod fill;
 mod order;
+mod perforate;
 mod raster;
 mod tabs;
 mod timeline;
@@ -129,9 +130,14 @@ pub fn plan(doc: &Document) -> Result<Job, PlanError> {
 /// material outlines when the layer asks for them), and an optional lead-out.
 fn emit_outline(moves: &mut Vec<Move>, doc: &Document, layer: &Layer, pl: &Polyline, depth: usize, power: f64) {
     let Some(first) = pl.points.first().copied() else { return };
+    let perforated =
+        if layer.perf_cut > 0.0 && layer.perf_gap > 0.0 { perforate::perforate(&pl.points, pl.closed, layer.perf_cut, layer.perf_gap) } else { None };
     if !pl.closed {
         moves.push(Move::Travel(first));
-        moves.extend(pl.points.iter().skip(1).map(|p| Move::Cut { to: *p, power }));
+        match &perforated {
+            Some(pieces) => emit_dashes(moves, pieces, power),
+            None => moves.extend(pl.points.iter().skip(1).map(|p| Move::Cut { to: *p, power })),
+        }
         return;
     }
     // Leads need a start in the middle of an edge (see `restart_mid_edge`).
@@ -150,7 +156,18 @@ fn emit_outline(moves: &mut Vec<Move>, doc: &Document, layer: &Layer, pl: &Polyl
         }
         None => moves.push(Move::Travel(first)),
     }
+    // Perforation replaces tabs: a dashed line is already held together by its gaps.
     let pieces = if layer.tab_count > 0 && depth.is_multiple_of(2) { tabs::split_for_tabs(pl, layer.tab_count, layer.tab_width) } else { None };
+    if layer.perf_cut > 0.0
+        && layer.perf_gap > 0.0
+        && let Some(dashes) = perforate::perforate(&pl.points, true, layer.perf_cut, layer.perf_gap)
+    {
+        emit_dashes(moves, &dashes, power);
+        if let Some(exit) = lead(layer.lead_out) {
+            moves.push(Move::Cut { to: exit, power });
+        }
+        return;
+    }
     match pieces {
         Some(pieces) => {
             for piece in &pieces {
@@ -165,6 +182,15 @@ fn emit_outline(moves: &mut Vec<Move>, doc: &Document, layer: &Layer, pl: &Polyl
     }
     if let Some(exit) = lead(layer.lead_out) {
         moves.push(Move::Cut { to: exit, power });
+    }
+}
+
+/// Cuts the "on" pieces and moves over the gaps with the laser off (rapid moves).
+fn emit_dashes(moves: &mut Vec<Move>, pieces: &[tabs::Piece], power: f64) {
+    for piece in pieces {
+        for p in piece.points.iter().skip(1) {
+            moves.push(if piece.on { Move::Cut { to: *p, power } } else { Move::Travel(*p) });
+        }
     }
 }
 
@@ -230,6 +256,11 @@ fn validate(layer: &Layer) -> Result<(), PlanError> {
     }
     if !(layer.kerf_offset.is_finite() && layer.kerf_offset.abs() <= 50.0) {
         return Err(bad("kerf offset"));
+    }
+    for (value, what) in [(layer.perf_cut, "perforation cut length"), (layer.perf_gap, "perforation gap")] {
+        if !(value.is_finite() && (0.0..=1000.0).contains(&value)) {
+            return Err(bad(what));
+        }
     }
     for (value, what) in [(layer.tab_width, "tab width"), (layer.lead_in, "lead-in"), (layer.lead_out, "lead-out")] {
         if !(value.is_finite() && (0.0..=1000.0).contains(&value)) {

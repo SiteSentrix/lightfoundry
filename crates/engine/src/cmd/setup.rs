@@ -11,7 +11,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Cut Settings",
         menu: "Laser",
         shortcut: None,
-        params_doc: "{id, name?, color? (#rrggbb), mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, kerf_offset? (mm; closed outlines are offset before cutting, + grows parts and shrinks holes), tab_count? (per outer outline), tab_width? (mm), lead_in?/lead_out? (mm, on the scrap side), bidirectional?, dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
+        params_doc: "{id, name?, color? (#rrggbb), mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, kerf_offset? (mm; closed outlines are offset before cutting, + grows parts and shrinks holes), tab_count? (per outer outline), tab_width? (mm), lead_in?/lead_out? (mm, on the scrap side), perf_cut?/perf_gap? (mm; both > 0 cuts outlines as dashes with the laser off over the gaps, instead of tabs), bidirectional?, dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
         mutates: true,
         run: layer_set,
     },
@@ -52,6 +52,8 @@ struct LayerParams {
     tab_width: Option<f64>,
     lead_in: Option<f64>,
     lead_out: Option<f64>,
+    perf_cut: Option<f64>,
+    perf_gap: Option<f64>,
     bidirectional: Option<bool>,
     dither: Option<Dither>,
     output: Option<bool>,
@@ -84,6 +86,12 @@ fn layer_set(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     }
     if let Some(v) = p.lead_in {
         layer.lead_in = in_range("lead_in", v, 0.0, 1000.0)?;
+    }
+    if let Some(v) = p.perf_cut {
+        layer.perf_cut = in_range("perf_cut", v, 0.0, 1000.0)?;
+    }
+    if let Some(v) = p.perf_gap {
+        layer.perf_gap = in_range("perf_gap", v, 0.0, 1000.0)?;
     }
     if let Some(v) = p.lead_out {
         layer.lead_out = in_range("lead_out", v, 0.0, 1000.0)?;

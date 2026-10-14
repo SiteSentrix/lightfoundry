@@ -114,6 +114,8 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ("Tab width", "tab_width", layer.tab_width, 0.0..=1000.0, " mm"),
             ("Lead-in", "lead_in", layer.lead_in, 0.0..=1000.0, " mm"),
             ("Lead-out", "lead_out", layer.lead_out, 0.0..=1000.0, " mm"),
+            ("Dash cut", "perf_cut", layer.perf_cut, 0.0..=1000.0, " mm"),
+            ("Dash gap", "perf_gap", layer.perf_gap, 0.0..=1000.0, " mm"),
         ] {
             ui.label(label);
             if let Some(v) = number(ui, value, range, suffix) {

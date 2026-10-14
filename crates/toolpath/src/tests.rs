@@ -660,3 +660,83 @@ mod order_option_tests {
         assert_eq!(sizes(order(false, true))[0], 100);
     }
 }
+
+mod perforation_tests {
+    use super::*;
+    use crate::perforate::perforate;
+
+    fn line(len: f64) -> Vec<Point> {
+        vec![Point::new(0.0, 0.0), Point::new(len, 0.0)]
+    }
+
+    fn length(points: &[Point]) -> f64 {
+        points.windows(2).map(|w| w[0].distance(w[1])).sum()
+    }
+
+    #[test]
+    fn a_line_alternates_cut_and_skip_pieces_and_covers_the_whole_length() {
+        let pieces = perforate(&line(50.0), false, 4.0, 1.0).unwrap();
+        assert_eq!(pieces.len(), 20, "ten 5 mm periods");
+        assert!(pieces.iter().enumerate().all(|(i, p)| p.on == (i % 2 == 0)));
+        assert!((pieces.iter().map(|p| length(&p.points)).sum::<f64>() - 50.0).abs() < 1e-6);
+        assert!((length(&pieces[0].points) - 4.0).abs() < 1e-9 && (length(&pieces[1].points) - 1.0).abs() < 1e-9);
+        for w in pieces.windows(2) {
+            assert!(w[0].points.last().unwrap().distance(w[1].points[0]) < 1e-9, "pieces join up");
+        }
+    }
+
+    #[test]
+    fn dashes_follow_corners_and_closed_outlines_include_the_closing_edge() {
+        let square = vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(10.0, 10.0), Point::new(0.0, 10.0)];
+        let pieces = perforate(&square, true, 4.0, 3.0).unwrap();
+        let total: f64 = pieces.iter().map(|p| length(&p.points)).sum();
+        assert!((total - 40.0).abs() < 1e-6, "{total}");
+        assert!(pieces.iter().any(|p| p.points.len() > 2), "a dash can turn a corner");
+        let open = perforate(&square, false, 4.0, 3.0).unwrap();
+        assert!((open.iter().map(|p| length(&p.points)).sum::<f64>() - 30.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn unusable_lengths_and_inputs_give_none() {
+        for (cut, gap) in [(0.0, 1.0), (1.0, 0.0), (0.01, 1.0), (f64::NAN, 1.0), (1.0, f64::INFINITY), (-1.0, 1.0)] {
+            assert!(perforate(&line(10.0), false, cut, gap).is_none(), "{cut} {gap}");
+        }
+        assert!(perforate(&[], false, 1.0, 1.0).is_none());
+        assert!(perforate(&[Point::new(0.0, 0.0)], true, 1.0, 1.0).is_none());
+        assert!(perforate(&line(1e9), false, 0.05, 0.05).is_none(), "too many pieces to be sensible");
+        assert!(perforate(&line(f64::INFINITY), false, 1.0, 1.0).is_none());
+        let degenerate = vec![Point::new(1.0, 1.0); 5];
+        assert!(
+            perforate(&degenerate, true, 1.0, 1.0).is_some_and(|p| p.iter().all(|x| x.points.len() <= 2)),
+            "zero-length edges do not loop forever"
+        );
+    }
+
+    #[test]
+    fn a_perforated_layer_uses_rapid_moves_over_the_gaps_and_cuts_half_the_length() {
+        let mut doc = rect_doc(40.0, 40.0, LayerMode::Line);
+        if let Some(l) = doc.layer_mut(0) {
+            l.perf_cut = 5.0;
+            l.perf_gap = 5.0;
+            l.tab_count = 4; // perforation wins over tabs
+        }
+        let job = plan(&doc).unwrap();
+        let moves = &job.ops[0].moves;
+        let travels = moves.iter().filter(|m| matches!(m, Move::Travel(_))).count();
+        assert!(travels >= 16, "one rapid move per gap plus the first: {travels}");
+        let e = estimate(&job, 6000.0);
+        assert!((e.cut_mm - 80.0).abs() < 1.0, "{}", e.cut_mm);
+        assert!(moves.iter().all(|m| !matches!(m, Move::Cut { power, .. } if *power == 0.0)), "no zero-power cuts: gaps are travels");
+    }
+
+    #[test]
+    fn bad_perforation_settings_are_a_plan_error_not_a_panic() {
+        for bad in [f64::NAN, -1.0, 5000.0] {
+            let mut doc = rect_doc(10.0, 10.0, LayerMode::Line);
+            if let Some(l) = doc.layer_mut(0) {
+                l.perf_cut = bad;
+            }
+            assert!(matches!(plan(&doc), Err(PlanError::BadLayerSetting { .. })), "{bad}");
+        }
+    }
+}
