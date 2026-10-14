@@ -72,10 +72,25 @@ impl Snapper {
                 if g.vertical { t.xs.push(g.pos) } else { t.ys.push(g.pos) }
             }
         }
+        let mut vertices = 0;
         for item in &app.geometry.items {
             all.add_rect(item.bounds);
-            if !app.session.selection.contains(&item.id) {
+            let moving = app.session.selection.contains(&item.id);
+            if !moving {
                 others.add_rect(item.bounds);
+            }
+            // Corners and edge midpoints of drawn paths (not text, which has too many to be useful).
+            if let Some(shape) = app.session.doc.shape(item.id)
+                && let lightfoundry_doc::ShapeKind::Path { path } = &shape.kind
+                && vertices < snap::MAX_VERTEX_TARGETS
+            {
+                for p in snap::path_points(path, shape.transform, snap::MAX_VERTEX_TARGETS_PER_SHAPE) {
+                    all.add_point(p);
+                    if !moving {
+                        others.add_point(p);
+                    }
+                    vertices += 1;
+                }
             }
         }
         Snapper { settings: app.snapping, all, others, threshold: snap::SNAP_RADIUS_PX / f64::from(view.zoom) }

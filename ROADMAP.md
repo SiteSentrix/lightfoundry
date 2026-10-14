@@ -126,4 +126,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   on the bed (a ring and cross), and "Click the canvas to move the laser there" sends a bounded
   absolute `$J=G90 G21` jog (`Link::jog_to`); points off the bed are refused, Escape or
   disconnecting leaves the mode, and nothing is sent while a job runs.
+- **2026-10-14 — precision layout.** Snapping now also locks onto path corners, segment ends and
+  the midpoints of straight segments (capped at 200 per shape, 5000 overall; text excluded), and
+  the Selection panel offers "Create by numbers" (x, y, width, height) for rectangles and ellipses
+  on the active layer.
 

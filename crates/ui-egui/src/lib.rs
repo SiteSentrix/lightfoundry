@@ -120,6 +120,8 @@ pub struct LightFoundryApp {
     preset_name: String,
     /// While on, a click on the canvas sends the laser head there.
     move_head_mode: bool,
+    /// x, y, width, height typed into the "create by numbers" fields.
+    new_shape: [f64; 4],
     /// The project path last added to the recent list.
     recorded_path: Option<PathBuf>,
     allow_close: bool,
@@ -203,6 +205,7 @@ impl LightFoundryApp {
             sharpen_amount: 1.0,
             preset_name: String::new(),
             move_head_mode: false,
+            new_shape: [10.0, 10.0, 50.0, 30.0],
             recorded_path: None,
             allow_close: false,
             last_title: String::new(),

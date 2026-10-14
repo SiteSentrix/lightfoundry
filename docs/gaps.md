@@ -8,7 +8,6 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 1  | Verify on real GRBL hardware (jog, frame, short cut), fix what it finds              | Everything machine-side is only simulator-tested                    |
 | 2  | Run-from-line; auto-reconnect (the $$ settings editor is done)                       | Day-to-day machine ownership                                        |
 | 4  | Outline fonts for text (Fill-mode text, accented/Unicode characters) via an optional font source (`storytold/craft-fonts` through a build option, never in-repo); today text is an ASCII single-line stroke font | Fill-engraved lettering and non-English text |
-| 7  | Numeric create dialogs; snapping to shape vertices and path midpoints (edges, centres, grid, bed and guides are done) | Precision layout                                                    |
 | 8  | Cut-order: by group, choose the start point, remove overlapping segments (not only identical outlines) | Quality and time                                                    |
 | 9  | Trace image to vectors; on-canvas crop handles; resample/resize (tone, crop, sharpen and seven dither modes are done) | Photo engraving results                                  |
 | 10 | Perforation/dashed cuts, ramp, per-layer overscan setting (tabs and lead-in/out are done) | Clean cuts of special materials                                     |
