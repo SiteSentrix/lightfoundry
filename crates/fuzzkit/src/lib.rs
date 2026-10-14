@@ -100,6 +100,8 @@ mod tests {
 
     const SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="50mm" height="30mm" viewBox="0 0 50 30"><g transform="translate(5 5)"><rect x="1" y="1" width="20" height="10" rx="2"/><circle cx="30" cy="10" r="6"/><path d="M0 0 C 5 20 15 20 20 0 Z"/></g></svg>"##;
     const DXF: &str = "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10\n0\n20\n0\n11\n10\n21\n10\n0\nCIRCLE\n8\n0\n10\n5\n20\n5\n40\n3\n0\nLWPOLYLINE\n8\n0\n90\n3\n70\n1\n10\n0\n20\n0\n10\n4\n20\n0\n10\n4\n20\n4\n0\nENDSEC\n0\nEOF\n";
+    /// Blocks, inserts, an ellipse and a spline: the parts of the DXF reader with the most arithmetic.
+    const DXF_RICH: &str = "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nB\n10\n0\n20\n0\n0\nLINE\n10\n0\n20\n0\n11\n5\n21\n5\n0\nINSERT\n2\nB\n0\nENDBLK\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nINSERT\n2\nB\n10\n3\n20\n4\n41\n2\n42\n2\n50\n30\n0\nELLIPSE\n10\n0\n20\n0\n11\n9\n21\n1\n40\n0.4\n41\n0\n42\n3\n0\nSPLINE\n70\n8\n71\n3\n40\n0\n40\n0\n40\n0\n40\n0\n40\n1\n40\n1\n40\n1\n40\n1\n41\n1\n41\n2\n41\n1\n41\n1\n10\n0\n20\n0\n10\n1\n20\n3\n10\n2\n20\n3\n10\n3\n20\n0\n0\nENDSEC\n0\nEOF\n";
     const GCODE: &str = "G21\nG90\nM4 S0\nG0 X10 Y10\nG1 X20 Y10 S500 F1000\nG1 X20 Y20\nM5\nG0 X0 Y0\n";
     const STATUS: &str = "<Idle|MPos:1.000,2.000,0.000|FS:0,0>\n$130=410.000\n$32=1\nok\nerror:20\nALARM:1\n";
     const MCP: &str = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"shape_rectangle\",\"arguments\":{\"width\":5,\"height\":5}}}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n";
@@ -155,6 +157,7 @@ mod tests {
     #[test]
     fn dxf_survives_mutation() {
         drive(DXF, dxf, 3000);
+        drive(DXF_RICH, dxf, 4000);
     }
 
     #[test]
