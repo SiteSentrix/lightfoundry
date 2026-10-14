@@ -27,6 +27,11 @@ pub trait Platform {
         None
     }
 
+    /// A folder of project templates (`.lightfoundry` files), if this platform has one.
+    fn templates_dir(&self) -> Option<PathBuf> {
+        None
+    }
+
     /// Where the list of recent projects is kept, if this platform has somewhere to keep it.
     fn recent_file(&self) -> Option<PathBuf> {
         None

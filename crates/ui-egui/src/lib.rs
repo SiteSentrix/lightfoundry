@@ -143,6 +143,7 @@ pub struct LightFoundryApp {
     trace_threshold: f64,
     trace_smooth: bool,
     preset_name: String,
+    template_name: String,
     resume_line: usize,
     /// What a requested upload is for.
     awaiting_upload: Option<UploadKind>,
@@ -191,6 +192,8 @@ pub(crate) enum PendingAction {
     New,
     Open,
     OpenPath(PathBuf),
+    /// A template: opens as a new untitled project.
+    FromTemplate(PathBuf),
     Close,
 }
 
@@ -269,6 +272,7 @@ impl LightFoundryApp {
             trace_threshold: 128.0,
             trace_smooth: true,
             preset_name: String::new(),
+            template_name: String::new(),
             resume_line: 1,
             awaiting_upload: None,
             awaiting_serial: false,
@@ -487,6 +491,13 @@ impl LightFoundryApp {
                     self.forget_recent(&path);
                 }
             }
+            PendingAction::FromTemplate(path) => {
+                if self.run("file.open", serde_json::json!({ "path": path, "template": true })).is_some() {
+                    self.clear_recovery();
+                    self.autosave_revision = None;
+                    self.view = None;
+                }
+            }
             PendingAction::Close => {
                 self.allow_close = true;
                 self.clear_recovery();
@@ -633,6 +644,46 @@ impl LightFoundryApp {
         }
         if let Some(v) = self.run("preset.import", serde_json::json!({ "presets": library })) {
             self.say(format!("{} preset(s) added from your library", v["added"]));
+        }
+    }
+
+    pub(crate) fn templates_available(&self) -> bool {
+        self.platform.templates_dir().is_some()
+    }
+
+    /// Template files, by name.
+    pub(crate) fn templates(&self) -> Vec<(String, PathBuf)> {
+        let Some(dir) = self.platform.templates_dir() else { return Vec::new() };
+        let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+        let mut found: Vec<(String, PathBuf)> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "lightfoundry"))
+            .filter_map(|p| Some((p.file_stem()?.to_string_lossy().into_owned(), p)))
+            .collect();
+        found.sort();
+        found.truncate(100);
+        found
+    }
+
+    /// Keeps the current project as a template under `name` (letters, digits, spaces, `-` and `_`).
+    pub(crate) fn save_template(&mut self, name: &str) {
+        let clean: String = name.trim().chars().filter(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_')).take(60).collect();
+        let Some(dir) = self.platform.templates_dir() else { return };
+        if clean.is_empty() {
+            self.status = Some(("Give the template a name".into(), true));
+            return;
+        }
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join(format!("{clean}.lightfoundry"));
+        // Saved as data, so the open project keeps its own path and unsaved state.
+        let was_dirty = self.session.dirty;
+        let Some(v) = self.session.execute("file.project_data", &serde_json::Value::Null).ok() else { return };
+        let bytes = v["data_base64"].as_str().and_then(lightfoundry_doc::base64::decode).unwrap_or_default();
+        self.session.dirty = was_dirty;
+        match std::fs::write(&file, bytes) {
+            Ok(()) => self.say(format!("Saved template {clean}")),
+            Err(e) => self.status = Some((format!("Could not save the template: {e}"), true)),
         }
     }
 

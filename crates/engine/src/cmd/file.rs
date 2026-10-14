@@ -22,7 +22,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Open…",
         menu: "File",
         shortcut: Some("Ctrl+O"),
-        params_doc: "{path | data_base64}  — data_base64 is the contents of a .lightfoundry file",
+        params_doc: "{path | data_base64, template?: bool}  — template opens it as a new untitled project; data_base64 is the contents of a .lightfoundry file",
         mutates: false,
         run: open,
     },
@@ -118,6 +118,9 @@ const MAX_IMAGE_FILE_BYTES: u64 = 256 * 1024 * 1024;
 struct OpenParams {
     path: Option<PathBuf>,
     data_base64: Option<String>,
+    /// Open as a new untitled project (the file is a template and is never saved over).
+    #[serde(default)]
+    template: bool,
 }
 
 fn open(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
@@ -128,7 +131,10 @@ fn open(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         (None, None) => return Err(EngineError::BadParams("give either path or data_base64".into())),
     };
     let shapes = doc.shapes.len();
-    s.replace_document(doc, path);
+    s.replace_document(doc, if p.template { None } else { path });
+    if p.template {
+        s.dirty = true; // a new project made from a template has never been saved
+    }
     Ok(json!({ "shapes": shapes }))
 }
 

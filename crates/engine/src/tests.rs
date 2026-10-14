@@ -1302,6 +1302,23 @@ mod import_tests {
     }
 
     #[test]
+    fn opening_a_file_as_a_template_leaves_an_untitled_unsaved_project() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-template-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("t.lightfoundry");
+        let mut a = Session::new();
+        a.execute("shape.rectangle", &json!({"width": 5, "height": 5})).unwrap();
+        a.execute("file.save", &json!({"path": file})).unwrap();
+        let mut b = Session::new();
+        b.execute("file.open", &json!({"path": file, "template": true})).unwrap();
+        assert_eq!(b.doc.shapes.len(), 1);
+        assert!(b.path.is_none() && b.dirty);
+        assert!(b.execute("file.save", &json!({})).is_err(), "no path to save over the template");
+        b.execute("file.open", &json!({"path": file})).unwrap();
+        assert_eq!(b.path.as_deref(), Some(file.as_path()));
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {
