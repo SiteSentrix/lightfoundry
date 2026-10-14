@@ -156,6 +156,10 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     if ui.checkbox(&mut bidi, "Bi-directional fill").changed() {
         app.run("layer.set", json!({ "id": layer.id, "bidirectional": bidi }));
     }
+    let mut cross = layer.crosshatch;
+    if ui.checkbox(&mut cross, "Cross-hatch fill").on_hover_text("Fill a second time at right angles").changed() {
+        app.run("layer.set", json!({ "id": layer.id, "crosshatch": cross }));
+    }
     let mut air = layer.air_assist;
     if ui.checkbox(&mut air, "Air assist").changed() {
         app.run("layer.set", json!({ "id": layer.id, "air_assist": air }));
@@ -212,6 +216,13 @@ fn create_by_numbers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         }
         if ui.button("Ellipse").clicked() {
             app.run("shape.ellipse", json!({ "cx": x + w / 2.0, "cy": y + h / 2.0, "rx": w / 2.0, "ry": h / 2.0, "layer": layer }));
+        }
+        if ui.button("Star").on_hover_text("Five points, fitted to the width and height boxes").clicked() {
+            let r = w.min(h) / 2.0;
+            app.run(
+                "shape.star",
+                json!({ "cx": x + w / 2.0, "cy": y + h / 2.0, "outer_radius": r, "inner_radius": r * 0.4, "points": 5, "layer": layer }),
+            );
         }
     });
 }

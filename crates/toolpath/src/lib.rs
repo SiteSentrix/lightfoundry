@@ -284,8 +284,12 @@ fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) ->
     let mk = |kind, moves| Op { layer: layer.id, kind, speed: layer.speed, passes, air_assist: layer.air_assist, moves };
 
     if matches!(layer.mode, LayerMode::Fill | LayerMode::FillAndLine) {
-        let segs = fill_segments(&vector, layer.interval, layer.scan_angle, layer.bidirectional);
-        if !segs.is_empty() {
+        let angles: &[f64] = if layer.crosshatch { &[0.0, 90.0] } else { &[0.0] };
+        for extra in angles {
+            let segs = fill_segments(&vector, layer.interval, layer.scan_angle + extra, layer.bidirectional);
+            if segs.is_empty() {
+                continue;
+            }
             let mut moves = Vec::with_capacity(segs.len() * 2);
             for (a, b) in segs {
                 moves.push(Move::Travel(a));

@@ -713,6 +713,27 @@ mod perforation_tests {
     }
 
     #[test]
+    fn crosshatch_fills_twice_at_right_angles() {
+        let mut doc = rect_doc(30.0, 30.0, LayerMode::Fill);
+        if let Some(l) = doc.layer_mut(0) {
+            l.interval = 1.0;
+        }
+        let single = plan(&doc).unwrap();
+        assert_eq!(single.ops.len(), 1);
+        if let Some(l) = doc.layer_mut(0) {
+            l.crosshatch = true;
+        }
+        let both = plan(&doc).unwrap();
+        assert_eq!(both.ops.len(), 2);
+        let direction = |op: &Op| match (op.moves.first(), op.moves.get(1)) {
+            (Some(Move::Travel(a)), Some(Move::Cut { to, .. })) => (to.x - a.x).abs() > (to.y - a.y).abs(),
+            other => panic!("{other:?}"),
+        };
+        assert_ne!(direction(&both.ops[0]), direction(&both.ops[1]), "one pass runs along x, the other along y");
+        assert!((estimate(&both, 6000.0).cut_mm / estimate(&single, 6000.0).cut_mm - 2.0).abs() < 0.2);
+    }
+
+    #[test]
     fn a_perforated_layer_uses_rapid_moves_over_the_gaps_and_cuts_half_the_length() {
         let mut doc = rect_doc(40.0, 40.0, LayerMode::Line);
         if let Some(l) = doc.layer_mut(0) {

@@ -151,4 +151,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — distribute and star.** `edit.distribute` (even gaps between three or more shapes
   along an axis, or a fixed gap from the first) with Arrange menu entries, and `shape.star`
   (3-100 points, inner and outer radius).
+- **2026-10-14 — cross-hatch fill and a Star button.** `crosshatch` on a layer plans the fill a
+  second time at right angles (older files load with it off); the Create by numbers section gets a
+  Star button.
 
