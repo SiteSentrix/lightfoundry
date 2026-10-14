@@ -26,3 +26,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   position, 9-point anchor) through the document, G-code placement, file format, CLI and UI. UI jog pad
   and anchor picker drawn in code (the default font has no arrow glyphs). 143 tests. Still not run on
   real hardware.
+- **2026-10-14 — text.** New `text` crate: an original single-line stroke font (ASCII, upper and
+  lower case, digits, punctuation) drawn from a glyph table with corner-cutting smoothing, plus
+  layout (multi-line, alignment, letter/line gap). `ShapeKind::Text` keeps content and style next to
+  the generated path; `text.create` / `text.edit` commands; Text tool and inspector editor in the UI.
+  Clicking anywhere inside a text block selects it. Fixed a drag-select bug found while testing (a
+  click that switched tools was re-handled as a selection click).

@@ -8,7 +8,7 @@
 
 | Area                  | Score | Shipped                                                                 | Missing (highlights)                                                                                     |
 |-----------------------|------:|-------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
-| Drawing tools         |   15% | rectangle, ellipse, line, polygon; move, resize, rotate, flip, align    | pen/Bézier editing, node edit, text, rounded rect, offset, boolean ops, array/grid, groups, tabs/bridges |
+| Drawing tools         |   25% | rectangle, ellipse, line, polygon, editable text (stroke font); move, resize, rotate, flip, align | pen/Bézier editing, node edit, outline fonts (Fill-mode text), rounded rect, offset, boolean ops, array/grid, groups, tabs/bridges |
 | Import                |   35% | SVG, DXF (basic entities), raster images                                | AI/PDF/EPS, DXF splines/ellipses/text/blocks, image trace, image adjustments, SVG text/images            |
 | Layers & cut settings |   35% | 16 layers; line, fill, fill+line, image; speed, power, passes, interval | sub-layers, kerf offset, lead-in/out, perforation, dot width, ramp, Z offset, per-layer overscan        |
 | Toolpath planning     |   30% | inner-first, nearest neighbour, scan fill, dithered raster, estimate    | cut-order optimiser options, remove overlaps, start-point choice, cut selected only, job origin modes    |
@@ -25,7 +25,7 @@ low power, and stay present.
 
 ## Evidence of what ships
 
-- 143 tests across the workspace (`cargo test --workspace`); gates in `cargo xtask ci`.
+- 164 tests across the workspace (`cargo test --workspace`); gates in `cargo xtask ci`.
 - End-to-end: `lightfoundry-cli gcode demo.svg` → G-code; the desktop app was driven under Xvfb
   (draw with each tool, generate, start on the simulator, progress and completion shown; jog pad
   clicks moved the simulated head the expected way and the console logged each `$J=` line).

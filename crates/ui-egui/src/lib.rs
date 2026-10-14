@@ -30,6 +30,7 @@ pub enum Tool {
     Ellipse,
     Line,
     Polygon,
+    Text,
 }
 
 /// Where Start sends the program.
@@ -58,6 +59,9 @@ pub struct LightFoundryApp {
     snap: Option<Snapshot>,
     last_job: Option<JobState>,
     console_input: String,
+    /// The text being typed in the inspector (committed when the box loses focus).
+    text_buffer: Option<(lightfoundry_doc::ShapeId, String)>,
+    text_warning: Option<String>,
     jog_step: f64,
     jog_feed: f64,
     target: Target,
@@ -86,6 +90,8 @@ impl LightFoundryApp {
             snap: None,
             last_job: None,
             console_input: String::new(),
+            text_buffer: None,
+            text_warning: None,
             jog_step: 1.0,
             jog_feed: 3000.0,
             target: Target::Simulator,
@@ -114,6 +120,13 @@ impl LightFoundryApp {
                 None
             }
         }
+    }
+
+    /// Remembers characters the stroke font cannot draw so the inspector can say so.
+    pub(crate) fn note_unsupported(&mut self, result: &Value) {
+        let chars: Vec<String> =
+            result["unsupported"].as_array().map(|a| a.iter().filter_map(|c| c.as_str().map(String::from)).collect()).unwrap_or_default();
+        self.text_warning = (!chars.is_empty()).then(|| format!("No glyph for: {} (drawn as a box)", chars.join(" ")));
     }
 
     pub(crate) fn say(&mut self, text: impl Into<String>) {

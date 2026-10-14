@@ -1,5 +1,5 @@
 use lightfoundry_device::{JobState, Link};
-use lightfoundry_doc::{Anchor, Dither, LayerMode, Origin, StartFrom};
+use lightfoundry_doc::{Anchor, Dither, LayerMode, Origin, ShapeKind, StartFrom, TextAlign};
 use serde_json::{Value, json};
 
 use crate::menus::format_duration;
@@ -8,9 +8,14 @@ use crate::{LightFoundryApp, Target, Tool};
 
 pub fn toolbar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     ui.add_space(4.0);
-    for (tool, label) in
-        [(Tool::Select, "Select"), (Tool::Rectangle, "Rectangle"), (Tool::Ellipse, "Ellipse"), (Tool::Line, "Line"), (Tool::Polygon, "Polygon")]
-    {
+    for (tool, label) in [
+        (Tool::Select, "Select"),
+        (Tool::Rectangle, "Rectangle"),
+        (Tool::Ellipse, "Ellipse"),
+        (Tool::Line, "Line"),
+        (Tool::Polygon, "Polygon"),
+        (Tool::Text, "Text"),
+    ] {
         if ui.add_sized([72.0, 28.0], egui::Button::new(label).selected(app.tool == tool)).clicked() {
             app.tool = tool;
         }
@@ -25,7 +30,10 @@ pub fn toolbar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 pub fn inspector(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
         egui::CollapsingHeader::new("Cuts / Layers").default_open(true).show(ui, |ui| layers(app, ui));
-        egui::CollapsingHeader::new("Selection").default_open(true).show(ui, |ui| properties(app, ui));
+        egui::CollapsingHeader::new("Selection").default_open(true).show(ui, |ui| {
+            properties(app, ui);
+            text_properties(app, ui);
+        });
         egui::CollapsingHeader::new("Laser").default_open(true).show(ui, |ui| laser(app, ui));
     });
 }
@@ -486,4 +494,72 @@ fn anchor_button(ui: &mut egui::Ui, selected: bool) -> egui::Response {
         ui.painter().circle_stroke(rect.center(), 5.0, egui::Stroke::new(1.5, color));
     }
     resp
+}
+
+/// The editor for a single selected text object.
+fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let [id] = app.session.selection.as_slice() else {
+        app.text_buffer = None;
+        return;
+    };
+    let id = *id;
+    let Some((content, style)) = app.session.doc.shape(id).and_then(|s| match &s.kind {
+        ShapeKind::Text { content, style, .. } => Some((content.clone(), style.clone())),
+        _ => None,
+    }) else {
+        app.text_buffer = None;
+        return;
+    };
+    if app.text_buffer.as_ref().is_none_or(|(buf_id, _)| *buf_id != id) {
+        app.text_buffer = Some((id, content.clone()));
+    }
+    ui.separator();
+    ui.label(egui::RichText::new("Text").strong());
+    let mut commit = None;
+    if let Some((_, buffer)) = app.text_buffer.as_mut() {
+        let r = ui.add(egui::TextEdit::multiline(buffer).desired_rows(2).desired_width(f32::INFINITY).hint_text("Type text; click away to apply"));
+        if r.lost_focus() && *buffer != content && !buffer.trim().is_empty() {
+            commit = Some(json!({ "id": id, "text": buffer.clone() }));
+        }
+    }
+    egui::Grid::new("text_style").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+        for (label, key, value, range) in [
+            ("Height", "height", style.height, 0.1..=1000.0),
+            ("Letter gap", "letter_spacing", style.letter_spacing, 0.0..=10.0),
+            ("Line gap", "line_spacing", style.line_spacing, 0.0..=10.0),
+        ] {
+            ui.label(label);
+            if let Some(v) = number(ui, value, range, if key == "height" { " mm" } else { "×" }) {
+                commit = Some(json!({ "id": id, key: v }));
+            }
+            ui.end_row();
+        }
+        ui.label("Align");
+        let mut align = style.align;
+        egui::ComboBox::from_id_salt("text_align")
+            .selected_text(match align {
+                TextAlign::Left => "Left",
+                TextAlign::Center => "Center",
+                TextAlign::Right => "Right",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut align, TextAlign::Left, "Left");
+                ui.selectable_value(&mut align, TextAlign::Center, "Center");
+                ui.selectable_value(&mut align, TextAlign::Right, "Right");
+            });
+        if align != style.align {
+            commit = Some(json!({ "id": id, "align": align }));
+        }
+        ui.end_row();
+    });
+    if let Some(params) = commit {
+        if let Some(v) = app.run("text.edit", params) {
+            app.note_unsupported(&v);
+        }
+        app.text_buffer = None;
+    }
+    if let Some(w) = &app.text_warning {
+        ui.colored_label(app.tokens.error, w);
+    }
+    ui.weak("Single-line stroke font: engraves each stroke in one pass (Line mode).");
 }

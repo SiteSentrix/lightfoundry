@@ -152,7 +152,7 @@ fn validate(layer: &Layer) -> Result<(), PlanError> {
 
 fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) -> Result<Vec<Op>, PlanError> {
     let mut ops = Vec::new();
-    let vector: Vec<Polyline> = shapes.iter().filter(|s| matches!(s.kind, ShapeKind::Path { .. })).flat_map(|s| s.world_polylines()).collect();
+    let vector: Vec<Polyline> = shapes.iter().filter(|s| s.vector_path().is_some()).flat_map(|s| s.world_polylines()).collect();
     let power = layer.max_power.clamp(0.0, 100.0);
     let passes = layer.passes.clamp(1, 1000);
     let mk = |kind, moves| Op { layer: layer.id, kind, speed: layer.speed, passes, air_assist: layer.air_assist, moves };

@@ -6,6 +6,7 @@ mod job;
 mod params;
 mod setup;
 mod shapes;
+mod text;
 
 use serde_json::Value;
 
@@ -29,7 +30,7 @@ pub struct CommandSpec {
 }
 
 pub fn commands() -> impl Iterator<Item = &'static CommandSpec> {
-    shapes::COMMANDS.iter().chain(edit::COMMANDS).chain(setup::COMMANDS).chain(file::COMMANDS).chain(job::COMMANDS)
+    shapes::COMMANDS.iter().chain(text::COMMANDS).chain(edit::COMMANDS).chain(setup::COMMANDS).chain(file::COMMANDS).chain(job::COMMANDS)
 }
 
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {

@@ -1,0 +1,14 @@
+[package]
+name = "lightfoundry-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "LightFoundry text: an original single-line stroke font and layout"
+
+[lints]
+workspace = true
+
+[dependencies]
+lightfoundry-geom = { workspace = true }
+kurbo = { workspace = true }
+thiserror = { workspace = true }

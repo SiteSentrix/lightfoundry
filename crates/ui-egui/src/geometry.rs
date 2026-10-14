@@ -14,7 +14,9 @@ pub struct Item {
     pub layer: LayerId,
     pub lines: Vec<Polyline>,
     pub bounds: Rect,
+    /// Filled-in for picking: images and text are picked anywhere inside their bounds.
     pub is_image: bool,
+    pub is_text: bool,
 }
 
 #[derive(Default)]
@@ -36,14 +38,28 @@ impl GeometryCache {
             .filter_map(|sh| {
                 let lines = sh.world_polylines();
                 let bounds = bounds_of_polylines(&lines)?;
-                Some(Item { id: sh.id, layer: sh.layer, lines, bounds, is_image: matches!(sh.kind, lightfoundry_doc::ShapeKind::Image { .. }) })
+                Some(Item {
+                    id: sh.id,
+                    layer: sh.layer,
+                    lines,
+                    bounds,
+                    is_image: matches!(sh.kind, lightfoundry_doc::ShapeKind::Image { .. }),
+                    is_text: matches!(sh.kind, lightfoundry_doc::ShapeKind::Text { .. }),
+                })
             })
             .collect();
     }
 
     /// Topmost shape whose outline is within `tol` mm of `p`, or whose closed outline contains it.
     pub fn pick(&self, p: Point, tol: f64) -> Option<ShapeId> {
-        self.items.iter().rev().find(|it| it.lines.iter().any(|l| l.contains(p) || l.distance_to(p) <= tol)).map(|it| it.id)
+        self.items
+            .iter()
+            .rev()
+            .find(|it| {
+                // Thin strokes are hard to hit, so text counts as a block.
+                (it.is_text && it.bounds.inflate(tol, tol).contains(p)) || it.lines.iter().any(|l| l.contains(p) || l.distance_to(p) <= tol)
+            })
+            .map(|it| it.id)
     }
 }
 
