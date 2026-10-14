@@ -1,6 +1,7 @@
 //! The preview timeline: a bar under the canvas with play/pause, a scrubber and the time spent per
 //! layer, and the maths that decides how much of the toolpath has been "burned" at a given moment.
 
+use crate::i18n::tr;
 use egui::{Color32, Stroke, pos2, vec2};
 use lightfoundry_geom::Point;
 use lightfoundry_toolpath::Moment;
@@ -100,7 +101,7 @@ pub fn head_position(segments: &[PreviewSegment], now: Moment) -> Option<Point> 
 pub fn bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let total = app.preview.timeline.total;
     if app.preview.error.is_some() || app.preview.timeline.ops.is_empty() {
-        ui.label("Nothing to preview: no layer with output has any shapes.");
+        ui.label(tr("Nothing to preview: no layer with output has any shapes."));
         return;
     }
     advance(app, ui, total);
@@ -108,13 +109,13 @@ pub fn bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 
     ui.horizontal(|ui| {
         let label = if app.player.playing { "Pause" } else { "Play" };
-        if ui.button(label).clicked() {
+        if ui.button(tr(label)).clicked() {
             if !app.player.playing && app.player.position.is_none_or(|p| p >= total) {
                 app.player.position = Some(0.0);
             }
             app.player.playing = !app.player.playing;
         }
-        if ui.button("Show all").clicked() {
+        if ui.button(tr("Show all")).clicked() {
             app.player.position = None;
             app.player.playing = false;
         }
@@ -163,7 +164,7 @@ fn advance(app: &mut LightFoundryApp, ui: &egui::Ui, total: f64) {
 }
 
 fn speed_label(speed: f64) -> String {
-    if speed > 0.0 { format!("{speed}x") } else { "Auto".into() }
+    if speed > 0.0 { format!("{speed}x") } else { tr("Auto") }
 }
 
 /// The head marker: a ring with a dot, in screen space.

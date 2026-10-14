@@ -27,6 +27,11 @@ pub trait Platform {
         None
     }
 
+    /// Where the chosen translation (a JSON catalog, see `i18n`) is kept, if this platform has somewhere to keep it.
+    fn translation_file(&self) -> Option<PathBuf> {
+        None
+    }
+
     /// Where presets shared between projects are kept, if this platform has somewhere to keep them.
     fn preset_library_file(&self) -> Option<PathBuf> {
         None

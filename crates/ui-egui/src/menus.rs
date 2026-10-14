@@ -1,3 +1,4 @@
+use crate::i18n::tr;
 use serde_json::{Value, json};
 
 use crate::{LightFoundryApp, PendingAction};
@@ -5,24 +6,24 @@ use crate::{LightFoundryApp, PendingAction};
 pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     egui::Panel::top("menu").show(ui, |ui| {
         egui::MenuBar::new().ui(ui, |ui| {
-            ui.menu_button("File", |ui| file_menu(app, ui));
-            ui.menu_button("Edit", |ui| edit_menu(app, ui));
-            ui.menu_button("Arrange", |ui| arrange_menu(app, ui));
-            ui.menu_button("Laser", |ui| laser_menu(app, ui));
-            ui.menu_button("View", |ui| {
-                if ui.button("Fit bed to window").clicked() {
+            ui.menu_button(tr("File"), |ui| file_menu(app, ui));
+            ui.menu_button(tr("Edit"), |ui| edit_menu(app, ui));
+            ui.menu_button(tr("Arrange"), |ui| arrange_menu(app, ui));
+            ui.menu_button(tr("Laser"), |ui| laser_menu(app, ui));
+            ui.menu_button(tr("View"), |ui| {
+                if ui.button(tr("Fit bed to window")).clicked() {
                     app.view = None;
                     ui.close();
                 }
-                ui.checkbox(&mut app.show_rulers, "Rulers");
-                ui.checkbox(&mut app.snapping.objects, "Snap to objects and guides");
+                ui.checkbox(&mut app.show_rulers, tr("Rulers"));
+                ui.checkbox(&mut app.snapping.objects, tr("Snap to objects and guides"));
                 let mut grid_on = app.snapping.grid.is_some();
-                if ui.checkbox(&mut grid_on, "Snap to grid").changed() {
+                if ui.checkbox(&mut grid_on, tr("Snap to grid")).changed() {
                     app.snapping.grid = grid_on.then_some(app.snapping.grid.unwrap_or(5.0));
                 }
                 if let Some(step) = app.snapping.grid.as_mut() {
                     ui.horizontal(|ui| {
-                        ui.label("Grid step");
+                        ui.label(tr("Grid step"));
                         egui::ComboBox::from_id_salt("grid_step").selected_text(format!("{step} mm")).show_ui(ui, |ui| {
                             for s in [0.5, 1.0, 2.0, 5.0, 10.0] {
                                 ui.selectable_value(step, s, format!("{s} mm"));
@@ -30,27 +31,46 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                         });
                     });
                 }
-                if ui.add_enabled(!app.guides.is_empty(), egui::Button::new("Clear guides")).clicked() {
+                if ui.add_enabled(!app.guides.is_empty(), egui::Button::new(tr("Clear guides"))).clicked() {
                     app.guides.clear();
                     ui.close();
                 }
                 ui.separator();
-                ui.checkbox(&mut app.show_preview, "Toolpath preview");
-                ui.checkbox(&mut app.show_travel, "Show travel moves");
-                ui.menu_button("Theme", |ui| {
+                ui.checkbox(&mut app.show_preview, tr("Toolpath preview"));
+                ui.checkbox(&mut app.show_travel, tr("Show travel moves"));
+                ui.menu_button(tr("Theme"), |ui| {
                     for choice in crate::theme::ThemeChoice::ALL {
-                        if ui.radio_value(&mut app.theme, choice, choice.label()).clicked() {
+                        if ui.radio_value(&mut app.theme, choice, tr(choice.label())).clicked() {
                             ui.close();
                         }
                     }
                 });
-                ui.menu_button("Preview colours", |ui| {
+                if !app.platform.browser_files() {
+                    ui.menu_button(tr("Language"), |ui| {
+                        if let Some(name) = crate::i18n::active_name() {
+                            ui.weak(if name.is_empty() { tr("Custom translation") } else { name });
+                        }
+                        if ui.button(tr("Load translation…")).on_hover_text(tr("A JSON catalog of your own: see the manual")).clicked() {
+                            app.choose_translation();
+                            ui.close();
+                        }
+                        if ui.button(tr("Save translation template…")).on_hover_text(tr("Every text shown so far, to translate")).clicked() {
+                            app.save_translation_template();
+                            ui.close();
+                        }
+                        if ui.button(tr("Use English")).clicked() {
+                            app.use_english();
+                            ui.close();
+                        }
+                    });
+                }
+                ui.menu_button(tr("Preview colours"), |ui| {
                     for (mode, label) in [
                         (crate::timeline_ui::PreviewColors::Layer, "By layer"),
                         (crate::timeline_ui::PreviewColors::Power, "By power"),
                         (crate::timeline_ui::PreviewColors::Speed, "By speed"),
                     ] {
-                        if ui.radio_value(&mut app.preview_colors, mode, label).clicked() {
+                        if ui.radio_value(&mut app.preview_colors, mode, tr(label)).clicked() {
                             ui.close();
                         }
                     }
@@ -70,29 +90,29 @@ fn file_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     recent_menu(app, ui);
     template_menu(app, ui);
     let can_save = true;
-    if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() {
+    if ui.add_enabled(can_save, egui::Button::new(tr("Save"))).clicked() {
         save(app, false);
         ui.close();
     }
-    if ui.button("Save As…").clicked() {
+    if ui.button(tr("Save As…")).clicked() {
         save(app, true);
         ui.close();
     }
     ui.separator();
-    if ui.button("Import SVG…").clicked() {
+    if ui.button(tr("Import SVG…")).clicked() {
         import(app, "file.import_svg", "Import SVG", &["svg"]);
         ui.close();
     }
-    if ui.button("Import DXF…").clicked() {
+    if ui.button(tr("Import DXF…")).clicked() {
         import(app, "file.import_dxf", "Import DXF", &["dxf"]);
         ui.close();
     }
-    if ui.button("Import Image…").clicked() {
+    if ui.button(tr("Import Image…")).clicked() {
         import(app, "file.import_image", "Import image", &["png", "jpg", "jpeg", "bmp", "gif", "webp"]);
         ui.close();
     }
     ui.separator();
-    if ui.button("Save G-code…").clicked() {
+    if ui.button(tr("Save G-code…")).clicked() {
         if app.platform_browser_files() {
             if let Some(v) = app.run("job.gcode", json!({ "include": true }))
                 && let Some(text) = v["gcode"].as_str()
@@ -112,9 +132,9 @@ fn template_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     if app.templates_available() {
         let templates = app.templates();
         let mut chosen = None;
-        ui.menu_button("New from Template", |ui| {
+        ui.menu_button(tr("New from Template"), |ui| {
             if templates.is_empty() {
-                ui.weak("No templates yet");
+                ui.weak(tr("No templates yet"));
             }
             for (name, path) in &templates {
                 if ui.button(name).clicked() {
@@ -125,7 +145,7 @@ fn template_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ui.separator();
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut app.template_name).hint_text("Template name").desired_width(120.0));
-                if ui.add_enabled(!app.template_name.trim().is_empty(), egui::Button::new("Save current")).clicked() {
+                if ui.add_enabled(!app.template_name.trim().is_empty(), egui::Button::new(tr("Save current"))).clicked() {
                     let name = std::mem::take(&mut app.template_name);
                     app.save_template(&name);
                     ui.close();
@@ -143,7 +163,7 @@ fn recent_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let mut chosen = None;
     let mut clear = false;
     ui.add_enabled_ui(!app.recent.files.is_empty(), |ui| {
-        ui.menu_button("Open Recent", |ui| {
+        ui.menu_button(tr("Open Recent"), |ui| {
             for path in &app.recent.files {
                 let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
                 if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
@@ -152,7 +172,7 @@ fn recent_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 }
             }
             ui.separator();
-            if ui.button("Clear list").clicked() {
+            if ui.button(tr("Clear list")).clicked() {
                 clear = true;
                 ui.close();
             }
@@ -171,11 +191,11 @@ fn recent_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 fn edit_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let (can_undo, can_redo) = (app.session.can_undo(), app.session.can_redo());
     use crate::shortcuts::Action;
-    if ui.add_enabled(can_undo, egui::Button::new("Undo").shortcut_text(app.shortcuts.text(Action::Undo))).clicked() {
+    if ui.add_enabled(can_undo, egui::Button::new(tr("Undo")).shortcut_text(app.shortcuts.text(Action::Undo))).clicked() {
         app.run("edit.undo", Value::Null);
         ui.close();
     }
-    if ui.add_enabled(can_redo, egui::Button::new("Redo").shortcut_text(app.shortcuts.text(Action::Redo))).clicked() {
+    if ui.add_enabled(can_redo, egui::Button::new(tr("Redo")).shortcut_text(app.shortcuts.text(Action::Redo))).clicked() {
         app.run("edit.redo", Value::Null);
         ui.close();
     }
@@ -192,7 +212,7 @@ fn edit_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         }
     }
     ui.separator();
-    if ui.button("Keyboard shortcuts…").clicked() {
+    if ui.button(tr("Keyboard shortcuts…")).clicked() {
         app.shortcuts_open = true;
         ui.close();
     }
@@ -208,21 +228,21 @@ fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ("Center Horizontally", "center_x"),
             ("Center Vertically", "center_y"),
         ] {
-            if ui.button(label).clicked() {
+            if ui.button(tr(label)).clicked() {
                 app.run("edit.align", json!({ "to": to }));
                 ui.close();
             }
         }
         ui.add_enabled_ui(app.session.selection.len() >= 3, |ui| {
             for (label, axis) in [("Distribute Horizontally", "horizontal"), ("Distribute Vertically", "vertical")] {
-                if ui.button(label).clicked() {
+                if ui.button(tr(label)).clicked() {
                     app.run("edit.distribute", json!({ "axis": axis }));
                     ui.close();
                 }
             }
         });
         ui.add_enabled_ui(app.session.selection.len() == 2, |ui| {
-            if ui.button("Text on Path").on_hover_text("Select a text and the shape to bend it along").clicked() {
+            if ui.button(tr("Text on Path")).on_hover_text(tr("Select a text and the shape to bend it along")).clicked() {
                 let is_text = |id: &u64| app.session.doc.shape(*id).is_some_and(|s| matches!(s.kind, lightfoundry_doc::ShapeKind::Text { .. }));
                 if let [a, b] = app.session.selection[..] {
                     let (text, path) = if is_text(&a) { (a, b) } else { (b, a) };
@@ -233,14 +253,14 @@ fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         });
         ui.separator();
         ui.add_enabled_ui(app.session.selection.len() >= 2, |ui| {
-            ui.menu_button("Boolean", |ui| {
+            ui.menu_button(tr("Boolean"), |ui| {
                 for (label, op) in [
                     ("Union (weld)", "union"),
                     ("Subtract (first minus the rest)", "difference"),
                     ("Intersect", "intersect"),
                     ("Exclusive or", "xor"),
                 ] {
-                    if ui.button(label).clicked() {
+                    if ui.button(tr(label)).clicked() {
                         app.run("path.boolean", json!({ "op": op }));
                         ui.close();
                     }
@@ -248,29 +268,29 @@ fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             });
         });
         ui.separator();
-        if ui.add(egui::Button::new("Group").shortcut_text(app.shortcuts.text(crate::shortcuts::Action::Group))).clicked() {
+        if ui.add(egui::Button::new(tr("Group")).shortcut_text(app.shortcuts.text(crate::shortcuts::Action::Group))).clicked() {
             app.run("edit.group", json!({}));
             ui.close();
         }
-        if ui.add(egui::Button::new("Ungroup").shortcut_text(app.shortcuts.text(crate::shortcuts::Action::Ungroup))).clicked() {
+        if ui.add(egui::Button::new(tr("Ungroup")).shortcut_text(app.shortcuts.text(crate::shortcuts::Action::Ungroup))).clicked() {
             app.run("edit.ungroup", json!({}));
             ui.close();
         }
         ui.separator();
-        if ui.button("Join Paths").clicked() {
+        if ui.button(tr("Join Paths")).clicked() {
             app.run("path.join", json!({}));
             ui.close();
         }
         ui.separator();
-        if ui.button("Flip Horizontal").clicked() {
+        if ui.button(tr("Flip Horizontal")).clicked() {
             app.run("edit.flip", json!({ "axis": "horizontal" }));
             ui.close();
         }
-        if ui.button("Flip Vertical").clicked() {
+        if ui.button(tr("Flip Vertical")).clicked() {
             app.run("edit.flip", json!({ "axis": "vertical" }));
             ui.close();
         }
-        if ui.button("Rotate 90°").clicked() {
+        if ui.button(tr("Rotate 90°")).clicked() {
             app.run("edit.rotate", json!({ "degrees": 90 }));
             ui.close();
         }
@@ -278,13 +298,13 @@ fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 }
 
 fn laser_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
-    if ui.button("Generate G-code").clicked() {
+    if ui.button(tr("Generate G-code")).clicked() {
         if app.run("job.gcode", Value::Null).is_some() {
             app.say("G-code generated");
         }
         ui.close();
     }
-    if ui.button("Estimate time").clicked() {
+    if ui.button(tr("Estimate time")).clicked() {
         if let Some(v) = app.run("job.estimate", Value::Null) {
             app.say(format!("Estimated {}", format_duration(v["seconds"].as_f64().unwrap_or(0.0))));
         }
@@ -293,7 +313,7 @@ fn laser_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 }
 
 fn item(ui: &mut egui::Ui, label: &str, shortcut: &str) -> bool {
-    let clicked = ui.add(egui::Button::new(label).shortcut_text(shortcut)).clicked();
+    let clicked = ui.add(egui::Button::new(tr(label)).shortcut_text(shortcut)).clicked();
     if clicked {
         ui.close();
     }
