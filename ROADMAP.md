@@ -55,3 +55,6 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — join.** `pathops::join` chains open polylines whose ends meet (grid-hashed, closes
   loops, bounded) and `path.join` applies it per layer. DXF import joins loose segments by default
   (`join: false` to keep them), so outlines drawn as separate LINEs become closed, fillable shapes.
+- **2026-10-14 — arrays.** `arrange.grid` and `arrange.circular` (pitch = size + gap; arc or full
+  circle; bounded to 10,000 copies, one undo step) and a corner radius on rectangles
+  (`shape.rectangle radius`, Rectangle tool option); Array section in the Selection panel.
