@@ -973,6 +973,26 @@ mod import_tests {
     }
 
     #[test]
+    fn a_job_can_be_resumed_from_a_line_and_the_rest_matches_the_original() {
+        let mut s = Session::new();
+        s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 40, "height": 20})).unwrap();
+        let full = s.execute("job.gcode", &json!({"include": true})).unwrap()["gcode"].as_str().unwrap().to_string();
+        let total = full.lines().count();
+        let mid = total / 2;
+        let r = s.execute("job.resume", &json!({"line": mid, "include": true})).unwrap();
+        let text = r["gcode"].as_str().unwrap();
+        assert_eq!(r["summary"]["total_lines"], json!(total));
+        assert!(text.starts_with("; LightFoundry resume"), "{text}");
+        assert!(text.contains("\nG0 X"), "it first moves to where the head would be: {text}");
+        assert!(text.trim_end().ends_with(full.lines().last().unwrap()), "same shutdown");
+        // The resumed program still passes the streamer and the simulator.
+        s.execute("job.simulate", &Value::Null).unwrap();
+        assert!(s.execute("job.resume", &json!({"line": 0})).is_err());
+        assert!(s.execute("job.resume", &json!({"line": total + 1})).is_err());
+        assert!(s.execute("job.resume", &json!({"line": "x"})).is_err());
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

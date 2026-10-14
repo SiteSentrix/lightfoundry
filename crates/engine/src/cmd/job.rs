@@ -27,6 +27,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         run: set_origin,
     },
     CommandSpec {
+        id: "job.resume",
+        label: "Resume Job From Line",
+        menu: "Laser",
+        shortcut: None,
+        params_doc: "{line (1-based, in the generated program), include?: bool}  — builds a program that starts at that line: laser off, moves to where the head would be, restores feed and power. Returns the text with include=true",
+        mutates: false,
+        run: resume,
+    },
+    CommandSpec {
         id: "job.set_scope",
         label: "Cut Selected Shapes Only",
         menu: "Laser",
@@ -98,6 +107,22 @@ fn set_origin(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     o.start_from = p.start_from.unwrap_or(o.start_from);
     o.anchor = p.anchor.unwrap_or(o.anchor);
     Ok(json!({ "start_from": o.start_from, "anchor": o.anchor }))
+}
+
+#[derive(Deserialize)]
+struct ResumeParams {
+    line: usize,
+    #[serde(default)]
+    include: bool,
+}
+
+fn resume(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: ResumeParams = parse(params)?;
+    let program = generate(s)?;
+    let text = lightfoundry_gcode::resume_from(&program, p.line).map_err(|e| EngineError::BadParams(e.to_string()))?;
+    let at = program.lines().nth(p.line.saturating_sub(1)).unwrap_or("").to_string();
+    let summary = json!({ "from_line": p.line, "total_lines": program.lines().count(), "line": at, "lines": text.lines().count() });
+    Ok(if p.include { json!({ "summary": summary, "gcode": text }) } else { summary })
 }
 
 #[derive(Deserialize)]

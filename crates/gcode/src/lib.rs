@@ -3,6 +3,10 @@
 //! Workspace coordinates are y-down from the bed's top-left; the machine profile decides how they
 //! map onto machine coordinates.
 
+mod resume;
+
+pub use resume::{ResumeError, resume_from};
+
 use std::fmt::Write;
 
 use lightfoundry_doc::{Dialect, Machine, Origin};

@@ -1107,6 +1107,19 @@ mod machine_tests {
     }
 
     #[test]
+    fn a_job_started_from_a_later_line_runs_on_the_simulator_and_finishes() {
+        let mut h = connected();
+        h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 20, "height": 20}));
+        h.app.run("job.gcode", json!({}));
+        let lines = h.app.session.last_gcode.as_ref().unwrap().lines().count();
+        h.frame(vec![]); // draws the panel with the G-code section
+        let v = h.app.run("job.resume", json!({"line": lines / 2, "include": true})).unwrap();
+        h.app.start_job(v["gcode"].as_str().unwrap().to_string());
+        pump(&mut h, "the resumed job", |h| matches!(h.app.snap.as_ref().map(|s| &s.job), Some(JobState::Finished(_))));
+        assert!(matches!(h.app.snap.as_ref().map(|s| &s.job), Some(JobState::Finished(Ok(_)))), "{:?}", h.app.status);
+    }
+
+    #[test]
     fn controller_settings_are_read_edited_and_checked_against_the_document() {
         use crate::settings_ui::{Advice, advice};
         let mut h = connected();
@@ -1444,5 +1457,119 @@ mod selection_scope_tests {
         h.app.run("edit.select", json!({"ids": []}));
         h.frame(vec![]);
         assert_eq!(h.app.preview.segments.len(), 0, "no selection, nothing to preview");
+    }
+}
+
+mod reconnect_tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+    use std::time::{Duration, Instant};
+
+    use lightfoundry_device::{Link, SimulatedGrbl, Transport};
+
+    use super::*;
+
+    /// A serial port that fails `fail_times` times and then opens a simulated controller.
+    struct FlakyPort {
+        fail_times: u32,
+        opens: Rc<Cell<u32>>,
+    }
+
+    impl Platform for FlakyPort {
+        fn pick_open(&self, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        fn pick_save(&self, _: &str, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        fn serial_ports(&self) -> Vec<String> {
+            vec!["ttyUSB0".into()]
+        }
+
+        fn open_serial(&self, _: &str) -> Result<Box<dyn Transport + Send>, String> {
+            self.opens.set(self.opens.get() + 1);
+            if self.opens.get() <= self.fail_times { Err("no such device".into()) } else { Ok(Box::new(SimulatedGrbl::new())) }
+        }
+    }
+
+    struct Unplugged;
+
+    impl Transport for Unplugged {
+        fn write_all(&mut self, _: &[u8]) -> std::io::Result<()> {
+            Err(std::io::Error::other("unplugged"))
+        }
+
+        fn read_line(&mut self, _: Duration) -> std::io::Result<Option<String>> {
+            Err(std::io::Error::other("unplugged"))
+        }
+    }
+
+    fn harness(fail_times: u32) -> (Harness, Rc<Cell<u32>>) {
+        let opens = Rc::new(Cell::new(0));
+        let mut h = Harness {
+            ctx: egui::Context::default(),
+            app: LightFoundryApp::new(Session::new(), Box::new(FlakyPort { fail_times, opens: Rc::clone(&opens) })),
+            time: 0.0,
+            modifiers: Modifiers::NONE,
+            sent_modifiers: Modifiers::NONE,
+        };
+        h.app.reconnect_wait = Duration::ZERO;
+        h.app.target = Target::Serial("ttyUSB0".into());
+        h.app.link = Some(Link::connect(Box::new(Unplugged)));
+        (h, opens)
+    }
+
+    fn run_until(h: &mut Harness, what: &str, done: impl Fn(&Harness) -> bool) {
+        let start = Instant::now();
+        while !done(h) {
+            h.frame(vec![]);
+            assert!(start.elapsed() < Duration::from_secs(10), "timed out waiting for {what}: {:?}", h.app.status);
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn a_lost_connection_is_retried_until_it_comes_back_and_nothing_resumes() {
+        let (mut h, opens) = harness(2);
+        run_until(&mut h, "the loss", |h| h.app.reconnect.is_some());
+        assert!(matches!(&h.app.status, Some((m, true)) if m.contains("trying to reconnect")), "{:?}", h.app.status);
+        run_until(&mut h, "the reconnect", |h| h.app.link.is_some() && h.app.reconnect.is_none());
+        assert_eq!(opens.get(), 3, "two failures, then success");
+        assert!(matches!(&h.app.status, Some((m, false)) if m.contains("Reconnected") && m.contains("Nothing is running")), "{:?}", h.app.status);
+        run_until(&mut h, "a status report", |h| h.app.snap.as_ref().is_some_and(|s| s.status.is_some()));
+        assert!(!h.app.job_active());
+    }
+
+    #[test]
+    fn it_gives_up_after_the_attempt_limit_and_the_user_can_stop_it() {
+        let (mut h, opens) = harness(u32::MAX);
+        run_until(&mut h, "giving up", |h| h.app.reconnect.is_none() && h.app.link.is_none() && opens.get() > 0);
+        assert_eq!(opens.get(), 8);
+        assert!(matches!(&h.app.status, Some((m, true)) if m.contains("Could not reconnect")), "{:?}", h.app.status);
+
+        let (mut h, opens) = harness(u32::MAX);
+        h.app.reconnect_wait = Duration::from_secs(3600);
+        run_until(&mut h, "the loss", |h| h.app.reconnect.is_some());
+        h.app.disconnect();
+        h.frame(vec![]);
+        assert!(h.app.reconnect.is_none());
+        assert_eq!(opens.get(), 0, "Disconnect cancels retrying");
+    }
+
+    #[test]
+    fn the_switch_turns_it_off_and_the_simulator_never_retries() {
+        let (mut h, opens) = harness(0);
+        h.app.auto_reconnect = false;
+        run_until(&mut h, "the loss", |h| h.app.link.is_none() && h.app.status.is_some());
+        h.frame(vec![]);
+        assert!(h.app.reconnect.is_none() && opens.get() == 0);
+        assert!(matches!(&h.app.status, Some((m, true)) if m.contains("connection was lost")));
+
+        let (mut h, opens) = harness(0);
+        h.app.target = Target::Simulator;
+        run_until(&mut h, "the loss", |h| h.app.link.is_none() && h.app.status.is_some());
+        assert!(h.app.reconnect.is_none() && opens.get() == 0);
     }
 }

@@ -51,6 +51,17 @@ pub enum Target {
     Serial(String),
 }
 
+/// Attempts made to get a lost serial connection back before giving up.
+const RECONNECT_ATTEMPTS: u32 = 8;
+/// Longest wait between attempts.
+const RECONNECT_MAX_WAIT: Duration = Duration::from_secs(30);
+
+/// A lost connection being retried.
+struct Reconnect {
+    attempts: u32,
+    next: Instant,
+}
+
 pub struct LightFoundryApp {
     pub session: Session,
     platform: Box<dyn Platform>,
@@ -119,6 +130,11 @@ pub struct LightFoundryApp {
     sharpen_amount: f64,
     trace_threshold: f64,
     preset_name: String,
+    resume_line: usize,
+    auto_reconnect: bool,
+    reconnect: Option<Reconnect>,
+    /// First wait before retrying; doubles each attempt (tests shrink it).
+    reconnect_wait: Duration,
     /// While on, a click on the canvas sends the laser head there.
     move_head_mode: bool,
     /// x, y, width, height typed into the "create by numbers" fields.
@@ -206,6 +222,10 @@ impl LightFoundryApp {
             sharpen_amount: 1.0,
             trace_threshold: 128.0,
             preset_name: String::new(),
+            resume_line: 1,
+            auto_reconnect: true,
+            reconnect: None,
+            reconnect_wait: Duration::from_secs(2),
             move_head_mode: false,
             new_shape: [10.0, 10.0, 50.0, 30.0],
             recorded_path: None,
@@ -462,6 +482,7 @@ impl LightFoundryApp {
 
     /// Opens the selected machine (or the simulator) and keeps the connection until `disconnect`.
     pub(crate) fn connect(&mut self) {
+        self.reconnect = None;
         let transport: Result<Box<dyn lightfoundry_device::Transport + Send>, String> = match &self.target {
             Target::Simulator => {
                 let mut sim = SimulatedGrbl::new();
@@ -482,6 +503,7 @@ impl LightFoundryApp {
     /// Dropping the link cancels any running job (soft reset) before the connection closes.
     pub(crate) fn disconnect(&mut self) {
         self.link = None;
+        self.reconnect = None;
         self.move_head_mode = false;
         self.snap = None;
         self.last_job = None;
@@ -513,15 +535,57 @@ impl LightFoundryApp {
         self.snap.as_ref().is_some_and(|s| matches!(s.job, JobState::Running | JobState::Paused))
     }
 
+    /// Retries a lost serial connection with growing waits. A reconnected machine is idle: a job
+    /// that was running is never resumed.
+    fn reconnect_tick(&mut self, ctx: &egui::Context) {
+        let Some(state) = &self.reconnect else { return };
+        let (attempts, next) = (state.attempts, state.next);
+        if Instant::now() < next {
+            ctx.request_repaint_after(next - Instant::now());
+            return;
+        }
+        let Target::Serial(port) = self.target.clone() else {
+            self.reconnect = None;
+            return;
+        };
+        match self.platform.open_serial(&port) {
+            Ok(t) => {
+                self.link = Some(Link::connect(t));
+                self.reconnect = None;
+                self.say("Reconnected. Nothing is running; start the job again if you want to continue.");
+            }
+            Err(e) => {
+                let attempts = attempts + 1;
+                if attempts >= RECONNECT_ATTEMPTS {
+                    self.reconnect = None;
+                    self.status = Some((format!("Could not reconnect to {port}: {e}"), true));
+                } else {
+                    let wait = (self.reconnect_wait * 2u32.saturating_pow(attempts)).min(RECONNECT_MAX_WAIT);
+                    self.reconnect = Some(Reconnect { attempts, next: Instant::now() + wait });
+                    ctx.request_repaint_after(wait);
+                }
+            }
+        }
+    }
+
     fn poll_link(&mut self, ctx: &egui::Context) {
+        self.reconnect_tick(ctx);
         let Some(link) = &self.link else { return };
         // The worker updates continuously; poll at a modest rate rather than every frame forever.
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
         let snap = link.snapshot();
         if !snap.connected {
-            self.status = Some(("The machine connection was lost".into(), true));
+            let had_job = matches!(snap.job, JobState::Running | JobState::Paused | JobState::Finished(Err(_)));
             self.link = None;
             self.snap = None;
+            self.move_head_mode = false;
+            if self.auto_reconnect && matches!(self.target, Target::Serial(_)) {
+                self.reconnect = Some(Reconnect { attempts: 0, next: Instant::now() + self.reconnect_wait });
+                let note = if had_job { " The job was stopped and will not resume by itself." } else { "" };
+                self.status = Some((format!("The machine connection was lost; trying to reconnect.{note}"), true));
+            } else {
+                self.status = Some(("The machine connection was lost".into(), true));
+            }
             return;
         }
         if self.last_job.as_ref() != Some(&snap.job) {

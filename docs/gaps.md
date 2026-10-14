@@ -6,7 +6,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | #  | Gap                                                                                  | Why it matters                                                      |
 |----|--------------------------------------------------------------------------------------|---------------------------------------------------------------------|
 | 1  | Verify on real GRBL hardware (jog, frame, short cut), fix what it finds              | Everything machine-side is only simulator-tested                    |
-| 2  | Run-from-line; auto-reconnect (the $$ settings editor is done)                       | Day-to-day machine ownership                                        |
+| 2  | Resume after a power loss with a saved job position (run-from-line, auto-reconnect and the $$ editor are done) | Day-to-day machine ownership                                        |
 | 4  | Outline fonts for text (Fill-mode text, accented/Unicode characters) via an optional font source (`storytold/craft-fonts` through a build option, never in-repo); today text is an ASCII single-line stroke font | Fill-engraved lettering and non-English text |
 | 8  | Cut-order: by group, choose the start point, remove overlapping segments (not only identical outlines) | Quality and time                                                    |
 | 9  | Smoother (curve-fitted) tracing and colour-aware tracing; on-canvas crop handles; resample/resize (tone, crop, sharpen, seven dither modes and basic threshold tracing are done) | Photo engraving results                                  |
