@@ -125,7 +125,7 @@ fn emit_outline(moves: &mut Vec<Move>, doc: &Document, layer: &Layer, pl: &Polyl
         }
         None => moves.push(Move::Travel(first)),
     }
-    let pieces = if layer.tab_count > 0 && depth % 2 == 0 { tabs::split_for_tabs(pl, layer.tab_count, layer.tab_width) } else { None };
+    let pieces = if layer.tab_count > 0 && depth.is_multiple_of(2) { tabs::split_for_tabs(pl, layer.tab_count, layer.tab_width) } else { None };
     match pieces {
         Some(pieces) => {
             for piece in &pieces {
