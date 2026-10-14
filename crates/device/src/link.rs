@@ -2,12 +2,13 @@
 //! status polling, immediate commands (jog, home, unlock, set zero), job streaming with
 //! pause/resume/stop, and keeps a console log. The UI only sends commands and reads snapshots.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::settings;
 use crate::stream::{JobStream, MAX_LINE_BYTES};
 use crate::{DeviceError, Progress, Status, Transport, parse_status, realtime};
 
@@ -39,6 +40,8 @@ pub struct Snapshot {
     pub job: JobState,
     pub progress: Option<Progress>,
     pub console: Vec<String>,
+    /// `$n=value` settings reported by the controller, by number.
+    pub settings: BTreeMap<u32, String>,
 }
 
 #[derive(Debug, PartialEq, thiserror::Error)]
@@ -77,10 +80,16 @@ impl Link {
                 job: s.job.clone(),
                 progress: s.progress,
                 console: s.console.iter().cloned().collect(),
+                settings: s.settings.clone(),
             },
-            Err(_) => {
-                Snapshot { connected: false, status: None, job: JobState::Idle, progress: None, console: vec!["link state unavailable".into()] }
-            }
+            Err(_) => Snapshot {
+                connected: false,
+                status: None,
+                job: JobState::Idle,
+                progress: None,
+                console: vec!["link state unavailable".into()],
+                settings: BTreeMap::new(),
+            },
         }
     }
 
@@ -99,6 +108,17 @@ impl Link {
         }
         self.require_idle()?;
         self.send(Cmd::Line(line.to_string()))
+    }
+
+    /// `$$`: ask the controller to report its settings (they arrive in [`Snapshot::settings`]).
+    pub fn request_settings(&self) -> Result<(), LinkError> {
+        self.send_line("$$")
+    }
+
+    /// Changes one controller setting (`$id=value`) and asks for the settings again.
+    pub fn write_setting(&self, id: u32, value: f64) -> Result<(), LinkError> {
+        self.send_line(&settings::setting_line(id, value)?)?;
+        self.request_settings()
     }
 
     /// Relative jog in *machine* axes (`$J=G91 G21 ...`). Steps and feed are bounded.
@@ -201,11 +221,12 @@ struct Shared {
     job: JobState,
     progress: Option<Progress>,
     console: VecDeque<String>,
+    settings: BTreeMap<u32, String>,
 }
 
 impl Default for Shared {
     fn default() -> Self {
-        Shared { connected: false, status: None, job: JobState::Idle, progress: None, console: VecDeque::new() }
+        Shared { connected: false, status: None, job: JobState::Idle, progress: None, console: VecDeque::new(), settings: BTreeMap::new() }
     }
 }
 
@@ -401,6 +422,14 @@ impl Worker {
             if line.starts_with("ALARM:") {
                 self.log("the machine is in an alarm state: use Unlock ($X), or Home ($H)");
             }
+            return Ok(());
+        }
+        if let Some((id, value)) = settings::parse_setting(line) {
+            self.update(|s| {
+                if s.settings.len() < settings::MAX_SETTINGS || s.settings.contains_key(&id) {
+                    s.settings.insert(id, value);
+                }
+            });
             return Ok(());
         }
         self.log(format!("< {line}"));
@@ -639,6 +668,63 @@ mod tests {
             link.start_job(format!("G1 {}", "X1 ".repeat(40))).unwrap();
             let s = wait_for(&link, "failure", |s| matches!(s.job, JobState::Finished(_)));
             assert!(matches!(s.job, JobState::Finished(Err(_))));
+        }
+    }
+
+    mod settings_tests {
+        use super::*;
+
+        #[test]
+        fn requesting_settings_fills_the_snapshot_and_keeps_them_out_of_the_console() {
+            let link = sim_link();
+            link.request_settings().unwrap();
+            let s = wait_for(&link, "the settings report", |s| s.settings.len() > 20);
+            assert_eq!(s.settings.get(&32).map(String::as_str), Some("1"));
+            assert_eq!(s.settings.get(&130).map(String::as_str), Some("200.000"));
+            assert!(!s.console.iter().any(|l| l.starts_with("< $")), "{:?}", s.console);
+            wait_for(&link, "the ok", |s| s.console.iter().any(|l| l == "< ok"));
+        }
+
+        #[test]
+        fn writing_a_setting_changes_it_and_reports_the_new_value() {
+            let link = sim_link();
+            link.write_setting(130, 410.5).unwrap();
+            let s = wait_for(&link, "the new value", |s| s.settings.get(&130).is_some_and(|v| v == "410.5"));
+            assert!(s.console.iter().any(|l| l == "> $130=410.5"), "{:?}", s.console);
+        }
+
+        #[test]
+        fn settings_are_refused_while_a_job_runs() {
+            let mut sim = SimulatedGrbl::new();
+            sim.set_latency(Duration::from_millis(20));
+            let link = Link::connect(Box::new(sim));
+            link.start_job(long_program(200)).unwrap();
+            wait_for(&link, "the job to run", |s| s.job == JobState::Running);
+            assert_eq!(link.write_setting(30, 255.0), Err(LinkError::Busy));
+            assert_eq!(link.request_settings(), Err(LinkError::Busy));
+            link.stop().unwrap();
+        }
+
+        #[test]
+        fn a_controller_cannot_flood_the_settings_table() {
+            struct Flood(u32);
+            impl Transport for Flood {
+                fn write_all(&mut self, _: &[u8]) -> io::Result<()> {
+                    Ok(())
+                }
+
+                fn read_line(&mut self, timeout: Duration) -> io::Result<Option<String>> {
+                    if self.0 < 5000 {
+                        self.0 += 1;
+                        return Ok(Some(format!("${}=1", self.0 % 1000)));
+                    }
+                    std::thread::sleep(timeout);
+                    Ok(None)
+                }
+            }
+            let link = Link::connect(Box::new(Flood(0)));
+            let s = wait_for(&link, "the flood to be read", |s| s.settings.len() >= crate::settings::MAX_SETTINGS);
+            assert!(s.settings.len() <= crate::settings::MAX_SETTINGS);
         }
     }
 

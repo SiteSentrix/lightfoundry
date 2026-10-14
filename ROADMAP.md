@@ -97,4 +97,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   `recent.json` in the app data folder through `Platform::recent_file`); any change of the
   document's path (open, save as) records it, picking one asks about unsaved changes first, and an
   unreadable entry is dropped from the list.
+- **2026-10-14 — controller settings.** `device::settings` (parser for `$n=value` reports, validated
+  `$n=v` writer, table of GRBL 1.1 settings with source URL); the link remembers what the controller
+  reports (bounded) and offers `request_settings` / `write_setting` (refused while a job runs);
+  the simulator answers `$$` and stores writes. The Laser panel has a Controller settings editor
+  (flags as checkboxes, numbers with units) and warns when laser mode ($32) is off or $30 / $130-131
+  differ from the document, with one-click fixes.
 

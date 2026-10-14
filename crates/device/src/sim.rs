@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::time::Duration;
 
@@ -27,11 +27,17 @@ pub struct SimulatedGrbl {
     held: bool,
     homed: bool,
     latency: Duration,
+    settings: BTreeMap<u32, String>,
 }
 
 impl SimulatedGrbl {
     pub fn new() -> Self {
-        Self::default()
+        SimulatedGrbl { settings: default_settings(), ..Self::default() }
+    }
+
+    /// The setting values the "controller" currently holds.
+    pub fn settings(&self) -> &BTreeMap<u32, String> {
+        &self.settings
     }
 
     /// Lines the "controller" has accepted, in order.
@@ -110,6 +116,16 @@ impl SimulatedGrbl {
             Some(rest) => (rest.to_string(), true),
             None => (upper.clone(), false),
         };
+        if upper == "$$" {
+            for (id, value) in &self.settings {
+                self.responses.push_back(format!("${id}={value}"));
+            }
+            return;
+        }
+        if !jog && let Some((id, value)) = crate::settings::parse_setting(&upper) {
+            self.settings.insert(id, value);
+            return;
+        }
         if body.starts_with('$') {
             return;
         }
@@ -213,4 +229,47 @@ impl Transport for SimulatedGrbl {
         }
         Ok(response)
     }
+}
+
+/// GRBL 1.1's stock values, with a laser-friendly `$30`/`$32`.
+fn default_settings() -> BTreeMap<u32, String> {
+    [
+        (0, "10"),
+        (1, "25"),
+        (2, "0"),
+        (3, "0"),
+        (4, "0"),
+        (5, "0"),
+        (6, "0"),
+        (10, "1"),
+        (11, "0.010"),
+        (12, "0.002"),
+        (13, "0"),
+        (20, "0"),
+        (21, "0"),
+        (22, "0"),
+        (23, "0"),
+        (24, "25.000"),
+        (25, "500.000"),
+        (26, "250"),
+        (27, "1.000"),
+        (30, "1000"),
+        (31, "0"),
+        (32, "1"),
+        (100, "250.000"),
+        (101, "250.000"),
+        (102, "250.000"),
+        (110, "500.000"),
+        (111, "500.000"),
+        (112, "500.000"),
+        (120, "10.000"),
+        (121, "10.000"),
+        (122, "10.000"),
+        (130, "200.000"),
+        (131, "200.000"),
+        (132, "200.000"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k, v.to_string()))
+    .collect()
 }

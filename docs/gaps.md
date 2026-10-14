@@ -6,7 +6,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | #  | Gap                                                                                  | Why it matters                                                      |
 |----|--------------------------------------------------------------------------------------|---------------------------------------------------------------------|
 | 1  | Verify on real GRBL hardware (jog, frame, short cut), fix what it finds              | Everything machine-side is only simulator-tested                    |
-| 2  | Machine settings ($$) editor; run-from-line; auto-reconnect                          | Day-to-day machine ownership                                        |
+| 2  | Run-from-line; auto-reconnect (the $$ settings editor is done)                       | Day-to-day machine ownership                                        |
 | 3  | Jog by dragging/clicking on the canvas; "move laser here" and show head position on canvas | Faster alignment                                              |
 | 4  | Outline fonts for text (Fill-mode text, accented/Unicode characters) via an optional font source (`storytold/craft-fonts` through a build option, never in-repo); today text is an ASCII single-line stroke font | Fill-engraved lettering and non-English text |
 | 7  | Numeric create dialogs; snapping to shape vertices and path midpoints (edges, centres, grid, bed and guides are done) | Precision layout                                                    |
