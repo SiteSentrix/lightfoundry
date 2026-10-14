@@ -81,6 +81,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         run: flip,
     },
     CommandSpec {
+        id: "align.two_point",
+        label: "Align to Two Marks",
+        menu: "Laser",
+        shortcut: None,
+        params_doc: "{design: [[x,y],[x,y]], actual: [[x,y],[x,y]], lock_scale? (default true), ids? (default: every shape)}  — moves and turns the design so the two marks drawn in it land on where they really are (print-and-cut / camera alignment)",
+        mutates: true,
+        run: two_point,
+    },
+    CommandSpec {
         id: "edit.distribute",
         label: "Distribute",
         menu: "Arrange/Align",
@@ -328,6 +337,36 @@ fn align(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         transform_all(s, &[*id], Affine::translate((dx, dy)));
     }
     Ok(json!({ "aligned": ids.len() }))
+}
+
+#[derive(Deserialize)]
+struct TwoPointParams {
+    design: [[f64; 2]; 2],
+    actual: [[f64; 2]; 2],
+    #[serde(default = "yes")]
+    lock_scale: bool,
+    ids: Option<Vec<ShapeId>>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn two_point(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: TwoPointParams = parse(params)?;
+    let pt = |v: [f64; 2]| lightfoundry_geom::Point::new(v[0], v[1]);
+    let r = lightfoundry_geom::register::two_point([pt(p.design[0]), pt(p.design[1])], [pt(p.actual[0]), pt(p.actual[1])], p.lock_scale)
+        .map_err(|e| EngineError::BadParams(e.to_string()))?;
+    let ids: Vec<ShapeId> = match p.ids {
+        Some(ids) => ids.into_iter().filter(|id| s.doc.shape(*id).is_some()).collect(),
+        None => s.doc.shapes.iter().map(|sh| sh.id).collect(),
+    };
+    let ids = s.doc.expand_groups(&ids);
+    if ids.is_empty() {
+        return Err(EngineError::NothingSelected);
+    }
+    transform_all(s, &ids, r.transform);
+    Ok(json!({ "moved": ids.len(), "scale": r.scale, "rotation_deg": r.rotation_deg }))
 }
 
 #[derive(Deserialize)]

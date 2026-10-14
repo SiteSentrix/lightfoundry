@@ -7,7 +7,7 @@ use crate::snap::{self, SnapSettings, SnapTargets};
 use crate::theme::{on_dark, parse_hex};
 use crate::view::View;
 use crate::{LightFoundryApp, Tool};
-use crate::{head_ui, nodes_ui, timeline_ui};
+use crate::{head_ui, nodes_ui, register_ui, timeline_ui};
 
 /// Pointer-distance (screen points) within which handles and edges are hit.
 pub(crate) const HIT_PX: f32 = 6.0;
@@ -145,6 +145,7 @@ pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         draw_preview(app, &painter, &view);
     }
     head_ui::draw(app, &painter, &view);
+    register_ui::draw(app, &painter, &view);
     draw_guides(app, &painter, &view, canvas_rect);
     nodes_ui::draw(app, &painter, &view);
     draw_overlays(app, &painter, &view, pointer, offset, &snapper, shift);
@@ -193,6 +194,14 @@ fn interact(
     let tol = f64::from(HIT_PX / view.zoom);
     let mut offset = (0.0, 0.0);
 
+    if app.marks.pick.is_some() {
+        if resp.clicked_by(PointerButton::Primary)
+            && let Some(p) = pointer
+        {
+            register_ui::click(app, snapper.point(p).point);
+        }
+        return offset;
+    }
     if app.move_head_mode {
         if resp.clicked_by(PointerButton::Primary)
             && let Some(p) = pointer

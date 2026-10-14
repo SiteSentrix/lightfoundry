@@ -1043,6 +1043,39 @@ mod import_tests {
     }
 
     #[test]
+    fn two_marks_move_and_turn_the_whole_design_onto_where_they_really_are() {
+        let mut s = Session::new();
+        let a = s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 4, "height": 4})).unwrap()["id"].as_u64().unwrap();
+        let b = s.execute("shape.rectangle", &json!({"x": 106, "y": 10, "width": 4, "height": 4})).unwrap()["id"].as_u64().unwrap();
+        s.execute("shape.rectangle", &json!({"x": 50, "y": 50, "width": 10, "height": 10})).unwrap();
+        // The sheet was put down 5 mm to the right and 2 mm lower, and not turned.
+        let v = s.execute("align.two_point", &json!({"design": [[12, 12], [108, 12]], "actual": [[17, 14], [113, 14]]})).unwrap();
+        assert_eq!(v["moved"], json!(3));
+        assert!(v["rotation_deg"].as_f64().unwrap().abs() < 1e-9);
+        let ba = s.doc.shape(a).unwrap().world_bounds().unwrap();
+        assert!((ba.x0 - 15.0).abs() < 1e-9 && (ba.y0 - 12.0).abs() < 1e-9, "{ba:?}");
+        let bb = s.doc.shape(b).unwrap().world_bounds().unwrap();
+        assert!((bb.x0 - 111.0).abs() < 1e-9);
+
+        // Only some shapes, with a turn.
+        s.execute("align.two_point", &json!({"design": [[0, 0], [100, 0]], "actual": [[0, 0], [0, 100]], "ids": [a]})).unwrap();
+        let rotated = s.doc.shape(a).unwrap().world_bounds().unwrap();
+        assert!((rotated.x0 - -16.0).abs() < 1e-6 && (rotated.y0 - 15.0).abs() < 1e-6, "{rotated:?}");
+        assert!((s.doc.shape(b).unwrap().world_bounds().unwrap().x0 - 111.0).abs() < 1e-9, "others stay");
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert!((s.doc.shape(a).unwrap().world_bounds().unwrap().x0 - 15.0).abs() < 1e-9, "one undo step");
+
+        for bad in [
+            json!({"design": [[1, 1], [1, 1]], "actual": [[0, 0], [5, 0]]}),
+            json!({"design": [[0, 0], [1, 0]], "actual": [[0, 0], [900, 0]], "lock_scale": false}),
+            json!({"design": [[0, 0]], "actual": [[0, 0], [5, 0]]}),
+            json!({"design": [[0, 0], [5, 0]], "actual": [[0, 0], [5, 0]], "ids": [999]}),
+        ] {
+            assert!(s.execute("align.two_point", &bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

@@ -177,4 +177,11 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   `font` (a path; "" returns to the stroke font); the laid-out shapes are stored, so projects open
   without the font. No font is in the repository: tests use a font built in code
   (`text::testfont`, behind the `testfont` feature).
+- **2026-10-14 — print-and-cut alignment.** `geom::register::two_point` finds the move and turn
+  (and optionally size) that carries two marks onto where they really are, sharing the error
+  between them and refusing coincident marks and absurd scales; `align.two_point` applies it to
+  every shape or a chosen few in one undo step. The Laser panel's "Align to marks" section sets
+  the design marks (by clicking, or the centres of two selected shapes) and the real ones (by
+  clicking on a photo of the bed, or From laser using the head position) and draws them on the
+  canvas. Live camera capture is OS- and hardware-specific and is not built.
 
