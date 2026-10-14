@@ -117,6 +117,7 @@ pub struct LightFoundryApp {
     /// Percentages to cut off the left, top, right and bottom of the selected image.
     crop_pct: [f64; 4],
     sharpen_amount: f64,
+    trace_threshold: f64,
     preset_name: String,
     /// While on, a click on the canvas sends the laser head there.
     move_head_mode: bool,
@@ -203,6 +204,7 @@ impl LightFoundryApp {
             recent,
             crop_pct: [0.0; 4],
             sharpen_amount: 1.0,
+            trace_threshold: 128.0,
             preset_name: String::new(),
             move_head_mode: false,
             new_shape: [10.0, 10.0, 50.0, 30.0],

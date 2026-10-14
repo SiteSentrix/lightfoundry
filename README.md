@@ -12,7 +12,7 @@ simulator when nothing is plugged in.
 
 ## What works today
 
-- **Images:** shown on the canvas as real thumbnails (rotation and flips included); brightness, contrast, gamma and negative adjustments (non-destructive, applied before dithering), crop and sharpen (undoable); a picture flush with the bed edge gets a shorter lead-in rather than a job that cannot run.
+- **Images:** shown on the canvas as real thumbnails (rotation and flips included); brightness, contrast, gamma and negative adjustments (non-destructive, applied before dithering), crop and sharpen (undoable), and tracing of dark areas into vector outlines; a picture flush with the bed edge gets a shorter lead-in rather than a job that cannot run.
 - **Arrange:** grid and circular arrays (bounded copy count), rounded rectangles, join paths.
 - **Draw and edit curves:** a Pen tool (click corners, drag out smooth nodes, click the first node to close) and a Nodes tool (drag nodes and handles, double-click a segment to insert, smooth/corner, line/curve, open/close); text converts to editable paths.
 - **Combine:** boolean union / subtract / intersect / XOR of closed shapes (holes preserved), and offset (grow, shrink, kerf-style; round, miter or bevel joins; open lines and stroke text become an outline around the line).

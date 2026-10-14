@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use lightfoundry_doc::{ShapeId, ShapeKind};
+use lightfoundry_doc::{LayerId, Shape, ShapeId, ShapeKind};
 use lightfoundry_geom::{Affine, Vec2};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -26,6 +26,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         params_doc: "{id?, left?, top?, right?, bottom?}  — fractions (0..0.95) of the picture to cut off each side; the rest stays where it is",
         mutates: true,
         run: crop,
+    },
+    CommandSpec {
+        id: "image.trace",
+        label: "Trace Image to Vectors",
+        menu: "Edit",
+        shortcut: None,
+        params_doc: "{id?, threshold? (0..255, default 128: pixels darker than this are traced, after the image's tone adjustments), tolerance? (pixels, default 1), min_area? (pixels squared, default 4), layer?, keep_image? (default true)}  — adds a path shape that follows the dark areas, on top of the picture",
+        mutates: true,
+        run: trace,
     },
     CommandSpec {
         id: "image.sharpen",
@@ -151,4 +160,72 @@ fn adjust(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
 
 fn in_range(name: &str, v: f64, lo: f64, hi: f64) -> Result<f64, EngineError> {
     if v.is_finite() && (lo..=hi).contains(&v) { Ok(v) } else { Err(EngineError::BadParams(format!("{name} must be between {lo} and {hi}"))) }
+}
+
+#[derive(Deserialize)]
+struct TraceParams {
+    id: Option<ShapeId>,
+    #[serde(default = "default_threshold")]
+    threshold: f64,
+    #[serde(default = "default_tolerance")]
+    tolerance: f64,
+    #[serde(default = "default_min_area")]
+    min_area: f64,
+    layer: Option<LayerId>,
+    #[serde(default = "yes")]
+    keep_image: bool,
+}
+
+fn default_threshold() -> f64 {
+    128.0
+}
+
+fn default_tolerance() -> f64 {
+    1.0
+}
+
+fn default_min_area() -> f64 {
+    4.0
+}
+
+fn yes() -> bool {
+    true
+}
+
+fn trace(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: TraceParams = parse(params)?;
+    let id = target_image(s, p.id)?;
+    let threshold = in_range("threshold", p.threshold, 0.0, 255.0)?;
+    let tolerance = in_range("tolerance", p.tolerance, 0.0, 50.0)?;
+    let min_area = in_range("min_area", p.min_area, 0.0, 1e9)?;
+    let shape = s.doc.shape(id).ok_or_else(|| EngineError::NotFound(format!("shape {id} does not exist")))?;
+    let ShapeKind::Image { image, width_mm, height_mm, adjust } = &shape.kind else { return Err(not_an_image(id)) };
+    let (w, h) = (image.width as usize, image.height as usize);
+    let loops = lightfoundry_toolpath::trace(
+        w,
+        h,
+        |x, y| image.gray.get(y * w + x).is_some_and(|g| adjust.apply(f32::from(*g)) < threshold as f32),
+        tolerance,
+        min_area,
+    )
+    .ok_or_else(|| EngineError::BadParams("that picture is too large or too detailed to trace".into()))?;
+    if loops.is_empty() {
+        return Err(EngineError::BadParams("nothing in the picture is darker than the threshold".into()));
+    }
+    let layer = p.layer.unwrap_or(shape.layer);
+    if s.doc.layer(layer).is_none() {
+        return Err(EngineError::NotFound(format!("layer {layer} does not exist")));
+    }
+    // Pixel units to the picture's own millimetres, then wherever the picture sits.
+    let to_local = Affine::scale_non_uniform(*width_mm / w as f64, *height_mm / h as f64);
+    let place = shape.transform * to_local;
+    let mut traced = Shape::path("Traced", layer, super::pathops::polylines_to_path(&loops));
+    traced.transform = place;
+    let count = loops.len();
+    let new_id = s.doc.add_shape(traced);
+    if !p.keep_image {
+        s.doc.shapes.retain(|x| x.id != id);
+    }
+    s.selection = vec![new_id];
+    Ok(json!({ "id": new_id, "outlines": count }))
 }

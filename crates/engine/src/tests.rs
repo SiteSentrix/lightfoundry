@@ -866,6 +866,50 @@ mod import_tests {
     }
 
     #[test]
+    fn tracing_a_picture_adds_outlines_in_place_and_validates_its_inputs() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-trace-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.png");
+        // 20x10 white picture with a black 6x4 block at columns 4..10, rows 3..7.
+        image::GrayImage::from_fn(20, 10, |x, y| image::Luma([if (4..10).contains(&x) && (3..7).contains(&y) { 0 } else { 255 }]))
+            .save(&path)
+            .unwrap();
+        let mut s = Session::new();
+        let pic = s.execute("file.import_image", &json!({"path": path, "width": 40, "x": 100, "y": 50})).unwrap()["id"].as_u64().unwrap();
+        let v = s.execute("image.trace", &json!({"id": pic})).unwrap();
+        assert_eq!(v["outlines"], json!(1));
+        let traced = v["id"].as_u64().unwrap();
+        let b = s.doc.shape(traced).unwrap().world_bounds().unwrap();
+        // 2 mm per pixel: the block spans x 100+8..100+20 and y 50+6..50+14.
+        assert!((b.x0 - 108.0).abs() < 1e-6 && (b.x1 - 120.0).abs() < 1e-6 && (b.y0 - 56.0).abs() < 1e-6 && (b.y1 - 64.0).abs() < 1e-6, "{b:?}");
+        assert_eq!(s.selection, vec![traced]);
+        assert_eq!(s.doc.shapes.len(), 2, "the picture is kept by default");
+
+        s.execute("image.trace", &json!({"id": pic, "keep_image": false})).unwrap();
+        assert!(s.doc.shape(pic).is_none());
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert!(s.doc.shape(pic).is_some(), "one undo step brings the picture back");
+
+        s.execute("image.adjust", &json!({"id": pic, "negative": true})).unwrap();
+        let negative = s.execute("image.trace", &json!({"id": pic})).unwrap();
+        let nb = s.doc.shape(negative["id"].as_u64().unwrap()).unwrap().world_bounds().unwrap();
+        assert!(nb.x1 - nb.x0 > 30.0, "the negative traces everything but the block: {nb:?}");
+        s.execute("image.adjust", &json!({"id": pic, "reset": true})).unwrap();
+
+        for bad in [
+            json!({"id": pic, "threshold": 300}),
+            json!({"id": pic, "tolerance": -1}),
+            json!({"id": pic, "min_area": "x"}),
+            json!({"id": pic, "layer": 999}),
+        ] {
+            assert!(s.execute("image.trace", &bad).is_err(), "{bad}");
+        }
+        assert!(s.execute("image.trace", &json!({"id": pic, "threshold": 0})).is_err(), "nothing is darker than 0");
+        s.execute("shape.rectangle", &json!({"width": 5, "height": 5})).unwrap();
+        assert!(s.execute("image.trace", &json!({})).is_err(), "a rectangle is not an image");
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {

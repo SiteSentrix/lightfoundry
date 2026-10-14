@@ -140,4 +140,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   read-only `document_summary`. Engine failures are tool errors; messages over 64 MB are skipped
   without being buffered. `lightfoundry-cli mcp` serves it on stdin/stdout. Note for operators: the
   file.* tools read and write paths the agent names, so only attach it to agents you trust.
+- **2026-10-14 — trace to vectors.** `toolpath::trace` follows the boundaries of dark pixels along
+  pixel edges (outer loops clockwise, holes the other way, diagonal neighbours joined), then
+  simplifies with Douglas-Peucker (bounded: 16 Mpixel, 4 M edges, 50 000 loops). `image.trace`
+  applies the picture's tone adjustments, scales to the picture's size and position, and adds the
+  outlines as a path (optionally replacing the picture). Image inspector gets a Trace section.
 
