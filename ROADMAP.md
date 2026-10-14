@@ -339,3 +339,13 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   outlines, pictures embedded as PNG with their tone adjustments. `selection_only` and
   `include_hidden` narrow or widen it. Written so work designed here can go into software that takes SVG
   but not G-code (such as a cloud-driven laser's own app); reading it back gives the same size.
+- **2026-10-14 — live MCP link.** `lightfoundry --agent-link` (or `LIGHTFOUNDRY_AGENT_LINK=1`; off by
+  default) opens a loopback-only port and writes `agent-link.json` (port + random token, owner-only
+  permissions) to the per-user data folder; `lightfoundry-cli mcp --connect` then bridges an agent's
+  stdio to it, so the agent edits the drawing in the open window and the person watches it change.
+  Decisions: loopback TCP with a token (portable, no new dependencies); opt-in per launch with a
+  warning logged; commands run on the app's thread once per frame (no shared locking), at most 16
+  per frame and 4 agents at once; only engine commands cross the link, so a machine job cannot be
+  started by an agent, and `file.new`/`file.open`/`file.recover` are refused while there are unsaved
+  changes. Hostile-handshake, wrong-token, file-permission, stale-file and end-to-end tests are in
+  `crates/mcp/src/link.rs`.

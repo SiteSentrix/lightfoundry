@@ -1783,6 +1783,7 @@ dependencies = [
  "env_logger",
  "lightfoundry-device",
  "lightfoundry-engine",
+ "lightfoundry-mcp",
  "lightfoundry-ui-egui",
  "log",
  "rfd",
