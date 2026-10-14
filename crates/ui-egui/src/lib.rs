@@ -136,6 +136,8 @@ pub struct LightFoundryApp {
     resume_line: usize,
     /// What a requested upload is for.
     awaiting_upload: Option<UploadKind>,
+    /// Waiting for the host to finish choosing and opening a serial device.
+    awaiting_serial: bool,
     marks: register_ui::Marks,
     auto_reconnect: bool,
     reconnect: Option<Reconnect>,
@@ -250,6 +252,7 @@ impl LightFoundryApp {
             preset_name: String::new(),
             resume_line: 1,
             awaiting_upload: None,
+            awaiting_serial: false,
             marks: register_ui::Marks::default(),
             auto_reconnect: true,
             reconnect: None,
@@ -269,6 +272,7 @@ impl LightFoundryApp {
         self.watch_close_and_title(ui.ctx());
         self.track_recent();
         self.poll_upload(ui.ctx());
+        self.poll_serial(ui.ctx());
         if !self.has_modal() {
             self.handle_shortcuts(ui.ctx());
         }
@@ -561,20 +565,48 @@ impl LightFoundryApp {
             self.status = Some(("Connecting to a machine is not available in this build".into(), true));
             return;
         }
+        let inline = self.platform.inline_link();
         let transport: Result<Box<dyn lightfoundry_device::Transport + Send>, String> = match &self.target {
             Target::Simulator => {
                 let mut sim = SimulatedGrbl::new();
-                sim.set_latency(std::time::Duration::from_millis(3));
+                if inline {
+                    sim.set_non_blocking(true);
+                } else {
+                    sim.set_latency(std::time::Duration::from_millis(3));
+                }
                 Ok(Box::new(sim))
+            }
+            Target::Serial(_) if self.platform.serial_async() => {
+                // The host asks the person to choose a device; the link starts when it is open.
+                self.awaiting_serial = true;
+                self.platform.request_serial();
+                return;
             }
             Target::Serial(port) => self.platform.open_serial(port),
         };
+        self.start_link(transport);
+    }
+
+    fn start_link(&mut self, transport: Result<Box<dyn lightfoundry_device::Transport + Send>, String>) {
         match transport {
             Ok(t) => {
-                self.link = Some(Link::connect(t));
+                self.link = Some(if self.platform.inline_link() { Link::connect_inline(t) } else { Link::connect(t) });
                 self.say("Connected");
             }
             Err(e) => self.status = Some((format!("Could not open the machine: {e}"), true)),
+        }
+    }
+
+    fn poll_serial(&mut self, ctx: &egui::Context) {
+        if !self.awaiting_serial {
+            return;
+        }
+        match self.platform.take_serial() {
+            Some(result) => {
+                self.awaiting_serial = false;
+                self.start_link(result);
+            }
+            None => ctx.request_repaint_after(Duration::from_millis(200)),
         }
     }
 
@@ -650,14 +682,16 @@ impl LightFoundryApp {
         self.reconnect_tick(ctx);
         let Some(link) = &self.link else { return };
         // The worker updates continuously; poll at a modest rate rather than every frame forever.
-        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        // An inline link only works when ticked, so it needs frames more often.
+        ctx.request_repaint_after(std::time::Duration::from_millis(if self.platform.inline_link() { 30 } else { 100 }));
+        link.tick();
         let snap = link.snapshot();
         if !snap.connected {
             let had_job = matches!(snap.job, JobState::Running | JobState::Paused | JobState::Finished(Err(_)));
             self.link = None;
             self.snap = None;
             self.move_head_mode = false;
-            if self.auto_reconnect && matches!(self.target, Target::Serial(_)) {
+            if self.auto_reconnect && matches!(self.target, Target::Serial(_)) && !self.platform.serial_async() {
                 self.reconnect = Some(Reconnect { attempts: 0, next: Instant::now() + self.reconnect_wait });
                 let note = if had_job { " The job was stopped and will not resume by itself." } else { "" };
                 self.status = Some((format!("The machine connection was lost; trying to reconnect.{note}"), true));

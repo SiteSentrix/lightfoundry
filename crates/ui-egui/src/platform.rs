@@ -51,6 +51,25 @@ pub trait Platform {
         true
     }
 
+    /// Hosts without threads (the browser) run the machine link on the caller's thread, driven by
+    /// `Link::tick` each frame.
+    fn inline_link(&self) -> bool {
+        false
+    }
+
+    /// Whether the serial port is chosen and opened asynchronously by the host (the browser asks
+    /// the person to pick a device): call [`request_serial`](Platform::request_serial), then poll
+    /// [`take_serial`](Platform::take_serial).
+    fn serial_async(&self) -> bool {
+        false
+    }
+
+    fn request_serial(&self) {}
+
+    fn take_serial(&self) -> Option<Result<Box<dyn Transport + Send>, String>> {
+        None
+    }
+
     fn serial_ports(&self) -> Vec<String>;
     fn open_serial(&self, port: &str) -> Result<Box<dyn Transport + Send>, String>;
 }

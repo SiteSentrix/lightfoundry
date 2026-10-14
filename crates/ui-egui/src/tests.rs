@@ -1729,3 +1729,115 @@ mod browser_file_tests {
         assert_eq!(h.app.session.doc.shapes.len(), 2, "a failed open leaves the document alone");
     }
 }
+
+mod async_serial_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    use std::time::{Duration, Instant};
+
+    use lightfoundry_device::{JobState, SimulatedGrbl, Transport};
+
+    use super::*;
+
+    type Ready = Rc<RefCell<Option<Result<Box<dyn Transport + Send>, String>>>>;
+
+    /// A host like the browser: the device is chosen asynchronously, and there are no threads.
+    struct AsyncHost {
+        ready: Ready,
+        requests: Rc<RefCell<u32>>,
+    }
+
+    impl Platform for AsyncHost {
+        fn pick_open(&self, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        fn pick_save(&self, _: &str, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        fn inline_link(&self) -> bool {
+            true
+        }
+
+        fn serial_async(&self) -> bool {
+            true
+        }
+
+        fn request_serial(&self) {
+            *self.requests.borrow_mut() += 1;
+        }
+
+        fn take_serial(&self) -> Option<Result<Box<dyn Transport + Send>, String>> {
+            self.ready.borrow_mut().take()
+        }
+
+        fn serial_ports(&self) -> Vec<String> {
+            vec!["USB device".into()]
+        }
+
+        fn open_serial(&self, _: &str) -> Result<Box<dyn Transport + Send>, String> {
+            Err("use request_serial".into())
+        }
+    }
+
+    fn host() -> (Harness, Ready, Rc<RefCell<u32>>) {
+        let ready: Ready = Rc::new(RefCell::new(None));
+        let requests = Rc::new(RefCell::new(0));
+        let mut h = Harness {
+            ctx: egui::Context::default(),
+            app: LightFoundryApp::new(Session::new(), Box::new(AsyncHost { ready: Rc::clone(&ready), requests: Rc::clone(&requests) })),
+            time: 0.0,
+            modifiers: Modifiers::NONE,
+            sent_modifiers: Modifiers::NONE,
+        };
+        h.frame(vec![]);
+        (h, ready, requests)
+    }
+
+    fn pump(h: &mut Harness, what: &str, done: impl Fn(&Harness) -> bool) {
+        let start = Instant::now();
+        while !done(h) {
+            h.frame(vec![]);
+            assert!(start.elapsed() < Duration::from_secs(10), "timed out waiting for {what}: {:?}", h.app.status);
+        }
+    }
+
+    #[test]
+    fn connecting_asks_the_host_to_pick_a_device_and_the_link_runs_on_frames() {
+        let (mut h, ready, requests) = host();
+        h.app.target = Target::Serial("USB device".into());
+        h.app.connect();
+        assert_eq!(*requests.borrow(), 1);
+        h.frame(vec![]);
+        assert!(h.app.link.is_none() && h.app.awaiting_serial, "still waiting for the person to choose");
+
+        let mut sim = SimulatedGrbl::new();
+        sim.set_non_blocking(true);
+        *ready.borrow_mut() = Some(Ok(Box::new(sim)));
+        pump(&mut h, "the link", |h| h.app.link.is_some() && h.app.snap.as_ref().is_some_and(|s| s.status.is_some()));
+        assert!(!h.app.awaiting_serial);
+
+        h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 20, "height": 10}));
+        let program = h.app.run("job.gcode", json!({"include": true})).and_then(|v| v["gcode"].as_str().map(String::from)).unwrap();
+        h.app.start_job(program);
+        pump(&mut h, "the job", |h| matches!(h.app.snap.as_ref().map(|s| &s.job), Some(JobState::Finished(_))));
+        assert!(matches!(h.app.snap.as_ref().map(|s| &s.job), Some(JobState::Finished(Ok(_)))), "{:?}", h.app.status);
+    }
+
+    #[test]
+    fn a_refused_or_cancelled_choice_is_reported_and_the_simulator_works_without_threads() {
+        let (mut h, ready, _) = host();
+        h.app.target = Target::Serial("USB device".into());
+        h.app.connect();
+        *ready.borrow_mut() = Some(Err("No device selected".into()));
+        h.frame(vec![]);
+        assert!(h.app.link.is_none() && !h.app.awaiting_serial);
+        assert!(matches!(&h.app.status, Some((m, true)) if m.contains("No device selected")), "{:?}", h.app.status);
+
+        h.app.target = Target::Simulator;
+        h.app.connect();
+        pump(&mut h, "the simulated machine", |h| h.app.snap.as_ref().is_some_and(|s| s.status.is_some()));
+        assert!(h.app.reconnect.is_none(), "no automatic reconnect for hosts that need a click to open a device");
+    }
+}

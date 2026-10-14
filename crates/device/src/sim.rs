@@ -28,11 +28,18 @@ pub struct SimulatedGrbl {
     homed: bool,
     latency: Duration,
     settings: BTreeMap<u32, String>,
+    /// Never sleep (for hosts without threads, which poll instead of waiting).
+    non_blocking: bool,
 }
 
 impl SimulatedGrbl {
     pub fn new() -> Self {
         SimulatedGrbl { settings: default_settings(), ..Self::default() }
+    }
+
+    /// Makes reads return at once instead of waiting out their timeout, and ignores the latency.
+    pub fn set_non_blocking(&mut self, non_blocking: bool) {
+        self.non_blocking = non_blocking;
     }
 
     /// The setting values the "controller" currently holds.
@@ -214,17 +221,19 @@ impl Transport for SimulatedGrbl {
 
     fn read_line(&mut self, timeout: Duration) -> io::Result<Option<String>> {
         if self.silent {
-            std::thread::sleep(timeout);
+            if !self.non_blocking {
+                std::thread::sleep(timeout);
+            }
             return Ok(None);
         }
         if self.responses.is_empty() && !self.held {
-            if !self.latency.is_zero() && !self.pending.is_empty() {
+            if !self.non_blocking && !self.latency.is_zero() && !self.pending.is_empty() {
                 std::thread::sleep(self.latency);
             }
             self.process_one();
         }
         let response = self.responses.pop_front();
-        if response.is_none() {
+        if response.is_none() && !self.non_blocking {
             // A real port blocks until the timeout; do the same so callers do not spin.
             std::thread::sleep(timeout.min(Duration::from_millis(5)));
         }

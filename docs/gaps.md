@@ -16,5 +16,5 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 15 | Other controllers: verify the Marlin/Smoothieware dialects on hardware and add a link for them; Ruida is a large project | Reach beyond GRBL                                                   |
 | 16 | Live camera capture and lens calibration (two-point print-and-cut alignment is done; a photo of the bed can serve as a backdrop on a non-output layer) | Placing work on printed or irregular material                       |
 | 17 | MCP: resources (documents as files), prompts, a live link to the running desktop app (the stdio server edits its own session) | Agent-driven design, like the sibling apps                          |
-| 18 | Browser build: Web Serial for the machine link (needs the link worker without threads), install as a PWA, remember recent files |  Web users can design and generate G-code today |
+| 18 | Browser build: try Web Serial on real hardware, install as a PWA, remember recent files |  Web users can design and generate G-code today |
 | 20 | Galvo/fibre/CO2-RF controllers (proprietary protocols); a tilted or 3D Z map; chuck rotary with steps-per-rotation |  Hardware variants |
