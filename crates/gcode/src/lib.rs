@@ -58,6 +58,7 @@ pub fn generate(job: &Job, machine: &Machine, placement: Placement) -> Result<St
         }
         for pass in 0..op.passes.max(1) {
             w.comment(&format!("layer {} pass {}", op.layer, pass + 1));
+            w.set_z(op.z + op.z_per_pass * f64::from(pass), op.z != 0.0 || op.z_per_pass != 0.0)?;
             for m in &op.moves {
                 match m {
                     Move::Travel(p) => w.travel(*p)?,
@@ -100,6 +101,10 @@ fn check_machine(m: &Machine) -> Result<(), GcodeError> {
             return Err(GcodeError::BadMachine(name));
         }
     }
+    let r = m.rotary;
+    if r.enabled && !(r.reference_diameter.is_finite() && r.reference_diameter > 0.0 && r.object_diameter.is_finite() && r.object_diameter > 0.0) {
+        return Err(GcodeError::BadMachine("rotary diameters"));
+    }
     if m.max_s == 0 {
         return Err(GcodeError::BadMachine("max S value"));
     }
@@ -114,6 +119,8 @@ struct Writer<'a> {
     y: Option<f64>,
     s: Option<u32>,
     f: Option<f64>,
+    /// Current Z when the program has moved it; `None` while Z is untouched.
+    z: Option<f64>,
 }
 
 impl<'a> Writer<'a> {
@@ -126,7 +133,7 @@ impl<'a> Writer<'a> {
                 return Err(GcodeError::JobLargerThanBed { w, h, bw: machine.bed_width, bh: machine.bed_height });
             }
         }
-        Ok(Writer { out: String::new(), machine, placement, x: None, y: None, s: None, f: None })
+        Ok(Writer { out: String::new(), machine, placement, x: None, y: None, s: None, f: None, z: None })
     }
 
     fn preamble(&mut self, title: &str) {
@@ -154,6 +161,23 @@ impl<'a> Writer<'a> {
     fn shutdown(&mut self) {
         self.line("M5");
         self.line("G0 X0 Y0");
+    }
+
+    /// Moves Z (with the laser off) when an operation wants a different height; an operation that
+    /// does not use Z brings it back to the work zero if an earlier one moved it.
+    fn set_z(&mut self, z: f64, wanted: bool) -> Result<(), GcodeError> {
+        if !z.is_finite() || z.abs() > lightfoundry_toolpath::MAX_Z_MM {
+            return Err(GcodeError::NonFinite);
+        }
+        let target = if wanted { z } else { 0.0 };
+        let current = self.z.unwrap_or(0.0);
+        if (target - current).abs() < 1e-9 {
+            return Ok(());
+        }
+        // Feed moves are modal in GRBL, so a plain rapid is fine: the beam is off during G0.
+        self.line(&format!("G0 Z{}", num(target)));
+        self.z = Some(target);
+        Ok(())
     }
 
     fn travel(&mut self, p: Point) -> Result<(), GcodeError> {
@@ -225,7 +249,7 @@ impl<'a> Writer<'a> {
                 Origin::TopLeft => dy,
                 Origin::BottomLeft => -dy,
             };
-            return Ok((round3(dx), round3(y)));
+            return Ok((round3(dx), round3(y * m.rotary.y_scale())));
         }
         if p.x < -BED_EPSILON || p.y < -BED_EPSILON || p.x > m.bed_width + BED_EPSILON || p.y > m.bed_height + BED_EPSILON {
             return Err(GcodeError::OutOfBed { x: p.x, y: p.y, w: m.bed_width, h: m.bed_height });
@@ -234,7 +258,7 @@ impl<'a> Writer<'a> {
             Origin::TopLeft => p.y,
             Origin::BottomLeft => m.bed_height - p.y,
         };
-        Ok((round3(p.x.clamp(0.0, m.bed_width)), round3(y.clamp(0.0, m.bed_height))))
+        Ok((round3(p.x.clamp(0.0, m.bed_width)), round3(y.clamp(0.0, m.bed_height) * m.rotary.y_scale())))
     }
 
     fn line(&mut self, s: &str) {
@@ -279,6 +303,82 @@ mod tests {
         }
         doc.add_shape(Shape::path("r", 0, rect_path(10.0, 10.0, 20.0, 10.0)));
         generate(&plan(&doc).unwrap(), &doc.machine, Placement::Absolute).unwrap()
+    }
+
+    mod rotary_tests {
+        use super::*;
+
+        fn y_words(rotary: lightfoundry_doc::Rotary) -> Vec<String> {
+            let mut doc = Document::default();
+            doc.machine.origin = Origin::TopLeft;
+            doc.machine.rotary = rotary;
+            doc.add_shape(Shape::path("a", 0, rect_path(10.0, 10.0, 20.0, 40.0)));
+            let g = generate(&plan(&doc).unwrap(), &doc.machine, Placement::Absolute).unwrap();
+            g.lines().filter_map(|l| l.split_whitespace().find(|w| w.starts_with('Y')).map(String::from)).collect()
+        }
+
+        #[test]
+        fn y_is_scaled_by_the_reference_over_the_object_diameter() {
+            let plain = y_words(lightfoundry_doc::Rotary::default());
+            assert!(plain.contains(&"Y50".to_string()), "{plain:?}");
+            let scaled = y_words(lightfoundry_doc::Rotary { enabled: true, reference_diameter: 60.0, object_diameter: 30.0 });
+            assert!(scaled.contains(&"Y100".to_string()) && scaled.contains(&"Y20".to_string()), "{scaled:?}");
+            let off = y_words(lightfoundry_doc::Rotary { enabled: false, reference_diameter: 60.0, object_diameter: 30.0 });
+            assert_eq!(off, plain);
+        }
+
+        #[test]
+        fn unusable_diameters_are_refused_not_divided_by() {
+            let mut doc = Document::default();
+            doc.machine.rotary = lightfoundry_doc::Rotary { enabled: true, reference_diameter: 50.0, object_diameter: 0.0 };
+            doc.add_shape(Shape::path("a", 0, rect_path(10.0, 10.0, 20.0, 10.0)));
+            assert_eq!(generate(&plan(&doc).unwrap(), &doc.machine, Placement::Absolute), Err(GcodeError::BadMachine("rotary diameters")));
+        }
+    }
+
+    mod z_axis_tests {
+        use super::*;
+
+        fn program(z: f64, step: f64, passes: u32, second_layer: bool) -> String {
+            let mut doc = Document::default();
+            if let Some(l) = doc.layer_mut(0) {
+                l.z_offset = z;
+                l.z_per_pass = step;
+                l.passes = passes;
+            }
+            doc.add_shape(Shape::path("a", 0, rect_path(10.0, 10.0, 20.0, 10.0)));
+            if second_layer {
+                doc.add_shape(Shape::path("b", 1, rect_path(50.0, 10.0, 20.0, 10.0)));
+            }
+            generate(&plan(&doc).unwrap(), &doc.machine, Placement::Absolute).unwrap()
+        }
+
+        #[test]
+        fn z_is_left_alone_unless_a_layer_asks_for_it() {
+            assert!(!program(0.0, 0.0, 2, true).contains(" Z"));
+        }
+
+        #[test]
+        fn each_pass_steps_z_and_later_layers_return_to_zero() {
+            let g = program(-2.0, -0.5, 3, true);
+            let zs: Vec<&str> = g.lines().filter(|l| l.contains(" Z")).collect();
+            assert_eq!(zs, vec!["G0 Z-2", "G0 Z-2.5", "G0 Z-3", "G0 Z0"], "{g}");
+            let first_z = g.lines().position(|l| l == "G0 Z-2").unwrap();
+            let first_cut = g.lines().position(|l| l.starts_with("G1")).unwrap();
+            assert!(first_z < first_cut, "Z is set before the cut starts");
+        }
+
+        #[test]
+        fn absurd_z_values_are_refused_by_the_planner() {
+            let mut doc = Document::default();
+            doc.add_shape(Shape::path("a", 0, rect_path(10.0, 10.0, 20.0, 10.0)));
+            for bad in [f64::NAN, 1e9, -500.0] {
+                if let Some(l) = doc.layer_mut(0) {
+                    l.z_offset = bad;
+                }
+                assert!(plan(&doc).is_err(), "{bad}");
+            }
+        }
     }
 
     mod dialect_tests {
@@ -404,6 +504,8 @@ G0 X0 Y0
                     speed: 100.0,
                     passes: 1,
                     air_assist: false,
+                    z: 0.0,
+                    z_per_pass: 0.0,
                     moves: vec![Move::Travel(Point::new(f64::NAN, 0.0))],
                 }],
             };

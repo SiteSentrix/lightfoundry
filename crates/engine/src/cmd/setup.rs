@@ -11,7 +11,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Cut Settings",
         menu: "Laser",
         shortcut: None,
-        params_doc: "{id, name?, color? (#rrggbb), mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, kerf_offset? (mm; closed outlines are offset before cutting, + grows parts and shrinks holes), tab_count? (per outer outline), tab_width? (mm), lead_in?/lead_out? (mm, on the scrap side), perf_cut?/perf_gap? (mm; both > 0 cuts outlines as dashes with the laser off over the gaps, instead of tabs), bidirectional?, crosshatch? (fill again at right angles), dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
+        params_doc: "{id, name?, color? (#rrggbb), mode?: line|fill|fill_and_line, speed? (mm/min), min_power?, max_power? (%), passes?, interval? (mm), scan_angle?, kerf_offset? (mm; closed outlines are offset before cutting, + grows parts and shrinks holes), tab_count? (per outer outline), tab_width? (mm), lead_in?/lead_out? (mm, on the scrap side), perf_cut?/perf_gap? (mm; both > 0 cuts outlines as dashes with the laser off over the gaps, instead of tabs), bidirectional?, crosshatch? (fill again at right angles), z_offset?/z_per_pass? (mm; Z height for the layer and the change per extra pass), dither?: threshold|floyd_steinberg|grayscale, output?, air_assist?}",
         mutates: true,
         run: layer_set,
     },
@@ -29,7 +29,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Device Settings",
         menu: "Laser",
         shortcut: None,
-        params_doc: "{name?, bed_width?, bed_height?, origin?: bottom_left|top_left, max_s?, dynamic_power?, rapid_speed?, overscan?, dialect?: grbl|marlin|smoothie}",
+        params_doc: "{name?, bed_width?, bed_height?, origin?: bottom_left|top_left, max_s?, dynamic_power?, rapid_speed?, overscan?, dialect?: grbl|marlin|smoothie, rotary_enabled?, rotary_reference_diameter?, rotary_object_diameter? (mm)}",
         mutates: true,
         run: machine_set,
     },
@@ -55,6 +55,8 @@ struct LayerParams {
     perf_cut: Option<f64>,
     perf_gap: Option<f64>,
     crosshatch: Option<bool>,
+    z_offset: Option<f64>,
+    z_per_pass: Option<f64>,
     bidirectional: Option<bool>,
     dither: Option<Dither>,
     output: Option<bool>,
@@ -89,6 +91,12 @@ fn layer_set(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         layer.lead_in = in_range("lead_in", v, 0.0, 1000.0)?;
     }
     layer.crosshatch = p.crosshatch.unwrap_or(layer.crosshatch);
+    if let Some(v) = p.z_offset {
+        layer.z_offset = in_range("z_offset", v, -200.0, 200.0)?;
+    }
+    if let Some(v) = p.z_per_pass {
+        layer.z_per_pass = in_range("z_per_pass", v, -200.0, 200.0)?;
+    }
     if let Some(v) = p.perf_cut {
         layer.perf_cut = in_range("perf_cut", v, 0.0, 1000.0)?;
     }
@@ -153,6 +161,9 @@ struct MachineParams {
     rapid_speed: Option<f64>,
     overscan: Option<f64>,
     dialect: Option<lightfoundry_doc::Dialect>,
+    rotary_enabled: Option<bool>,
+    rotary_reference_diameter: Option<f64>,
+    rotary_object_diameter: Option<f64>,
 }
 
 fn machine_set(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
@@ -182,6 +193,13 @@ fn machine_set(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     m.origin = p.origin.unwrap_or(m.origin);
     m.dynamic_power = p.dynamic_power.unwrap_or(m.dynamic_power);
     m.dialect = p.dialect.unwrap_or(m.dialect);
+    m.rotary.enabled = p.rotary_enabled.unwrap_or(m.rotary.enabled);
+    if let Some(v) = p.rotary_reference_diameter {
+        m.rotary.reference_diameter = in_range("rotary_reference_diameter", v, 1.0, 10_000.0)?;
+    }
+    if let Some(v) = p.rotary_object_diameter {
+        m.rotary.object_diameter = in_range("rotary_object_diameter", v, 1.0, 10_000.0)?;
+    }
     Ok(json!({ "bed": [m.bed_width, m.bed_height] }))
 }
 

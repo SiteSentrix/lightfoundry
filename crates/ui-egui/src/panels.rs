@@ -114,6 +114,8 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ("Tab width", "tab_width", layer.tab_width, 0.0..=1000.0, " mm"),
             ("Lead-in", "lead_in", layer.lead_in, 0.0..=1000.0, " mm"),
             ("Lead-out", "lead_out", layer.lead_out, 0.0..=1000.0, " mm"),
+            ("Z offset", "z_offset", layer.z_offset, -200.0..=200.0, " mm"),
+            ("Z per pass", "z_per_pass", layer.z_per_pass, -200.0..=200.0, " mm"),
             ("Dash cut", "perf_cut", layer.perf_cut, 0.0..=1000.0, " mm"),
             ("Dash gap", "perf_gap", layer.perf_gap, 0.0..=1000.0, " mm"),
         ] {
@@ -324,6 +326,7 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         if dialect != lightfoundry_doc::Dialect::Grbl {
             ui.weak("Written from the firmware's public documentation and untested on a machine. Use Frame at 0% power first. The controller-link features ($$, jog) are GRBL only.");
         }
+        rotary_section(app, ui, &m);
         let mut dynamic = m.dynamic_power;
         if ui.checkbox(&mut dynamic, "Dynamic power (M4)").changed() {
             app.run("machine.set", json!({ "dynamic_power": dynamic }));
@@ -404,6 +407,37 @@ fn cut_order(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             }
         }
     });
+}
+
+fn rotary_section(app: &mut LightFoundryApp, ui: &mut egui::Ui, m: &lightfoundry_doc::Machine) {
+    let mut on = m.rotary.enabled;
+    if ui
+        .checkbox(&mut on, "Rotary attachment")
+        .on_hover_text("Y turns the workpiece: Y distances are scaled by reference / object diameter")
+        .changed()
+    {
+        app.run("machine.set", json!({ "rotary_enabled": on }));
+    }
+    if !m.rotary.enabled {
+        return;
+    }
+    egui::Grid::new("rotary").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+        ui.label("Roller / chuck diameter");
+        if let Some(v) = number(ui, m.rotary.reference_diameter, 1.0..=10_000.0, " mm") {
+            app.run("machine.set", json!({ "rotary_reference_diameter": v }));
+        }
+        ui.end_row();
+        ui.label("Object diameter");
+        if let Some(v) = number(ui, m.rotary.object_diameter, 1.0..=10_000.0, " mm") {
+            app.run("machine.set", json!({ "rotary_object_diameter": v }));
+        }
+        ui.end_row();
+    });
+    if ui.button("Set bed height to the circumference").on_hover_text("The design's Y range becomes one turn of the object").clicked() {
+        let c = m.rotary.circumference();
+        app.run("machine.set", json!({ "bed_height": c }));
+        app.view = None;
+    }
 }
 
 fn job_origin(app: &mut LightFoundryApp, ui: &mut egui::Ui) {

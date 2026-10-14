@@ -166,4 +166,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   resumed by itself. `gcode::resume_from` rebuilds position, feed, power, spindle mode and air from
   the skipped lines and never repeats `G92`; `job.resume` and a "Run from line" control in the
   G-code section start a job part-way through, with the beam off for the approach move.
+- **2026-10-14 — Z axis and rotary.** Layers have `z_offset` and `z_per_pass`: the program moves Z
+  (`G0 Z`, beam off) before each pass, brings it back to 0 for layers that do not use Z, and a
+  resumed job restores it. `Machine::rotary` (reference and object diameter) scales Y by
+  reference/object, refuses unusable diameters, and the Device section can set the bed height to
+  one turn of the object. Galvo needs controller-specific protocols and stays out of scope.
 
