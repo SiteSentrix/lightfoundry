@@ -85,17 +85,38 @@ pub fn plan(doc: &Document) -> Result<Job, PlanError> {
         if shapes.is_empty() {
             continue;
         }
-        let mut ops = plan_layer(doc, layer, &shapes, at)?;
-        for op in &mut ops {
-            total = total.saturating_add(op.moves.len());
-            if let Some(last) = op.moves.last() {
-                at = last.target();
+        // Shapes with their own cut settings are planned separately, in order of first appearance;
+        // everything else uses the layer as it is.
+        let mut groups: Vec<(Option<lightfoundry_doc::CutOverride>, Vec<&Shape>)> = Vec::new();
+        for shape in shapes {
+            let key = shape.cut.filter(|c| !c.is_empty());
+            match groups.iter_mut().find(|(k, _)| *k == key) {
+                Some((_, v)) => v.push(shape),
+                None => groups.push((key, vec![shape])),
             }
         }
-        if total > MAX_MOVES {
-            return Err(PlanError::TooManyMoves);
+        groups.sort_by_key(|(k, _)| k.is_some()); // stable: plain shapes first
+        for (key, group) in groups {
+            let effective = key.map(|c| c.apply(layer));
+            let layer_for_group = match &effective {
+                Some(l) => {
+                    validate(l)?;
+                    l
+                }
+                None => layer,
+            };
+            let mut ops = plan_layer(doc, layer_for_group, &group, at)?;
+            for op in &mut ops {
+                total = total.saturating_add(op.moves.len());
+                if let Some(last) = op.moves.last() {
+                    at = last.target();
+                }
+            }
+            if total > MAX_MOVES {
+                return Err(PlanError::TooManyMoves);
+            }
+            job.ops.append(&mut ops);
         }
-        job.ops.append(&mut ops);
     }
     Ok(job)
 }

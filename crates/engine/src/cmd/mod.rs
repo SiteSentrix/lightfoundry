@@ -9,6 +9,7 @@ mod params;
 mod pathops;
 mod setup;
 mod shapes;
+mod testgrid;
 mod text;
 
 use serde_json::Value;
@@ -36,6 +37,7 @@ pub fn commands() -> impl Iterator<Item = &'static CommandSpec> {
     shapes::COMMANDS
         .iter()
         .chain(text::COMMANDS)
+        .chain(testgrid::COMMANDS)
         .chain(pathops::COMMANDS)
         .chain(arrange::COMMANDS)
         .chain(edit::COMMANDS)

@@ -236,6 +236,36 @@ pub struct Shape {
     /// Maps local geometry to workspace mm (y down, origin top-left of the bed).
     pub transform: Affine,
     pub kind: ShapeKind,
+    /// Settings that replace the layer's for this shape only (test grids, one-off tweaks).
+    #[serde(default)]
+    pub cut: Option<CutOverride>,
+}
+
+/// Per-shape replacement for some of its layer's cut settings; `None` fields keep the layer's value.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct CutOverride {
+    /// mm/min
+    pub speed: Option<f64>,
+    /// Percent
+    pub min_power: Option<f64>,
+    pub max_power: Option<f64>,
+    pub passes: Option<u32>,
+}
+
+impl CutOverride {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The layer as this override changes it.
+    pub fn apply(&self, layer: &Layer) -> Layer {
+        let mut l = layer.clone();
+        l.speed = self.speed.unwrap_or(l.speed);
+        l.min_power = self.min_power.unwrap_or(l.min_power);
+        l.max_power = self.max_power.unwrap_or(l.max_power);
+        l.passes = self.passes.unwrap_or(l.passes);
+        l
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -297,7 +327,7 @@ impl Shape {
     }
 
     pub fn path(name: impl Into<String>, layer: LayerId, path: BezPath) -> Shape {
-        Shape { id: 0, name: name.into(), layer, transform: Affine::IDENTITY, kind: ShapeKind::Path { path } }
+        Shape { id: 0, name: name.into(), layer, transform: Affine::IDENTITY, kind: ShapeKind::Path { path }, cut: None }
     }
 
     /// Flattened outlines in workspace mm. Images yield their bounding rectangle.
@@ -546,6 +576,7 @@ mod tests {
                 layer: 0,
                 transform: Affine::IDENTITY,
                 kind: ShapeKind::Image { image, width_mm: 1.0, height_mm: 1.0, adjust: ImageAdjust::default() },
+                cut: None,
             });
         }
         let json = serde_json::to_string(&doc).unwrap();

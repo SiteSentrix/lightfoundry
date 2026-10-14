@@ -108,6 +108,60 @@ mod kerf_tests {
     }
 }
 
+mod override_tests {
+    use lightfoundry_doc::CutOverride;
+
+    use super::*;
+
+    fn two_squares() -> Document {
+        let mut doc = Document::default();
+        doc.add_shape(Shape::path("plain", 0, rect_path(0.0, 0.0, 10.0, 10.0)));
+        doc.add_shape(Shape::path("special", 0, rect_path(50.0, 0.0, 10.0, 10.0)));
+        let layer = doc.layer_mut(0).unwrap();
+        layer.speed = 1000.0;
+        layer.max_power = 40.0;
+        doc
+    }
+
+    #[test]
+    fn an_overridden_shape_runs_at_its_own_speed_and_power_and_the_rest_do_not() {
+        let mut doc = two_squares();
+        doc.shapes[1].cut = Some(CutOverride { speed: Some(300.0), max_power: Some(90.0), ..Default::default() });
+        let job = plan(&doc).unwrap();
+        assert_eq!(job.ops.len(), 2);
+        let (plain, special) = (&job.ops[0], &job.ops[1]);
+        assert_eq!(plain.speed, 1000.0);
+        assert!(plain.moves.iter().all(|m| !matches!(m, Move::Cut { power, .. } if *power != 40.0)));
+        assert_eq!(special.speed, 300.0);
+        assert!(special.moves.iter().filter(|m| matches!(m, Move::Cut { .. })).all(|m| matches!(m, Move::Cut { power, .. } if *power == 90.0)));
+        assert!(special.moves[0].target().x >= 50.0, "the overridden square is the second op");
+    }
+
+    #[test]
+    fn shapes_with_equal_overrides_share_an_op_and_empty_overrides_are_ignored() {
+        let mut doc = two_squares();
+        doc.shapes[0].cut = Some(CutOverride::default());
+        doc.shapes[1].cut = Some(CutOverride { passes: Some(3), ..Default::default() });
+        let job = plan(&doc).unwrap();
+        assert_eq!(job.ops.len(), 2);
+        assert_eq!((job.ops[0].passes, job.ops[1].passes), (1, 3));
+        let mut doc = two_squares();
+        let same = Some(CutOverride { speed: Some(500.0), ..Default::default() });
+        doc.shapes[0].cut = same;
+        doc.shapes[1].cut = same;
+        assert_eq!(plan(&doc).unwrap().ops.len(), 1, "one op for both");
+    }
+
+    #[test]
+    fn bad_override_values_are_rejected_like_bad_layer_values() {
+        let mut doc = two_squares();
+        doc.shapes[1].cut = Some(CutOverride { speed: Some(f64::NAN), ..Default::default() });
+        assert!(matches!(plan(&doc), Err(PlanError::BadLayerSetting { .. })));
+        doc.shapes[1].cut = Some(CutOverride { speed: Some(-5.0), ..Default::default() });
+        assert!(matches!(plan(&doc), Err(PlanError::BadLayerSetting { .. })));
+    }
+}
+
 mod tab_and_lead_tests {
     use super::*;
 
@@ -298,6 +352,7 @@ mod image_tests {
             layer: 0,
             transform: Affine::IDENTITY,
             kind: ShapeKind::Image { image, width_mm: w as f64, height_mm: h as f64, adjust: Default::default() },
+            cut: None,
         });
         doc
     }

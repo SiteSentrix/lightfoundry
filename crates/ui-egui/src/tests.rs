@@ -419,6 +419,7 @@ mod image_tests {
             layer: 0,
             transform,
             kind: ShapeKind::Image { image, width_mm: 40.0, height_mm: 40.0, adjust: ImageAdjust::default() },
+            cut: None,
         });
         h.app.session.revision += 1;
         id
@@ -481,6 +482,26 @@ mod array_and_radius_tests {
         assert_eq!(h.app.session.doc.shapes.len(), 4);
         h.app.run("arrange.circular", json!({"count": h.app.array_count, "radius": h.app.array_radius}));
         assert_eq!(h.app.session.doc.shapes.len(), 4 * 6, "the whole grid is rotated as one selection");
+    }
+}
+
+mod override_and_grid_tests {
+    use super::*;
+
+    #[test]
+    fn the_override_section_and_test_grid_panel_render_and_drive_the_commands() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
+        h.frame(vec![]);
+        h.app.run("shape.cut_override", json!({"speed": 300, "max_power": 70}));
+        h.frame(vec![]);
+        assert!(h.app.session.doc.shapes[0].cut.is_some());
+        h.app.grid_cols = 3;
+        h.app.grid_rows = 2;
+        let params = json!({"cols": h.app.grid_cols, "rows": h.app.grid_rows, "layer": h.app.active_layer, "speed_min": h.app.grid_speed.0, "speed_max": h.app.grid_speed.1});
+        assert!(h.app.run("generate.test_grid", params).is_some(), "{:?}", h.app.status);
+        h.frame(vec![]);
+        assert_eq!(h.app.session.doc.shapes.iter().filter(|s| s.cut.is_some()).count(), 1 + 6);
     }
 }
 

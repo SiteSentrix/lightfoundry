@@ -247,6 +247,7 @@ fn import_image(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         layer: p.layer,
         transform: Affine::translate((p.x, p.y)),
         kind: ShapeKind::Image { image: Arc::new(raster), width_mm, height_mm: width_mm * aspect, adjust: Default::default() },
+        cut: None,
     };
     let id = s.doc.add_shape(shape);
     s.selection = vec![id];
