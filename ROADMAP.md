@@ -297,3 +297,6 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — per-shape cut priority.** `shape.set_order` (Laser menu; "Cut order" in the shape
   inspector) gives shapes a priority within their layer: lower numbers are finished first, ties keep
   the drawing order; saved in the project (older files read as 0).
+- **2026-10-14 — tonal-band tracing.** `image.trace` takes `levels` (1–8): that many outlines, each
+  around the pixels darker than a share of the threshold, lightest first, so one picture can be
+  engraved or cut in nested tones (put the shapes on different layers to give each its own power).

@@ -912,6 +912,44 @@ mod import_tests {
     }
 
     #[test]
+    fn tracing_in_tonal_bands_makes_nested_outlines_from_light_to_dark() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-bands-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("b.png");
+        // Mid-grey 12x8 block with a black 4x4 core, on white.
+        image::GrayImage::from_fn(20, 12, |x, y| {
+            let core = (8..12).contains(&x) && (4..8).contains(&y);
+            let block = (4..16).contains(&x) && (2..10).contains(&y);
+            image::Luma([if core {
+                0
+            } else if block {
+                100
+            } else {
+                255
+            }])
+        })
+        .save(&path)
+        .unwrap();
+        let mut s = Session::new();
+        let pic = s.execute("file.import_image", &json!({"path": path, "width": 20})).unwrap()["id"].as_u64().unwrap();
+        let v = s.execute("image.trace", &json!({"id": pic, "threshold": 128, "levels": 2})).unwrap();
+        let ids = v["ids"].as_array().unwrap();
+        assert_eq!(ids.len(), 2, "{v}");
+        let width = |i: &Value| {
+            let b = s.doc.shape(i.as_u64().unwrap()).unwrap().world_bounds().unwrap();
+            b.x1 - b.x0
+        };
+        // Threshold 64 catches only the core; 128 the whole block.
+        assert!((width(&ids[0]) - 4.0).abs() < 1e-6 && (width(&ids[1]) - 12.0).abs() < 1e-6, "{} {}", width(&ids[0]), width(&ids[1]));
+        assert_eq!(s.selection.len(), 2);
+        for bad in [json!({"id": pic, "levels": 0}), json!({"id": pic, "levels": 9})] {
+            assert!(s.execute("image.trace", &bad).is_err(), "{bad}");
+        }
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(s.doc.shapes.len(), 1, "both bands go in one undo step");
+    }
+
+    #[test]
     fn tracing_a_picture_adds_outlines_in_place_and_validates_its_inputs() {
         let dir = std::env::temp_dir().join(format!("lf-engine-trace-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
