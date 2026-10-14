@@ -22,6 +22,11 @@ pub trait Platform {
     /// Removes the autosave copy (the work was saved or knowingly discarded).
     fn clear_recovery(&self) {}
 
+    /// Where the position of a job in progress is kept, so it can be resumed after a power cut.
+    fn job_position_file(&self) -> Option<PathBuf> {
+        None
+    }
+
     /// Where presets shared between projects are kept, if this platform has somewhere to keep them.
     fn preset_library_file(&self) -> Option<PathBuf> {
         None

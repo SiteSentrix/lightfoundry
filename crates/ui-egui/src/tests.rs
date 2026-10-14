@@ -88,6 +88,10 @@ impl Platform for RecoveryPlatform {
         self.recent.clone()
     }
 
+    fn job_position_file(&self) -> Option<std::path::PathBuf> {
+        Some(self.file.with_file_name("job-position.json"))
+    }
+
     fn clear_recovery(&self) {
         let _ = std::fs::remove_file(&self.file);
     }
@@ -119,6 +123,56 @@ fn harness_with(platform: RecoveryPlatform) -> Harness {
     h.frame(vec![]);
     h.frame(vec![]);
     h
+}
+
+mod job_position_tests {
+    use super::*;
+    use crate::job_position::{self, JobPosition};
+
+    fn platform(dir: &std::path::Path) -> RecoveryPlatform {
+        RecoveryPlatform { file: dir.join("recovery.lightfoundry"), open_answer: None, recent: None }
+    }
+
+    #[test]
+    fn a_position_left_by_an_earlier_session_is_offered_and_can_be_forgotten() {
+        let dir = temp_dir("jobpos-offer");
+        let file = dir.join("job-position.json");
+        job_position::save(&file, &JobPosition { hash: 7, line: 12, total_lines: 40 });
+        let mut h = harness_with(platform(&dir));
+        assert_eq!(h.app.interrupted, Some(JobPosition { hash: 7, line: 12, total_lines: 40 }));
+        h.frame(vec![]); // the banner draws, and cannot be used for a different design
+        h.app.forget_interrupted();
+        assert!(h.app.interrupted.is_none() && !file.exists());
+        let h2 = harness_with(platform(&dir));
+        assert!(h2.app.interrupted.is_none());
+    }
+
+    #[test]
+    fn a_clean_run_leaves_no_position_behind_and_starting_a_job_replaces_an_old_one() {
+        let dir = temp_dir("jobpos-clean");
+        let file = dir.join("job-position.json");
+        job_position::save(&file, &JobPosition { hash: 7, line: 3, total_lines: 9 });
+        let mut h = harness_with(platform(&dir));
+        h.app.connect();
+        let start = Instant::now();
+        while h.app.snap.as_ref().and_then(|s| s.status.as_ref()).is_none() {
+            h.frame(vec![]);
+            assert!(start.elapsed() < Duration::from_secs(10), "no status");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 20, "height": 20}));
+        h.app.run("job.gcode", json!({}));
+        let program = h.app.session.last_gcode.clone().unwrap();
+        h.app.start_job(program);
+        assert!(h.app.interrupted.is_none() && !file.exists(), "a new job supersedes the old position");
+        while !matches!(h.app.snap.as_ref().map(|s| &s.job), Some(lightfoundry_device::JobState::Finished(_))) {
+            h.frame(vec![]);
+            assert!(start.elapsed() < Duration::from_secs(20), "job did not finish");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        h.frame(vec![]);
+        assert!(!file.exists(), "finished cleanly");
+    }
 }
 
 mod recovery_tests {

@@ -173,6 +173,32 @@ pub(crate) fn prepare(program: &str) -> Result<Vec<String>, DeviceError> {
     Ok(prepare_numbered(program)?.into_iter().map(|(_, l)| l).collect())
 }
 
+/// Lines of margin when restarting an interrupted job: the controller acknowledges a line when it
+/// is buffered, not when it has run, so the last few acknowledged lines may never have happened.
+pub const RESTART_BACKUP_LINES: usize = 20;
+
+/// The 1-based program line to restart from after a job stopped with `acknowledged` lines
+/// acknowledged: [`RESTART_BACKUP_LINES`] before the last acknowledged one, never before line 1.
+/// Re-running a few lines is safe (the restart repositions with the beam off); skipping some is not.
+pub fn restart_line(program: &str, acknowledged: usize) -> usize {
+    let target = acknowledged.saturating_sub(RESTART_BACKUP_LINES);
+    if target == 0 {
+        return 1;
+    }
+    let mut seen = 0;
+    for (i, raw) in program.lines().enumerate() {
+        let code = strip_paren_comments(raw.split(';').next().unwrap_or(""));
+        if code.trim().is_empty() {
+            continue;
+        }
+        seen += 1;
+        if seen == target {
+            return i + 1;
+        }
+    }
+    1
+}
+
 /// Like [`prepare`], keeping each line's number in the original program.
 pub(crate) fn prepare_numbered(program: &str) -> Result<Vec<(usize, String)>, DeviceError> {
     let mut out = Vec::new();
@@ -222,6 +248,26 @@ mod tests {
 
     fn program(n: usize) -> String {
         (0..n).map(|i| format!("G1 X{}.{:03} Y{} S500 F1000\n", i % 300, i % 1000, i % 200)).collect()
+    }
+
+    mod restart_tests {
+        use super::*;
+
+        #[test]
+        fn restart_backs_up_over_buffered_lines_and_counts_code_lines_only() {
+            let p = "; header\nG21\n\n(note)\nG1 X1\nG1 X2\n";
+            // Nothing or little acknowledged: start at the top.
+            assert_eq!(restart_line(p, 0), 1);
+            assert_eq!(restart_line(p, 3), 1);
+            // 25 acknowledged lines back up by RESTART_BACKUP_LINES to code line 5.
+            let long: String = (0..100).map(|i| format!("; c{i}\nG1 X{i}\n")).collect();
+            let line = restart_line(&long, 25);
+            assert_eq!(line, 2 * (25 - RESTART_BACKUP_LINES));
+            assert_eq!(long.lines().nth(line - 1), Some("G1 X4"));
+            // More acknowledged than the program holds is harmless.
+            assert_eq!(restart_line(&long, 10_000), 1);
+            assert_eq!(restart_line("", 50), 1);
+        }
     }
 
     mod flow_tests {

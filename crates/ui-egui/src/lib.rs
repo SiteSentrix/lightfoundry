@@ -5,6 +5,7 @@ mod canvas;
 mod crop_ui;
 mod geometry;
 mod head_ui;
+mod job_position;
 mod menus;
 mod nodes_ui;
 mod panels;
@@ -154,6 +155,11 @@ pub struct LightFoundryApp {
     preset_name: String,
     template_name: String,
     resume_line: usize,
+    /// The program of the job being run, kept to work out where to restart it if it is interrupted.
+    job_program: Option<std::sync::Arc<str>>,
+    last_position_write: Instant,
+    /// A job a previous session left unfinished, found at startup.
+    interrupted: Option<job_position::JobPosition>,
     /// What a requested upload is for.
     awaiting_upload: Option<UploadKind>,
     /// Waiting for the host to finish choosing and opening a serial device.
@@ -214,6 +220,7 @@ impl LightFoundryApp {
         let ports = platform.serial_ports();
         // Offer the newest autosave that still reads back; a damaged newest copy falls back to an older one.
         let pending_recovery = platform.recovery_file().and_then(|base| recovery::newest_readable(&base).or_else(|| base.exists().then_some(base)));
+        let interrupted = platform.job_position_file().and_then(|p| job_position::load(&p));
         let recent = platform.recent_file().map(|p| recent::Recent::load(&p)).unwrap_or_default();
         let shortcuts = platform.shortcuts_file().map(|p| shortcuts::Shortcuts::load(&p)).unwrap_or_default();
         Self {
@@ -290,6 +297,9 @@ impl LightFoundryApp {
             preset_name: String::new(),
             template_name: String::new(),
             resume_line: 1,
+            job_program: None,
+            last_position_write: Instant::now(),
+            interrupted,
             awaiting_upload: None,
             awaiting_serial: false,
             stale_backups: false,
@@ -799,8 +809,52 @@ impl LightFoundryApp {
             self.status = Some(("Connect to a machine (or the simulator) first".into(), true));
             return;
         };
+        let kept: std::sync::Arc<str> = program.as_str().into();
         if let Err(e) = link.start_job(program) {
             self.status = Some((e.to_string(), true));
+        } else {
+            self.job_program = Some(kept);
+            self.forget_interrupted();
+        }
+    }
+
+    /// Drops the note about a job an earlier session left unfinished.
+    pub(crate) fn forget_interrupted(&mut self) {
+        self.interrupted = None;
+        if let Some(path) = self.platform.job_position_file() {
+            job_position::clear(&path);
+        }
+    }
+
+    /// Keeps the saved job position current while a job runs, and removes it when the job ends cleanly.
+    fn record_job_position(&mut self, snap: &Snapshot) {
+        let Some(path) = self.platform.job_position_file() else { return };
+        let write = |program: &str, acknowledged: usize| {
+            let total = program.lines().count();
+            let line = lightfoundry_device::restart_line(program, acknowledged).min(total.max(1));
+            job_position::save(&path, &job_position::JobPosition { hash: job_position::fingerprint(program), line, total_lines: total });
+        };
+        match &snap.job {
+            JobState::Running | JobState::Paused => {
+                let (Some(p), Some(program)) = (snap.progress, self.job_program.clone()) else { return };
+                if p.acknowledged > 0 && self.last_position_write.elapsed() >= Duration::from_secs(job_position::WRITE_EVERY_SECS) {
+                    self.last_position_write = Instant::now();
+                    write(&program, p.acknowledged);
+                }
+            }
+            JobState::Finished(Ok(_)) => {
+                if self.job_program.take().is_some() {
+                    job_position::clear(&path);
+                }
+            }
+            JobState::Finished(Err(_)) => {
+                if let (Some(program), Some(p)) = (self.job_program.take(), snap.progress)
+                    && p.acknowledged > 0
+                {
+                    write(&program, p.acknowledged);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -883,6 +937,7 @@ impl LightFoundryApp {
             }
             self.last_job = Some(snap.job.clone());
         }
+        self.record_job_position(&snap);
         self.snap = Some(snap);
     }
 
