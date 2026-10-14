@@ -1,10 +1,68 @@
 use kurbo::Shape;
 
 use super::*;
-use crate::outline::testfont::{tiny_font, tiny_font_for_cd, tiny_font_with_kerning};
+use crate::outline::testfont::{tiny_font, tiny_font_for_cd, tiny_font_hebrew, tiny_font_with_kerning};
 
 fn style(height: f64) -> TextStyle {
     TextStyle { height, ..TextStyle::default() }
+}
+
+mod bidi_tests {
+    use super::*;
+
+    const ALEF: char = '\u{05D0}'; // the glyph with a hole, advance 700
+    const BET: char = '\u{05D1}'; // plain, advance 500
+
+    /// The x ranges of the holes (the smaller contour of each glyph with one), left to right.
+    fn holes(l: &TextLayout) -> Vec<(f64, f64)> {
+        let mut found: Vec<(f64, f64)> = lightfoundry_geom::flatten(&l.path, 0.01)
+            .iter()
+            .map(|c| {
+                let xs = c.points.iter().map(|p| p.x);
+                (xs.clone().fold(f64::INFINITY, f64::min), xs.fold(f64::NEG_INFINITY, f64::max))
+            })
+            .filter(|(a, b)| (b - a - 3.0).abs() < 0.01)
+            .collect();
+        found.sort_by(|a, b| a.0.total_cmp(&b.0));
+        found
+    }
+
+    #[test]
+    fn a_right_to_left_run_inside_left_to_right_text_is_laid_out_in_visual_order() {
+        let (main, hebrew) = (tiny_font(), tiny_font_hebrew());
+        // Logical order A, alef, bet, B; the Hebrew pair reads right to left, so it is drawn bet then alef.
+        let text = format!("A{ALEF}{BET}B");
+        let l = layout_outline_with_fallback(&main, Some(&hebrew), &text, &style(7.0)).unwrap();
+        assert!(l.unsupported.is_empty(), "{:?}", l.unsupported);
+        // At 0.01 mm per unit: A is 7 mm wide-advance, bet 5, so alef starts at 12 and its hole at 13.5..16.5.
+        // In logical order alef would start at 7 and its hole would be 8.5..11.5.
+        let h = holes(&l);
+        assert_eq!(h.len(), 2, "{h:?}");
+        assert!((h[0].0 - 1.5).abs() < 1e-3 && (h[1].0 - 13.5).abs() < 1e-3, "{h:?}");
+    }
+
+    #[test]
+    fn a_line_that_starts_right_to_left_keeps_its_runs_in_visual_order() {
+        let (main, hebrew) = (tiny_font(), tiny_font_hebrew());
+        // alef, bet, A, B in logical order, base direction right to left: the whole line is mirrored, so
+        // the Latin pair sits at the left and the Hebrew pair, read right to left, at the right.
+        let text = format!("{ALEF}{BET}AB");
+        let l = layout_outline_with_fallback(&main, Some(&hebrew), &text, &style(7.0)).unwrap();
+        let h = holes(&l);
+        assert_eq!(h.len(), 2, "{h:?}");
+        // Visual: A (hole 1.5..4.5), B, then bet, then alef (hole after 7+5+5=17, so 18.5..21.5).
+        assert!((h[0].0 - 1.5).abs() < 1e-3 && (h[1].0 - 18.5).abs() < 1e-3, "{h:?}");
+    }
+
+    #[test]
+    fn plain_left_to_right_text_is_unchanged_and_odd_input_is_harmless() {
+        let f = tiny_font();
+        let plain = layout_outline(&f, "AB\nA", &style(7.0)).unwrap();
+        assert!(plain.path.bounding_box().width() > 10.0);
+        for text in ["", "\n", " ", "\u{202e}AB\u{202c}", "\u{2067}A\u{2069}", "A\u{200f}B", &"\u{05D0}A".repeat(500)] {
+            assert!(layout_outline_with_fallback(&f, Some(&tiny_font_hebrew()), text, &style(7.0)).is_ok(), "{text:?}");
+        }
+    }
 }
 
 mod fallback_tests {

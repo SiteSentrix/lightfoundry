@@ -327,3 +327,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   each error against the shipped template list (all covered; serde's own parameter messages are
   covered by the wrapper entry `bad parameters: {0}`). The catalog is now per thread (the interface
   has one), so tests that load different catalogs cannot disturb each other.
+- **2026-10-14 — mixed-direction text.** Outline text now follows the Unicode bidirectional algorithm
+  (UAX #9, via the `unicode-bidi` crate): each line is split into left-to-right and right-to-left runs
+  that are put in visual order and shaped in their own direction, with the fallback-font split applied
+  inside each run (reversed within right-to-left runs). The stroke font has no right-to-left letters, so
+  it is unchanged. Gap 4 is closed; gap 10 (ramp along fills and images) was dropped as unnecessary
+  given overscan, speed-based overscan and `M4` dynamic power.

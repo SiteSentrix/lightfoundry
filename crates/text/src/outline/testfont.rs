@@ -6,6 +6,12 @@ pub fn tiny_font() -> Vec<u8> {
     build(false, 65)
 }
 
+/// The same shapes, reached through U+05D0 (the one with a hole, advance 700) and U+05D1 (plain,
+/// advance 500), two Hebrew letters, for testing right-to-left text.
+pub fn tiny_font_hebrew() -> Vec<u8> {
+    build(false, 0x05D0)
+}
+
 /// The same shapes, but reached through 'C' (the tall one with a hole) and 'D' instead of 'A' and 'B', for
 /// testing a fallback font that covers different characters.
 pub fn tiny_font_for_cd() -> Vec<u8> {
