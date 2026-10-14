@@ -10,7 +10,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 4  | Outline fonts for text (Fill-mode text, accented/Unicode characters) via an optional font source (`storytold/craft-fonts` through a build option, never in-repo); today text is an ASCII single-line stroke font | Fill-engraved lettering and non-English text |
 | 8  | Cut-order: by group, choose the start point, remove overlapping segments (not only identical outlines) | Quality and time                                                    |
 | 9  | Trace image to vectors; on-canvas crop handles; resample/resize (tone, crop, sharpen and seven dither modes are done) | Photo engraving results                                  |
-| 10 | Perforation/dashed cuts, ramp, per-layer overscan setting (tabs and lead-in/out are done) | Clean cuts of special materials                                     |
+| 10 | Power ramp, per-layer overscan setting (tabs, lead-in/out and perforation are done) | Clean cuts of special materials                                     |
 | 13 | Keep several autosave generations; periodic recovery-health check (recent files are done) | Never lose work                                                     |
 | 14 | Ship an original starter material library; share presets between projects (per-project presets and test grids are done) | Reusing settings for a known material                               |
 | 15 | Other controllers: verify the Marlin/Smoothieware dialects on hardware and add a link for them; Ruida is a large project | Reach beyond GRBL                                                   |

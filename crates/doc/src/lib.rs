@@ -258,6 +258,11 @@ pub struct Layer {
     /// Length of the exit line after a closed outline, on the scrap side, mm.
     #[serde(default)]
     pub lead_out: f64,
+    /// Perforation: cut this many mm, then skip `perf_gap` mm, along outlines (both 0 = solid line).
+    #[serde(default)]
+    pub perf_cut: f64,
+    #[serde(default)]
+    pub perf_gap: f64,
     pub bidirectional: bool,
     pub dither: Dither,
     pub output: bool,
@@ -286,6 +291,8 @@ impl Layer {
             tab_width: default_tab_width(),
             lead_in: 0.0,
             lead_out: 0.0,
+            perf_cut: 0.0,
+            perf_gap: 0.0,
             bidirectional: true,
             dither: Dither::FloydSteinberg,
             output: true,

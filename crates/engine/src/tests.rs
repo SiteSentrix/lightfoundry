@@ -837,6 +837,22 @@ mod import_tests {
     }
 
     #[test]
+    fn perforation_is_a_layer_setting_that_adds_rapid_gaps_to_the_program() {
+        let mut s = Session::new();
+        s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 40, "height": 40})).unwrap();
+        let rapids = |s: &mut Session| {
+            s.execute("job.gcode", &json!({"include": true})).unwrap()["gcode"].as_str().unwrap().lines().filter(|l| l.starts_with("G0")).count()
+        };
+        let solid = rapids(&mut s);
+        s.execute("layer.set", &json!({"id": 0, "perf_cut": 5, "perf_gap": 5})).unwrap();
+        assert!(rapids(&mut s) > solid + 10);
+        assert!(s.execute("layer.set", &json!({"id": 0, "perf_cut": -1})).is_err());
+        assert!(s.execute("layer.set", &json!({"id": 0, "perf_gap": 5000})).is_err());
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert_eq!(s.doc.layer(0).unwrap().perf_cut, 0.0);
+    }
+
+    #[test]
     fn the_gcode_dialect_is_a_machine_setting_that_changes_the_program() {
         let mut s = Session::new();
         s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 10})).unwrap();
