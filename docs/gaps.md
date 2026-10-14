@@ -17,3 +17,4 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 17 | MCP: a live link to the running desktop app (the stdio server edits its own session); resource subscriptions | Agent-driven design, like the sibling apps                          |
 | 18 | Browser build: try Web Serial on real hardware, install as a PWA, remember recent files |  Web users can design and generate G-code today |
 | 20 | Galvo/fibre/CO2-RF controllers (proprietary protocols); a tilted or 3D Z map; chuck rotary with steps-per-rotation |  Hardware variants |
+| 21 | Translations: about 350 UI strings (menus, panels) plus engine messages are hard-coded English; needs a string table and a font with the target script (none ships, by the assets rule) | Users outside English-speaking markets |
