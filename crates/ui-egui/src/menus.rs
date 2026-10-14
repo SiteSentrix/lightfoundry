@@ -49,6 +49,7 @@ fn file_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     if item(ui, "Open…", "Ctrl+O") {
         app.request(PendingAction::Open);
     }
+    recent_menu(app, ui);
     let can_save = true;
     if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() {
         save(app, false);
@@ -78,6 +79,35 @@ fn file_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         {
             app.say("G-code saved");
         }
+        ui.close();
+    }
+}
+
+fn recent_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let mut chosen = None;
+    let mut clear = false;
+    ui.add_enabled_ui(!app.recent.files.is_empty(), |ui| {
+        ui.menu_button("Open Recent", |ui| {
+            for path in &app.recent.files {
+                let name = path.file_name().map_or_else(|| path.display().to_string(), |n| n.to_string_lossy().into_owned());
+                if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+                    chosen = Some(path.clone());
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.button("Clear list").clicked() {
+                clear = true;
+                ui.close();
+            }
+        });
+    });
+    if clear {
+        app.recent.files.clear();
+        app.save_recent();
+    }
+    if let Some(path) = chosen {
+        app.request(PendingAction::OpenPath(path));
         ui.close();
     }
 }

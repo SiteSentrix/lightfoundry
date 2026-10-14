@@ -21,6 +21,10 @@ impl Platform for DesktopPlatform {
         Some(data_dir()?.join("LightFoundry").join("recovery.lightfoundry"))
     }
 
+    fn recent_file(&self) -> Option<PathBuf> {
+        Some(data_dir()?.join("LightFoundry").join("recent.json"))
+    }
+
     fn clear_recovery(&self) {
         if let Some(path) = self.recovery_file()
             && let Err(e) = std::fs::remove_file(&path)

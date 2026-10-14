@@ -93,4 +93,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   preview has a bottom bar with Play/Pause, Show all, a scrubber, playback speed (auto = 30 s per
   job) and a per-layer time breakdown; done moves are drawn bright, the rest faintly, with a head
   marker. Tests: timeline maths, reveal/head logic, playback to the end.
+- **2026-10-14 — recent files.** File > Open Recent (ten entries, most recent first, kept in
+  `recent.json` in the app data folder through `Platform::recent_file`); any change of the
+  document's path (open, save as) records it, picking one asks about unsaved changes first, and an
+  unreadable entry is dropped from the list.
 

@@ -68,6 +68,7 @@ impl Harness {
 struct RecoveryPlatform {
     file: std::path::PathBuf,
     open_answer: Option<std::path::PathBuf>,
+    recent: Option<std::path::PathBuf>,
 }
 
 impl Platform for RecoveryPlatform {
@@ -81,6 +82,10 @@ impl Platform for RecoveryPlatform {
 
     fn recovery_file(&self) -> Option<std::path::PathBuf> {
         Some(self.file.clone())
+    }
+
+    fn recent_file(&self) -> Option<std::path::PathBuf> {
+        self.recent.clone()
     }
 
     fn clear_recovery(&self) {
@@ -123,7 +128,7 @@ mod recovery_tests {
     fn changes_are_autosaved_and_the_copy_is_removed_once_saved() {
         let dir = temp_dir("autosave");
         let file = dir.join("recovery.lightfoundry");
-        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None });
+        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None, recent: None });
         h.app.autosave_interval = Duration::ZERO;
         h.frame(vec![]);
         assert!(!file.exists(), "nothing to save yet");
@@ -145,7 +150,7 @@ mod recovery_tests {
     #[test]
     fn an_idle_window_still_gets_a_repaint_scheduled_so_autosave_can_fire() {
         let dir = temp_dir("repaint");
-        let mut h = harness_with(RecoveryPlatform { file: dir.join("recovery.lightfoundry"), open_answer: None });
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("recovery.lightfoundry"), open_answer: None, recent: None });
         h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
         h.app.last_autosave = Instant::now(); // pretend we just autosaved: the next one is due in the future
         h.time += 0.016;
@@ -166,7 +171,7 @@ mod recovery_tests {
         previous.execute("shape.rectangle", &json!({"width": 30, "height": 30})).unwrap();
         previous.execute("file.autosave", &json!({"path": file})).unwrap();
 
-        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None });
+        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None, recent: None });
         assert!(h.app.pending_recovery.is_some(), "found at startup");
         h.app.autosave_interval = Duration::ZERO;
         h.app.run("shape.line", json!({"x1": 0, "y1": 0, "x2": 5, "y2": 5})); // typing behind the prompt must not clobber the copy
@@ -185,7 +190,7 @@ mod recovery_tests {
         let dir = temp_dir("discard");
         let file = dir.join("recovery.lightfoundry");
         Session::new().execute("file.autosave", &json!({"path": file})).unwrap();
-        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None });
+        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None, recent: None });
         assert!(h.app.pending_recovery.is_some());
         h.app.answer_recovery(false);
         assert!(h.app.pending_recovery.is_none() && !file.exists());
@@ -198,7 +203,7 @@ mod recovery_tests {
         let dir = temp_dir("corrupt");
         let file = dir.join("recovery.lightfoundry");
         std::fs::write(&file, b"half a project").unwrap();
-        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None });
+        let mut h = harness_with(RecoveryPlatform { file: file.clone(), open_answer: None, recent: None });
         h.app.answer_recovery(true);
         assert!(matches!(&h.app.status, Some((_, true))), "the failure is shown");
         assert!(h.app.session.doc.shapes.is_empty());
@@ -212,7 +217,7 @@ mod unsaved_changes_tests {
     #[test]
     fn new_on_a_clean_document_just_happens_but_a_dirty_one_asks() {
         let dir = temp_dir("confirm");
-        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None });
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None, recent: None });
         h.app.request(PendingAction::New);
         assert!(h.app.pending_action.is_none(), "nothing to lose");
         h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
@@ -236,7 +241,7 @@ mod unsaved_changes_tests {
     fn saving_first_then_continuing_works_when_the_document_has_a_path() {
         let dir = temp_dir("savefirst");
         let target = dir.join("work.lightfoundry");
-        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None });
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None, recent: None });
         h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
         h.app.run("file.save", json!({"path": target}));
         h.app.run("shape.rectangle", json!({"width": 4, "height": 4}));
@@ -250,7 +255,7 @@ mod unsaved_changes_tests {
     #[test]
     fn shortcuts_are_blocked_while_a_question_is_open() {
         let dir = temp_dir("modal");
-        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None });
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None, recent: None });
         h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
         h.app.request(PendingAction::New);
         h.frame(vec![Event::Key { key: egui::Key::Delete, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]);
@@ -272,7 +277,7 @@ mod unsaved_changes_tests {
     #[test]
     fn a_close_request_on_unsaved_work_becomes_a_question() {
         let dir = temp_dir("close");
-        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None });
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None, recent: None });
         h.app.run("shape.rectangle", json!({"width": 10, "height": 10}));
         h.time += 0.016;
         let mut input = RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), SCREEN)), time: Some(h.time), ..Default::default() };
@@ -1214,5 +1219,83 @@ mod timeline_ui_tests {
 
     fn moment(op: usize, pass: u32, into_pass: f64) -> Moment {
         Moment { op, pass, into_pass }
+    }
+}
+
+mod recent_files_tests {
+    use super::*;
+    use crate::PendingAction;
+    use crate::recent::{MAX_RECENT, Recent};
+
+    #[test]
+    fn the_list_is_most_recent_first_without_duplicates_and_capped() {
+        let mut r = Recent::default();
+        for i in 0..15 {
+            r.push(format!("/p/{i}.lightfoundry").into());
+        }
+        assert_eq!(r.files.len(), MAX_RECENT);
+        assert_eq!(r.files[0], std::path::PathBuf::from("/p/14.lightfoundry"));
+        r.push("/p/10.lightfoundry".into());
+        assert_eq!(r.files[0], std::path::PathBuf::from("/p/10.lightfoundry"));
+        assert_eq!(r.files.iter().filter(|p| p.ends_with("10.lightfoundry")).count(), 1);
+        r.remove(std::path::Path::new("/p/10.lightfoundry"));
+        assert_eq!(r.files.len(), MAX_RECENT - 1);
+    }
+
+    #[test]
+    fn saving_and_loading_round_trips_and_hostile_files_give_an_empty_list() {
+        let dir = temp_dir("recent-file");
+        let file = dir.join("deep").join("recent.json");
+        let mut r = Recent::default();
+        r.push("/a.lightfoundry".into());
+        r.push("/b.lightfoundry".into());
+        r.save(&file);
+        assert_eq!(Recent::load(&file), r);
+        for (name, bytes) in [("garbage", b"\x00\xff not json".to_vec()), ("object", br#"{"a": 1}"#.to_vec()), ("huge", vec![b' '; 300 * 1024])] {
+            let bad = dir.join(name);
+            std::fs::write(&bad, bytes).unwrap();
+            assert!(Recent::load(&bad).files.is_empty(), "{name}");
+        }
+        std::fs::write(dir.join("mixed"), br#"["/x.lightfoundry", 5, null, "", "/y.lightfoundry"]"#).unwrap();
+        assert_eq!(Recent::load(&dir.join("mixed")).files.len(), 2, "non-strings and empty entries are skipped");
+        assert!(Recent::load(&dir.join("missing")).files.is_empty());
+    }
+
+    #[test]
+    fn saving_and_opening_projects_updates_the_list_and_a_missing_file_is_forgotten() {
+        let dir = temp_dir("recent-app");
+        let list = dir.join("recent.json");
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None, recent: Some(list.clone()) });
+        assert!(h.app.recent.files.is_empty());
+        h.app.run("shape.rectangle", json!({"width": 20, "height": 10}));
+        let project = dir.join("one.lightfoundry");
+        h.app.run("file.save", json!({"path": project}));
+        h.frame(vec![]);
+        assert_eq!(h.app.recent.files, vec![project.clone()]);
+        assert_eq!(Recent::load(&list).files, vec![project.clone()], "written to disk");
+
+        h.app.request(PendingAction::OpenPath(dir.join("gone.lightfoundry")));
+        h.frame(vec![]);
+        assert!(h.app.status.as_ref().is_some_and(|s| s.1), "the failure is reported");
+
+        h.app.recent.push(dir.join("gone.lightfoundry"));
+        h.app.request(PendingAction::OpenPath(dir.join("gone.lightfoundry")));
+        assert_eq!(h.app.recent.files, vec![project.clone()], "an unreadable entry is dropped from the list");
+
+        h.app.run("file.new", serde_json::Value::Null);
+        h.app.request(PendingAction::OpenPath(project.clone()));
+        h.frame(vec![]);
+        assert_eq!(h.app.session.path.as_deref(), Some(project.as_path()));
+        assert_eq!(h.app.session.doc.shapes.len(), 1);
+    }
+
+    #[test]
+    fn opening_a_recent_project_over_unsaved_work_asks_first() {
+        let dir = temp_dir("recent-ask");
+        let mut h = harness_with(RecoveryPlatform { file: dir.join("r.lightfoundry"), open_answer: None, recent: None });
+        h.app.run("shape.rectangle", json!({"width": 20, "height": 10}));
+        h.app.request(PendingAction::OpenPath(dir.join("x.lightfoundry")));
+        assert_eq!(h.app.pending_action, Some(PendingAction::OpenPath(dir.join("x.lightfoundry"))), "the prompt is raised, nothing is opened yet");
+        assert_eq!(h.app.session.doc.shapes.len(), 1);
     }
 }
