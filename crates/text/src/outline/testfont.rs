@@ -3,15 +3,21 @@
 /// Glyph 'A' is a square with a
 /// square hole (advance 700), 'B' a plain square (advance 500); capitals are 700 units of 1000.
 pub fn tiny_font() -> Vec<u8> {
-    build(false)
+    build(false, 65)
+}
+
+/// The same shapes, but reached through 'C' (the tall one with a hole) and 'D' instead of 'A' and 'B', for
+/// testing a fallback font that covers different characters.
+pub fn tiny_font_for_cd() -> Vec<u8> {
+    build(false, 67)
 }
 
 /// The same font with a legacy `kern` table that pulls 'B' 100 units closer after 'A'.
 pub fn tiny_font_with_kerning() -> Vec<u8> {
-    build(true)
+    build(true, 65)
 }
 
-fn build(kerning: bool) -> Vec<u8> {
+fn build(kerning: bool, first: i32) -> Vec<u8> {
     fn be16(v: &mut Vec<u8>, x: i32) {
         v.extend_from_slice(&(x as i16).to_be_bytes());
     }
@@ -109,7 +115,7 @@ fn build(kerning: bool) -> Vec<u8> {
     be16(&mut cmap, 3);
     be16(&mut cmap, 1);
     be32(&mut cmap, 12);
-    for v in [4, 32, 0, 4, 4, 1, 0, 66, 0xFFFFu16 as i32, 0, 65, 0xFFFFu16 as i32, -64, 1, 0, 0] {
+    for v in [4, 32, 0, 4, 4, 1, 0, first + 1, 0xFFFFu16 as i32, 0, first, 0xFFFFu16 as i32, 1 - first, 1, 0, 0] {
         be16(&mut cmap, v);
     }
 

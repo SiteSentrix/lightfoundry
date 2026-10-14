@@ -1059,6 +1059,25 @@ mod import_tests {
     }
 
     #[test]
+    fn a_fallback_font_supplies_characters_the_main_font_lacks() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-fallback-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (main, other) = (dir.join("main.ttf"), dir.join("other.ttf"));
+        std::fs::write(&main, lightfoundry_text::testfont::tiny_font()).unwrap();
+        std::fs::write(&other, lightfoundry_text::testfont::tiny_font_for_cd()).unwrap();
+        let mut s = Session::new();
+        let v = s.execute("text.create", &json!({"text": "AC", "font": main})).unwrap();
+        assert_eq!(v["unsupported"], json!(["C"]));
+        let id = v["id"].as_u64().unwrap();
+        let v = s.execute("text.edit", &json!({"id": id, "fallback_font": other})).unwrap();
+        assert!(v["unsupported"].as_array().unwrap().is_empty(), "{v}");
+        assert!(s.execute("text.edit", &json!({"id": id, "fallback_font": "/no/such.ttf"})).is_err());
+        let v = s.execute("text.edit", &json!({"id": id, "fallback_font": ""})).unwrap();
+        assert_eq!(v["unsupported"], json!(["C"]));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn outline_text_from_a_font_file_is_filled_survives_without_the_font_and_can_switch_back() {
         let dir = std::env::temp_dir().join(format!("lf-engine-font-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

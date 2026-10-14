@@ -469,11 +469,14 @@ pub struct TextSettings {
     /// Letters stacked top to bottom, one column per line, the first line rightmost.
     #[serde(default)]
     pub vertical: bool,
+    /// A second font file that supplies characters `font` has no glyph for.
+    #[serde(default)]
+    pub fallback_font: Option<String>,
 }
 
 impl Default for TextSettings {
     fn default() -> Self {
-        Self { height: 10.0, letter_spacing: 1.0, line_spacing: 1.0, align: TextAlign::Left, font: None, vertical: false }
+        Self { height: 10.0, letter_spacing: 1.0, line_spacing: 1.0, align: TextAlign::Left, font: None, vertical: false, fallback_font: None }
     }
 }
 

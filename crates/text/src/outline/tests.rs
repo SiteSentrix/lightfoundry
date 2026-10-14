@@ -1,10 +1,40 @@
 use kurbo::Shape;
 
 use super::*;
-use crate::outline::testfont::{tiny_font, tiny_font_with_kerning};
+use crate::outline::testfont::{tiny_font, tiny_font_for_cd, tiny_font_with_kerning};
 
 fn style(height: f64) -> TextStyle {
     TextStyle { height, ..TextStyle::default() }
+}
+
+mod fallback_tests {
+    use super::*;
+
+    #[test]
+    fn characters_the_main_font_lacks_come_from_the_fallback() {
+        let (main, other) = (tiny_font(), tiny_font_for_cd());
+        let plain = layout_outline(&main, "AC", &style(7.0)).unwrap();
+        assert_eq!(plain.unsupported, vec!['C']);
+        let with = layout_outline_with_fallback(&main, Some(&other), "AC", &style(7.0)).unwrap();
+        assert!(with.unsupported.is_empty(), "{:?}", with.unsupported);
+        // At 0.01 mm per unit: C starts after A's 700-unit advance and is itself 600 units wide.
+        assert!((with.path.bounding_box().width() - 13.0).abs() < 1e-3, "{:?}", with.path.bounding_box());
+        assert_eq!(lightfoundry_geom::flatten(&with.path, 0.01).len(), 4, "A and C both have a hole");
+    }
+
+    #[test]
+    fn characters_in_neither_font_are_still_reported_and_spaces_stay_in_the_run() {
+        let (main, other) = (tiny_font(), tiny_font_for_cd());
+        let l = layout_outline_with_fallback(&main, Some(&other), "A C Z", &style(7.0)).unwrap();
+        assert_eq!(l.unsupported, vec!['Z']);
+    }
+
+    #[test]
+    fn a_bad_fallback_is_an_error_and_none_changes_nothing() {
+        let main = tiny_font();
+        assert!(matches!(layout_outline_with_fallback(&main, Some(b"nope"), "A", &style(7.0)), Err(TextError::BadFont(_))));
+        assert_eq!(layout_outline_with_fallback(&main, None, "AB", &style(7.0)), layout_outline(&main, "AB", &style(7.0)));
+    }
 }
 
 mod layout_tests {

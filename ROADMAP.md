@@ -285,3 +285,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — vertical text.** Text objects can be stacked top to bottom (`vertical` on
   `text.create`/`text.edit`, "Vertical" in the text inspector): one column per line, first line
   rightmost, each letter centred in its column; works with the stroke font and outline fonts.
+- **2026-10-14 — font fallback.** An outline text object can name a second font file
+  (`fallback_font` on `text.create`/`text.edit`, "Fallback font" in the inspector); characters the
+  first font lacks are drawn from it, scaled to the same cap height. Only characters in neither font
+  are reported as unsupported.

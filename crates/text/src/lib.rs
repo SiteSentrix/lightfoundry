@@ -9,7 +9,7 @@ mod outline;
 
 #[cfg(any(test, feature = "testfont"))]
 pub use outline::testfont;
-pub use outline::{MAX_FONT_BYTES, layout_outline};
+pub use outline::{MAX_FONT_BYTES, layout_outline, layout_outline_with_fallback};
 
 use kurbo::{BezPath, Point};
 use thiserror::Error;

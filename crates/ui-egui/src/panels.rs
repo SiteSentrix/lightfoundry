@@ -844,6 +844,23 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         }
     });
     if style.font.is_some() {
+        ui.horizontal_wrapped(|ui| {
+            let name = style.fallback_font.as_deref().map_or("none".to_string(), |p| {
+                std::path::Path::new(p).file_name().map_or_else(|| p.to_string(), |n| n.to_string_lossy().into_owned())
+            });
+            ui.label(format!("Fallback font: {name}"));
+            if ui.button("Choose…").on_hover_text("Draws characters the font above has no glyph for").clicked()
+                && let Some(path) = app.pick_open("Choose a fallback font", &["ttf", "otf"])
+                && let Some(v) = app.run("text.edit", json!({ "id": id, "fallback_font": path }))
+            {
+                app.note_unsupported(&v);
+                app.text_buffer = None;
+            }
+            if style.fallback_font.is_some() && ui.button("None").clicked() {
+                app.run("text.edit", json!({ "id": id, "fallback_font": "" }));
+                app.text_buffer = None;
+            }
+        });
         ui.weak(
             "Outline text: set its layer to Fill to engrave it solid. The shapes are saved in the project; the font is only needed to edit the text.",
         );
