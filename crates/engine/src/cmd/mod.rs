@@ -2,6 +2,7 @@
 
 mod edit;
 mod file;
+mod image;
 mod job;
 mod params;
 mod pathops;
@@ -38,6 +39,7 @@ pub fn commands() -> impl Iterator<Item = &'static CommandSpec> {
         .chain(edit::COMMANDS)
         .chain(setup::COMMANDS)
         .chain(file::COMMANDS)
+        .chain(image::COMMANDS)
         .chain(job::COMMANDS)
 }
 

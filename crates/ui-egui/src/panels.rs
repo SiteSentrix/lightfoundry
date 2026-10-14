@@ -33,6 +33,7 @@ pub fn inspector(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("Selection").default_open(true).show(ui, |ui| {
             properties(app, ui);
             text_properties(app, ui);
+            image_properties(app, ui);
             shape_operations(app, ui);
         });
         egui::CollapsingHeader::new("Laser").default_open(true).show(ui, |ui| laser(app, ui));
@@ -604,4 +605,47 @@ fn shape_operations(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         }
         ui.checkbox(&mut app.offset_keep, "Keep original");
     });
+}
+
+/// Tone adjustments for a single selected image.
+fn image_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let [id] = app.session.selection.as_slice() else { return };
+    let id = *id;
+    let Some(adjust) = app.session.doc.shape(id).and_then(|s| match &s.kind {
+        ShapeKind::Image { adjust, .. } => Some(*adjust),
+        _ => None,
+    }) else {
+        return;
+    };
+    ui.separator();
+    ui.label(egui::RichText::new("Image").strong());
+    let mut commit = None;
+    egui::Grid::new("image_adjust").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
+        for (label, key, value, range, speed) in [
+            ("Brightness", "brightness", adjust.brightness, -1.0..=1.0, 0.01),
+            ("Contrast", "contrast", adjust.contrast, -1.0..=1.0, 0.01),
+            ("Gamma", "gamma", adjust.gamma, 0.1..=5.0, 0.02),
+        ] {
+            ui.label(label);
+            let mut v = value;
+            let r = ui.add(egui::DragValue::new(&mut v).range(range).speed(speed).max_decimals(2));
+            if committed(&r) && (v - value).abs() > 1e-9 {
+                commit = Some(json!({ "id": id, key: v }));
+            }
+            ui.end_row();
+        }
+    });
+    ui.horizontal(|ui| {
+        let mut negative = adjust.negative;
+        if ui.checkbox(&mut negative, "Negative").changed() {
+            commit = Some(json!({ "id": id, "negative": negative }));
+        }
+        if ui.add_enabled(!adjust.is_identity(), egui::Button::new("Reset")).clicked() {
+            commit = Some(json!({ "id": id, "reset": true }));
+        }
+    });
+    if let Some(params) = commit {
+        app.run("image.adjust", params);
+    }
+    ui.weak("The dither mode for engraving is set on the layer (Cuts / Layers).");
 }

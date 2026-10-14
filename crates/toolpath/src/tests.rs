@@ -176,7 +176,7 @@ mod image_tests {
             name: "img".into(),
             layer: 0,
             transform: Affine::IDENTITY,
-            kind: ShapeKind::Image { image, width_mm: w as f64, height_mm: h as f64 },
+            kind: ShapeKind::Image { image, width_mm: w as f64, height_mm: h as f64, adjust: Default::default() },
         });
         doc
     }
@@ -195,6 +195,69 @@ mod image_tests {
         assert_eq!(full.len(), 4);
         // Overscan lead-in and lead-out rows exist at zero power.
         assert!(moves.iter().any(|m| matches!(m, Move::Cut { power, .. } if *power == 0.0)));
+    }
+
+    #[test]
+    fn a_picture_flush_with_the_bed_edge_gets_a_shorter_lead_in_instead_of_leaving_the_bed() {
+        let mut doc = image_doc(vec![0; 16], 4, 4);
+        doc.machine.bed_width = 4.0;
+        let job = plan(&doc).unwrap();
+        for m in &job.ops[0].moves {
+            let x = m.target().x;
+            assert!((0.0..=4.0).contains(&x), "{x} is outside the bed");
+        }
+        // Relative placement cannot know the room, so the full lead-in is kept.
+        doc.job_origin.start_from = lightfoundry_doc::StartFrom::UserOrigin;
+        let job = plan(&doc).unwrap();
+        assert!(job.ops[0].moves.iter().any(|m| m.target().x < 0.0), "lead-in extends past the picture");
+    }
+
+    #[test]
+    fn a_negative_burns_the_picture_but_never_the_white_around_a_rotated_one() {
+        let mut doc = image_doc(vec![255; 16], 4, 4); // an all-white 4x4 mm picture
+        if let Some(ShapeKind::Image { adjust, .. }) = doc.shapes.get_mut(0).map(|s| &mut s.kind) {
+            adjust.negative = true;
+        }
+        doc.shapes[0].transform = Affine::translate((50.0, 50.0)) * Affine::rotate(0.6) * Affine::IDENTITY;
+        let job = plan(&doc).unwrap();
+        let burned: Vec<_> = job.ops[0].moves.iter().filter(|m| matches!(m, Move::Cut { power, .. } if *power > 0.0)).collect();
+        assert!(!burned.is_empty(), "the white picture, negated, is black");
+        let shape = &doc.shapes[0];
+        let inside = shape.world_polylines().into_iter().next().unwrap();
+        // Every burning move ends within a pixel of the picture: nothing outside it burns.
+        for m in burned {
+            let p = m.target();
+            assert!(inside.contains(p) || inside.distance_to(p) <= 1.5, "{p:?} burns outside the picture");
+        }
+        // And the un-negated white picture burns nothing at all.
+        if let Some(ShapeKind::Image { adjust, .. }) = doc.shapes.get_mut(0).map(|s| &mut s.kind) {
+            adjust.negative = false;
+        }
+        assert!(plan(&doc).unwrap().ops.is_empty());
+    }
+
+    #[test]
+    fn brightness_lightens_a_gray_image_until_it_stops_burning() {
+        let mut doc = image_doc(vec![100; 16], 4, 4);
+        if let Some(l) = doc.layer_mut(0) {
+            l.dither = lightfoundry_doc::Dither::Grayscale;
+        }
+        let power =
+            |doc: &Document| -> f64 {
+                plan(doc).unwrap().ops.first().map_or(0.0, |o| {
+                    o.moves.iter().filter_map(|m| if let Move::Cut { power, .. } = m { Some(*power) } else { None }).fold(0.0, f64::max)
+                })
+            };
+        let base = power(&doc);
+        assert!(base > 50.0);
+        if let Some(ShapeKind::Image { adjust, .. }) = doc.shapes.get_mut(0).map(|s| &mut s.kind) {
+            adjust.brightness = 0.3;
+        }
+        assert!(power(&doc) < base - 20.0, "brighter picture burns less");
+        if let Some(ShapeKind::Image { adjust, .. }) = doc.shapes.get_mut(0).map(|s| &mut s.kind) {
+            adjust.brightness = 1.0;
+        }
+        assert_eq!(power(&doc), 0.0);
     }
 
     #[test]

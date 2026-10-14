@@ -41,3 +41,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — kerf.** Per-layer kerf offset (`layer.set kerf_offset`): closed outlines are offset
   before cutting so parts grow and holes shrink by the beam compensation; fills and open paths are
   untouched. `pathops` moved down to layer 1 so the planner can use it.
+- **2026-10-14 — images.** `image.adjust` (brightness, contrast, gamma, negative; non-destructive,
+  applied before dithering and never to the white around a rotated picture), real thumbnails on the
+  canvas through the shape transform, an Image section in the inspector. Found by streaming a
+  120k-pixel picture to the simulator: an image flush against the bed edge made the job unrunnable
+  because of the 2 mm lead-in, so absolute placements now shorten the lead-in to the room available.

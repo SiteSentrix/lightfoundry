@@ -113,3 +113,86 @@ impl PreviewCache {
         }
     }
 }
+
+/// Thumbnails of image shapes (tone adjustments applied), uploaded as textures and reused until
+/// the picture or its adjustment changes.
+#[derive(Default)]
+pub struct ImageTextures {
+    map: std::collections::HashMap<ShapeId, (ThumbKey, egui::TextureHandle)>,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+struct ThumbKey {
+    /// Address of the shared pixel buffer: changes when the picture is replaced.
+    buffer: usize,
+    adjust: [u64; 3],
+    negative: bool,
+}
+
+/// Largest thumbnail side, in pixels.
+const THUMB_MAX: usize = 256;
+
+impl ImageTextures {
+    /// The texture for an image shape, (re)built when needed. `None` for non-images.
+    pub fn get(&mut self, ctx: &egui::Context, shape: &lightfoundry_doc::Shape) -> Option<egui::TextureId> {
+        let lightfoundry_doc::ShapeKind::Image { image, adjust, .. } = &shape.kind else { return None };
+        let key = ThumbKey {
+            buffer: std::sync::Arc::as_ptr(image) as usize,
+            adjust: [adjust.brightness.to_bits(), adjust.contrast.to_bits(), adjust.gamma.to_bits()],
+            negative: adjust.negative,
+        };
+        if let Some((k, handle)) = self.map.get(&shape.id)
+            && *k == key
+        {
+            return Some(handle.id());
+        }
+        let (w, h) = thumb_size(image.width as usize, image.height as usize);
+        let pixels = downscale(image, w, h, adjust);
+        let handle = ctx.load_texture(format!("image-{}", shape.id), egui::ColorImage::from_gray([w, h], &pixels), egui::TextureOptions::LINEAR);
+        let id = handle.id();
+        self.map.insert(shape.id, (key, handle));
+        Some(id)
+    }
+
+    #[cfg(test)]
+    pub fn map_len(&self) -> usize {
+        self.map.len()
+    }
+
+    #[cfg(test)]
+    pub fn cached_key(&self, id: ShapeId) -> Option<([u64; 3], bool, usize)> {
+        self.map.get(&id).map(|(k, _)| (k.adjust, k.negative, k.buffer))
+    }
+
+    /// Forgets textures of shapes that no longer exist.
+    pub fn retain(&mut self, alive: impl Fn(ShapeId) -> bool) {
+        self.map.retain(|id, _| alive(*id));
+    }
+}
+
+fn thumb_size(w: usize, h: usize) -> (usize, usize) {
+    let scale = (THUMB_MAX as f64 / w.max(h).max(1) as f64).min(1.0);
+    (((w as f64 * scale).round() as usize).max(1), ((h as f64 * scale).round() as usize).max(1))
+}
+
+/// Box-average downscale with the tone adjustment applied.
+fn downscale(img: &lightfoundry_doc::RasterImage, tw: usize, th: usize, adjust: &lightfoundry_doc::ImageAdjust) -> Vec<u8> {
+    let (sw, sh) = (img.width as usize, img.height as usize);
+    let mut out = Vec::with_capacity(tw * th);
+    for ty in 0..th {
+        let (y0, y1) = (ty * sh / th, ((ty + 1) * sh / th).max(ty * sh / th + 1).min(sh));
+        for tx in 0..tw {
+            let (x0, x1) = (tx * sw / tw, ((tx + 1) * sw / tw).max(tx * sw / tw + 1).min(sw));
+            let (mut sum, mut n) = (0u32, 0u32);
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    sum += u32::from(img.gray.get(y * sw + x).copied().unwrap_or(255));
+                    n += 1;
+                }
+            }
+            let avg = if n == 0 { 255.0 } else { sum as f32 / n as f32 };
+            out.push(adjust.apply(avg).round() as u8);
+        }
+    }
+    out
+}

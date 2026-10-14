@@ -333,6 +333,30 @@ mod import_tests {
     }
 
     #[test]
+    fn image_adjustments_are_validated_undoable_and_saved() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-adjust-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("g.png");
+        image::GrayImage::from_fn(8, 8, |x, _| image::Luma([(x * 30) as u8])).save(&path).unwrap();
+        let mut s = Session::new();
+        let id = s.execute("file.import_image", &json!({"path": path, "width": 8})).unwrap()["id"].as_u64().unwrap();
+        s.execute("image.adjust", &json!({"brightness": 0.25, "gamma": 1.8, "negative": true})).unwrap();
+        for bad in [json!({"brightness": 2}), json!({"contrast": -3}), json!({"gamma": 0}), json!({"gamma": "x"})] {
+            assert!(s.execute("image.adjust", &bad).is_err(), "{bad}");
+        }
+        let back = lightfoundry_format::from_bytes(&lightfoundry_format::to_bytes(&s.doc).unwrap()).unwrap();
+        match &back.shape(id).unwrap().kind {
+            lightfoundry_doc::ShapeKind::Image { adjust, .. } => assert!(adjust.negative && adjust.brightness == 0.25 && adjust.gamma == 1.8),
+            other => panic!("{other:?}"),
+        }
+        s.execute("edit.undo", &Value::Null).unwrap();
+        s.execute("image.adjust", &json!({"reset": true})).unwrap();
+        s.execute("shape.rectangle", &json!({"width": 5, "height": 5})).unwrap();
+        assert!(s.execute("image.adjust", &json!({})).is_err(), "a rectangle is not an image");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn png_import_becomes_a_raster_shape() {
         let dir = std::env::temp_dir().join(format!("lf-engine-img-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

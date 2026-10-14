@@ -13,7 +13,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 6  | Join/weld of open paths into closed shapes (so imported open outlines can be combined and offset) | Fit and assembly work (boxes, joints)             |
 | 7  | Rulers, snapping, guides, numeric create dialogs                                     | Precision layout                                                    |
 | 8  | Cut-order options (by layer/group, remove duplicate lines, choose start point)       | Quality and time                                                    |
-| 9  | Image adjustments (contrast, gamma, negative, crop, trace to vectors)                | Photo engraving results                                             |
+| 9  | Image crop, sharpen, halftone/newsprint dithers, trace to vectors (tone adjustments are done) | Photo engraving results                                  |
 | 10 | Lead-in/out, tabs/bridges, perforation, ramp, per-layer overscan                     | Clean cuts, holding parts                                           |
 | 11 | Timeline preview with scrubbing and per-layer time breakdown                         | Catch mistakes before burning                                       |
 | 12 | Groups, layers list with reorder/rename, per-shape cut settings overrides            | Larger projects                                                     |

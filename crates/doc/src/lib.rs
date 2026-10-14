@@ -236,6 +236,9 @@ pub enum ShapeKind {
         image: Arc<RasterImage>,
         width_mm: f64,
         height_mm: f64,
+        /// Tone adjustments applied before dithering; the stored pixels are never changed.
+        #[serde(default)]
+        adjust: ImageAdjust,
     },
 }
 
@@ -296,6 +299,49 @@ impl Shape {
 
     pub fn world_bounds(&self) -> Option<Rect> {
         bounds_of_polylines(&self.world_polylines())
+    }
+}
+
+/// Tone adjustments for an image, applied to a gray value before it is dithered.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ImageAdjust {
+    /// -1..=1, added to the normalised value.
+    pub brightness: f64,
+    /// -1..=1; positive stretches around mid-gray, negative flattens.
+    pub contrast: f64,
+    /// 0.1..=5; above 1 brightens midtones.
+    pub gamma: f64,
+    pub negative: bool,
+}
+
+impl Default for ImageAdjust {
+    fn default() -> Self {
+        Self { brightness: 0.0, contrast: 0.0, gamma: 1.0, negative: false }
+    }
+}
+
+impl ImageAdjust {
+    pub fn is_identity(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Maps a gray value 0..=255 to its adjusted value; settings and input are clamped, so the
+    /// result is always within 0..=255.
+    pub fn apply(&self, value: f32) -> f32 {
+        let finite = |v: f64, fallback: f64| if v.is_finite() { v } else { fallback };
+        let mut x = (f64::from(value) / 255.0).clamp(0.0, 1.0);
+        if !x.is_finite() {
+            x = 1.0;
+        }
+        x += finite(self.brightness, 0.0).clamp(-1.0, 1.0);
+        let c = finite(self.contrast, 0.0).clamp(-1.0, 1.0);
+        let factor = if c >= 0.0 { 1.0 / (1.0 - c).max(0.01) } else { 1.0 + c };
+        x = ((x - 0.5) * factor + 0.5).clamp(0.0, 1.0);
+        x = x.powf(1.0 / finite(self.gamma, 1.0).clamp(0.1, 5.0));
+        if self.negative {
+            x = 1.0 - x;
+        }
+        (x.clamp(0.0, 1.0) * 255.0) as f32
     }
 }
 
@@ -435,6 +481,33 @@ mod tests {
     }
 
     #[test]
+    fn image_adjustments_behave() {
+        let id = ImageAdjust::default();
+        assert!(id.is_identity());
+        for v in [0.0, 64.0, 128.0, 255.0] {
+            assert!((id.apply(v) - v).abs() < 0.01, "identity at {v}");
+        }
+        assert!((ImageAdjust { negative: true, ..id }.apply(255.0)).abs() < 0.01);
+        assert!(ImageAdjust { brightness: 0.2, ..id }.apply(100.0) > 150.0);
+        assert!(ImageAdjust { contrast: 0.5, ..id }.apply(200.0) > 200.0 && ImageAdjust { contrast: 0.5, ..id }.apply(50.0) < 50.0);
+        assert!(ImageAdjust { gamma: 2.0, ..id }.apply(64.0) > 100.0, "gamma > 1 brightens midtones");
+    }
+
+    #[test]
+    fn hostile_image_adjustments_stay_in_range() {
+        for adjust in [
+            ImageAdjust { brightness: f64::NAN, contrast: f64::INFINITY, gamma: f64::NAN, negative: true },
+            ImageAdjust { brightness: 5.0, contrast: 5.0, gamma: 0.0, negative: false },
+            ImageAdjust { brightness: -9.0, contrast: -9.0, gamma: -3.0, negative: true },
+        ] {
+            for v in [0.0, 128.0, 255.0, f32::NAN, f32::INFINITY, -50.0, 1e9] {
+                let r = adjust.apply(v);
+                assert!((0.0..=255.0).contains(&r), "{adjust:?} at {v} gave {r}");
+            }
+        }
+    }
+
+    #[test]
     fn raster_rejects_mismatched_buffers() {
         assert!(RasterImage::new(2, 2, vec![0; 3]).is_none());
         assert!(RasterImage::new(0, 0, vec![]).is_none());
@@ -452,7 +525,7 @@ mod tests {
                 name: "i".into(),
                 layer: 0,
                 transform: Affine::IDENTITY,
-                kind: ShapeKind::Image { image, width_mm: 1.0, height_mm: 1.0 },
+                kind: ShapeKind::Image { image, width_mm: 1.0, height_mm: 1.0, adjust: ImageAdjust::default() },
             });
         }
         let json = serde_json::to_string(&doc).unwrap();
