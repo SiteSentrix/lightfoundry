@@ -20,6 +20,11 @@ pub fn toolbar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             app.tool = tool;
         }
     }
+    if app.tool == Tool::Rectangle {
+        ui.add_space(6.0);
+        ui.label("Corner radius");
+        ui.add(egui::DragValue::new(&mut app.corner_radius).range(0.0..=500.0).speed(0.1).suffix(" mm"));
+    }
     if app.tool == Tool::Polygon {
         ui.add_space(6.0);
         ui.label("Sides");
@@ -35,6 +40,7 @@ pub fn inspector(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             text_properties(app, ui);
             image_properties(app, ui);
             shape_operations(app, ui);
+            array_section(app, ui);
         });
         egui::CollapsingHeader::new("Laser").default_open(true).show(ui, |ui| laser(app, ui));
     });
@@ -651,4 +657,30 @@ fn image_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         app.run("image.adjust", params);
     }
     ui.weak("The dither mode for engraving is set on the layer (Cuts / Layers).");
+}
+
+/// Grid and circular arrays of the current selection.
+fn array_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    if app.session.selection.is_empty() {
+        return;
+    }
+    ui.separator();
+    ui.label(egui::RichText::new("Array").strong());
+    ui.horizontal(|ui| {
+        ui.add(egui::DragValue::new(&mut app.array_columns).range(1..=200).prefix("cols "));
+        ui.add(egui::DragValue::new(&mut app.array_rows).range(1..=200).prefix("rows "));
+        ui.add(egui::DragValue::new(&mut app.array_gap).range(-1000.0..=1000.0).speed(0.1).prefix("gap ").suffix(" mm"));
+    });
+    if ui.button("Grid array").on_hover_text("Copy the selection into a grid; the original stays top-left").clicked() {
+        let params = json!({ "columns": app.array_columns, "rows": app.array_rows, "gap_x": app.array_gap, "gap_y": app.array_gap });
+        app.run("arrange.grid", params);
+    }
+    ui.horizontal(|ui| {
+        ui.add(egui::DragValue::new(&mut app.array_count).range(1..=1000).prefix("copies "));
+        ui.add(egui::DragValue::new(&mut app.array_radius).range(0.0..=1000.0).speed(0.5).prefix("radius ").suffix(" mm"));
+    });
+    if ui.button("Circular array").on_hover_text("Rotate copies about a centre this far below the selection").clicked() {
+        let params = json!({ "count": app.array_count, "radius": app.array_radius });
+        app.run("arrange.circular", params);
+    }
 }
