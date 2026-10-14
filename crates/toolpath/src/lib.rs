@@ -24,6 +24,8 @@ use thiserror::Error;
 pub const MAX_RASTER_CELLS: usize = 25_000_000;
 /// Duplicate removal is skipped for layers with more outlines than this (it is memory-hungry).
 const MAX_DEDUPLICATED: usize = 200_000;
+/// Largest Z offset or per-pass step accepted, in mm.
+pub const MAX_Z_MM: f64 = 200.0;
 /// Cap on total moves in a job.
 pub const MAX_MOVES: usize = 20_000_000;
 
@@ -42,6 +44,9 @@ pub struct Op {
     pub speed: f64,
     pub passes: u32,
     pub air_assist: bool,
+    /// Z height of the first pass and the change for each later pass (mm); both 0 = leave Z alone.
+    pub z: f64,
+    pub z_per_pass: f64,
     pub moves: Vec<Move>,
 }
 
@@ -259,6 +264,11 @@ fn validate(layer: &Layer) -> Result<(), PlanError> {
     if !(layer.kerf_offset.is_finite() && layer.kerf_offset.abs() <= 50.0) {
         return Err(bad("kerf offset"));
     }
+    for (value, what) in [(layer.z_offset, "Z offset"), (layer.z_per_pass, "Z step per pass")] {
+        if !(value.is_finite() && value.abs() <= MAX_Z_MM) {
+            return Err(bad(what));
+        }
+    }
     for (value, what) in [(layer.perf_cut, "perforation cut length"), (layer.perf_gap, "perforation gap")] {
         if !(value.is_finite() && (0.0..=1000.0).contains(&value)) {
             return Err(bad(what));
@@ -281,7 +291,16 @@ fn plan_layer(doc: &Document, layer: &Layer, shapes: &[&Shape], start: Point) ->
     let outlines = apply_kerf(layer, &vector)?;
     let power = layer.max_power.clamp(0.0, 100.0);
     let passes = layer.passes.clamp(1, 1000);
-    let mk = |kind, moves| Op { layer: layer.id, kind, speed: layer.speed, passes, air_assist: layer.air_assist, moves };
+    let mk = |kind, moves| Op {
+        layer: layer.id,
+        kind,
+        speed: layer.speed,
+        passes,
+        air_assist: layer.air_assist,
+        z: layer.z_offset,
+        z_per_pass: layer.z_per_pass,
+        moves,
+    };
 
     if matches!(layer.mode, LayerMode::Fill | LayerMode::FillAndLine) {
         let angles: &[f64] = if layer.crosshatch { &[0.0, 90.0] } else { &[0.0] };

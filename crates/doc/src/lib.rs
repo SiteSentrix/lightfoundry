@@ -266,6 +266,13 @@ pub struct Layer {
     /// Fill twice, the second time at right angles to the first.
     #[serde(default)]
     pub crosshatch: bool,
+    /// Z axis height for this layer, mm from the work zero (0 and no step = Z is not touched).
+    #[serde(default)]
+    pub z_offset: f64,
+    /// Extra Z movement for each pass after the first, mm (negative lowers a head that moves down
+    /// with negative Z, e.g. to follow a cut deeper).
+    #[serde(default)]
+    pub z_per_pass: f64,
     pub bidirectional: bool,
     pub dither: Dither,
     pub output: bool,
@@ -297,6 +304,8 @@ impl Layer {
             perf_cut: 0.0,
             perf_gap: 0.0,
             crosshatch: false,
+            z_offset: 0.0,
+            z_per_pass: 0.0,
             bidirectional: true,
             dither: Dither::FloydSteinberg,
             output: true,
@@ -628,6 +637,39 @@ pub struct Machine {
     /// Which controller firmware's G-code to write; absent in older files (GRBL).
     #[serde(default)]
     pub dialect: Dialect,
+    /// Rotary attachment: the Y axis turns the workpiece instead of moving the head.
+    #[serde(default)]
+    pub rotary: Rotary,
+}
+
+/// A rotary attachment. The controller's Y steps are calibrated for a roller or chuck of
+/// `reference_diameter`; a workpiece of another diameter needs Y distances scaled by
+/// `reference_diameter / object_diameter` so the surface moves by the distance the design asks for.
+/// The job's Y extent is then the object's circumference, `PI * object_diameter`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Rotary {
+    pub enabled: bool,
+    pub reference_diameter: f64,
+    pub object_diameter: f64,
+}
+
+impl Default for Rotary {
+    fn default() -> Self {
+        Rotary { enabled: false, reference_diameter: 50.0, object_diameter: 50.0 }
+    }
+}
+
+impl Rotary {
+    /// The factor applied to Y distances, or 1 when the attachment is off or the numbers are unusable.
+    pub fn y_scale(&self) -> f64 {
+        let ok = |d: f64| d.is_finite() && d > 0.0;
+        if self.enabled && ok(self.reference_diameter) && ok(self.object_diameter) { self.reference_diameter / self.object_diameter } else { 1.0 }
+    }
+
+    /// Length of the workpiece's surface around its circumference, mm.
+    pub fn circumference(&self) -> f64 {
+        std::f64::consts::PI * self.object_diameter
+    }
 }
 
 /// G-code flavours. GRBL is the one tested on a (simulated) controller; the others follow the
@@ -667,6 +709,7 @@ impl Default for Machine {
             rapid_speed: 6000.0,
             overscan: 2.0,
             dialect: Dialect::Grbl,
+            rotary: Rotary::default(),
         }
     }
 }
@@ -745,6 +788,17 @@ mod tests {
         let mut v = serde_json::to_value(Document::default()).unwrap();
         v.as_object_mut().unwrap().remove("presets");
         assert!(serde_json::from_value::<Document>(v).unwrap().presets.is_empty());
+    }
+
+    #[test]
+    fn rotary_scaling_follows_the_diameters_and_ignores_bad_numbers() {
+        let r = Rotary { enabled: true, reference_diameter: 60.0, object_diameter: 30.0 };
+        assert_eq!(r.y_scale(), 2.0);
+        assert!((r.circumference() - 30.0 * std::f64::consts::PI).abs() < 1e-9);
+        assert_eq!(Rotary { enabled: false, ..r }.y_scale(), 1.0);
+        for bad in [0.0, -3.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(Rotary { object_diameter: bad, ..r }.y_scale(), 1.0, "{bad}");
+        }
     }
 
     #[test]

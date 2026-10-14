@@ -25,6 +25,7 @@ struct State {
     y: Option<f64>,
     s: Option<f64>,
     f: Option<f64>,
+    z: Option<f64>,
     /// `M3` or `M4`, as the program set it.
     spindle: Option<&'static str>,
     air: bool,
@@ -56,6 +57,9 @@ pub fn resume_from(program: &str, line: usize) -> Result<String, ResumeError> {
     out.push('\n');
     if st.air {
         out.push_str("M8\n");
+    }
+    if let Some(z) = st.z {
+        let _ = writeln!(out, "G0 Z{}", num(z));
     }
     if let (Some(x), Some(y)) = (st.x, st.y) {
         let _ = writeln!(out, "G0 X{} Y{}", num(x), num(y));
@@ -125,9 +129,10 @@ fn track(st: &mut State, raw: &str) -> Option<()> {
         match (letter, v) {
             ("X", Some(v)) if motion => st.x = Some(v),
             ("Y", Some(v)) if motion => st.y = Some(v),
+            ("Z", Some(v)) if motion => st.z = Some(v),
             ("S", Some(v)) => st.s = Some(v),
             ("F", Some(v)) if motion => st.f = Some(v),
-            ("X" | "Y" | "F", _) if motion => return None,
+            ("X" | "Y" | "Z" | "F", _) if motion => return None,
             _ => {}
         }
     }
@@ -154,6 +159,13 @@ mod tests {
         assert!(r.contains("G1 X60 S250 F1200\n"), "feed is restored on the first cut: {r}");
         assert!(r.ends_with("M9\nM5\nG0 X0 Y0\n"));
         assert!(!r.contains("G92"), "the origin is not set a second time");
+    }
+
+    #[test]
+    fn the_z_height_is_restored_before_the_head_moves() {
+        let p = "G21\nG90\nM4 S0\nG0 Z-1.5\nG0 X5 Y5\nG1 X9 S100 F500\nG1 Y9\n";
+        let r = resume_from(p, 7).unwrap();
+        assert!(r.contains("G0 Z-1.5\nG0 X9 Y5\n"), "{r}");
     }
 
     #[test]

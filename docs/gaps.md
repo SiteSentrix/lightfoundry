@@ -17,4 +17,4 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 16 | Camera overlay and print-and-cut alignment                                           | Placing work on printed or irregular material                       |
 | 17 | MCP: resources (documents as files), prompts, a live link to the running desktop app (the stdio server edits its own session) | Agent-driven design, like the sibling apps                          |
 | 18 | WASM/web build                                                                       | Same engine in a browser (Web Serial for the machine link)          |
-| 20 | Rotary, Z-axis, galvo                                                                | Hardware variants                                                   |
+| 20 | Galvo/fibre/CO2-RF controllers (proprietary protocols); a tilted or 3D Z map; chuck rotary with steps-per-rotation |  Hardware variants |

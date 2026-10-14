@@ -993,6 +993,26 @@ mod import_tests {
     }
 
     #[test]
+    fn z_and_rotary_settings_are_validated_undoable_and_reach_the_program() {
+        let mut s = Session::new();
+        s.execute("machine.set", &json!({"origin": "top_left"})).unwrap();
+        s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 40})).unwrap();
+        let gcode = |s: &mut Session| s.execute("job.gcode", &json!({"include": true})).unwrap()["gcode"].as_str().unwrap().to_string();
+        assert!(!gcode(&mut s).contains(" Z"));
+        s.execute("layer.set", &json!({"id": 0, "z_offset": -3, "z_per_pass": -1, "passes": 2})).unwrap();
+        let g = gcode(&mut s);
+        assert!(g.contains("G0 Z-3") && g.contains("G0 Z-4"), "{g}");
+        assert!(s.execute("layer.set", &json!({"id": 0, "z_offset": 999})).is_err());
+        s.execute("machine.set", &json!({"rotary_enabled": true, "rotary_reference_diameter": 80, "rotary_object_diameter": 40})).unwrap();
+        assert!(gcode(&mut s).contains("Y100"), "50 mm of surface becomes 100 mm of Y");
+        for bad in [json!({"rotary_object_diameter": 0}), json!({"rotary_reference_diameter": -5}), json!({"rotary_object_diameter": 1e9})] {
+            assert!(s.execute("machine.set", &bad).is_err(), "{bad}");
+        }
+        s.execute("edit.undo", &Value::Null).unwrap();
+        assert!(!s.doc.machine.rotary.enabled);
+    }
+
+    #[test]
     fn every_dither_mode_can_be_chosen_by_name_and_unknown_ones_are_refused() {
         let mut s = Session::new();
         for name in ["threshold", "floyd_steinberg", "grayscale", "atkinson", "jarvis", "ordered", "halftone"] {
