@@ -263,6 +263,9 @@ pub struct Layer {
     pub perf_cut: f64,
     #[serde(default)]
     pub perf_gap: f64,
+    /// Fill twice, the second time at right angles to the first.
+    #[serde(default)]
+    pub crosshatch: bool,
     pub bidirectional: bool,
     pub dither: Dither,
     pub output: bool,
@@ -293,6 +296,7 @@ impl Layer {
             lead_out: 0.0,
             perf_cut: 0.0,
             perf_gap: 0.0,
+            crosshatch: false,
             bidirectional: true,
             dither: Dither::FloydSteinberg,
             output: true,
