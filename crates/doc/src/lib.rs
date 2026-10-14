@@ -203,6 +203,21 @@ pub enum Anchor {
 }
 
 impl Anchor {
+    /// A plain-words name (for tooltips and screen readers).
+    pub fn label(self) -> &'static str {
+        match self {
+            Anchor::TopLeft => "top left",
+            Anchor::Top => "top",
+            Anchor::TopRight => "top right",
+            Anchor::Left => "left",
+            Anchor::Center => "center",
+            Anchor::Right => "right",
+            Anchor::BottomLeft => "bottom left",
+            Anchor::Bottom => "bottom",
+            Anchor::BottomRight => "bottom right",
+        }
+    }
+
     pub const ALL: [Anchor; 9] = [
         Anchor::TopLeft,
         Anchor::Top,
@@ -805,6 +820,12 @@ pub enum Origin {
 mod tests {
     use super::*;
     use lightfoundry_geom::rect_path;
+
+    #[test]
+    fn every_anchor_has_its_own_name() {
+        let names: std::collections::HashSet<_> = Anchor::ALL.iter().map(|a| a.label()).collect();
+        assert_eq!(names.len(), Anchor::ALL.len());
+    }
 
     #[test]
     fn add_shape_assigns_ids_and_falls_back_to_layer_zero() {

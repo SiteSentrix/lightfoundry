@@ -1153,6 +1153,29 @@ mod shortcut_tests {
     }
 }
 
+mod accessibility_tests {
+    use super::*;
+
+    /// Every label the screen-reader tree carries after one frame.
+    fn labels(h: &mut Harness) -> Vec<String> {
+        h.ctx.enable_accesskit();
+        h.time += 0.016;
+        let input = RawInput { screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), SCREEN)), time: Some(h.time), ..Default::default() };
+        let app = &mut h.app;
+        let out = h.ctx.run_ui(input, |ui| app.ui(ui));
+        let update = out.platform_output.accesskit_update.expect("a tree update");
+        update.nodes.iter().filter_map(|(_, n)| n.label().map(str::to_string)).collect()
+    }
+
+    #[test]
+    fn custom_drawn_controls_have_names_a_screen_reader_can_read() {
+        let mut h = Harness::new();
+        let first = labels(&mut h);
+        assert!(first.iter().any(|l| l == "Design canvas"), "{first:?}");
+        assert!(first.iter().any(|l| l.starts_with("Layer ")), "layer chips are named: {first:?}");
+    }
+}
+
 mod machine_tests {
     use std::time::{Duration, Instant};
 

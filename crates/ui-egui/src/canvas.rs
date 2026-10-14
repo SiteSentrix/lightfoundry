@@ -117,6 +117,7 @@ fn drag_end(app: &LightFoundryApp, snapper: &Snapper, start: Point, raw: Point, 
 
 pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let (resp, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Design canvas"));
     let canvas_rect = resp.rect;
     app.canvas_rect = Some(canvas_rect);
     let painter = painter.with_clip_rect(canvas_rect);
