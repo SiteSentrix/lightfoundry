@@ -8,6 +8,7 @@ mod job;
 mod nodes;
 mod params;
 mod pathops;
+mod presets;
 mod setup;
 mod shapes;
 mod testgrid;
@@ -41,6 +42,7 @@ pub fn commands() -> impl Iterator<Item = &'static CommandSpec> {
         .chain(testgrid::COMMANDS)
         .chain(pathops::COMMANDS)
         .chain(nodes::COMMANDS)
+        .chain(presets::COMMANDS)
         .chain(arrange::COMMANDS)
         .chain(edit::COMMANDS)
         .chain(setup::COMMANDS)

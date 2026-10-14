@@ -118,3 +118,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   section and `machine.set`; written from the public firmware docs, flagged as untested on
   hardware; out-of-bed refusal applies to all. The serial link features stay GRBL-only.
 
+
+- **2026-10-14 — presets.** `Document::presets` (named snapshots of a layer's cut settings, capped at
+  200, saved with the project) and `preset.save` / `preset.apply` / `preset.delete`; applying keeps
+  the layer's name, colour and output switch. Presets section in the layer panel.
+\n

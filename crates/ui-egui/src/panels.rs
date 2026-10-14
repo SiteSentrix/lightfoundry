@@ -158,6 +158,35 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     if ui.checkbox(&mut air, "Air assist").changed() {
         app.run("layer.set", json!({ "id": layer.id, "air_assist": air }));
     }
+    presets_section(app, ui, layer.id);
+}
+
+/// Named cut settings kept in the project: apply one to this layer, or save this layer's as one.
+fn presets_section(app: &mut LightFoundryApp, ui: &mut egui::Ui, layer: u32) {
+    ui.collapsing("Presets", |ui| {
+        let names: Vec<String> = app.session.doc.presets.iter().map(|p| p.name.clone()).collect();
+        if names.is_empty() {
+            ui.weak("No presets yet. Set up this layer, name it below and save.");
+        }
+        for name in &names {
+            ui.horizontal(|ui| {
+                if ui.button(name).on_hover_text("Apply to this layer").clicked() {
+                    app.run("preset.apply", json!({ "name": name, "layer": layer }));
+                }
+                if ui.small_button("✕").on_hover_text("Delete this preset").clicked() {
+                    app.run("preset.delete", json!({ "name": name }));
+                }
+            });
+        }
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut app.preset_name).hint_text("Preset name").desired_width(120.0));
+            if ui.add_enabled(!app.preset_name.trim().is_empty(), egui::Button::new("Save")).clicked()
+                && app.run("preset.save", json!({ "name": app.preset_name, "layer": layer })).is_some()
+            {
+                app.preset_name.clear();
+            }
+        });
+    });
 }
 
 fn properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {

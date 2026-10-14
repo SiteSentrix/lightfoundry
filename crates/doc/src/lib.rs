@@ -29,6 +29,9 @@ pub struct Document {
     /// How outlines are ordered and cleaned before cutting; absent in older files.
     #[serde(default)]
     pub optimize: Optimize,
+    /// Named sets of cut settings the person saved (e.g. "3 mm birch ply, cut"); absent in older files.
+    #[serde(default)]
+    pub presets: Vec<Preset>,
     pub next_id: ShapeId,
 }
 
@@ -40,6 +43,7 @@ impl Default for Document {
             machine: Machine::default(),
             job_origin: JobOrigin::default(),
             optimize: Optimize::default(),
+            presets: Vec::new(),
             next_id: 1,
         }
     }
@@ -112,6 +116,31 @@ impl Document {
     /// Bounds of the given shapes in workspace mm.
     pub fn bounds_of(&self, ids: &[ShapeId]) -> Option<Rect> {
         ids.iter().filter_map(|id| self.shape(*id)).filter_map(Shape::world_bounds).reduce(|a, b| a.union(b))
+    }
+}
+
+/// Most presets kept in a document.
+pub const MAX_PRESETS: usize = 200;
+
+/// A named snapshot of a layer's cut settings. Identity (id, name, colour) and whether the layer
+/// outputs are not part of it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Preset {
+    pub name: String,
+    pub settings: Layer,
+}
+
+impl Layer {
+    /// Copies the cut settings of `preset` onto this layer, keeping its identity and output flag.
+    pub fn apply_settings(&mut self, preset: &Layer) {
+        let keep = Layer {
+            id: self.id,
+            name: std::mem::take(&mut self.name),
+            color: std::mem::take(&mut self.color),
+            output: self.output,
+            ..preset.clone()
+        };
+        *self = keep;
     }
 }
 
@@ -684,6 +713,27 @@ mod tests {
         assert_eq!(Anchor::Center.point(b), lightfoundry_geom::Point::new(20.0, 40.0));
         assert_eq!(Anchor::BottomRight.point(b), lightfoundry_geom::Point::new(30.0, 60.0));
         assert_eq!(Anchor::ALL.len(), 9);
+    }
+
+    #[test]
+    fn applying_a_preset_keeps_the_layers_identity() {
+        let mut preset = Layer::numbered(5);
+        preset.speed = 321.0;
+        preset.max_power = 77.0;
+        preset.passes = 3;
+        preset.output = false;
+        let mut layer = Layer::numbered(2);
+        layer.name = "Mine".into();
+        layer.apply_settings(&preset);
+        assert_eq!((layer.id, layer.name.as_str(), layer.color.as_str(), layer.output), (2, "Mine", Layer::numbered(2).color.as_str(), true));
+        assert_eq!((layer.speed, layer.max_power, layer.passes), (321.0, 77.0, 3));
+    }
+
+    #[test]
+    fn old_files_without_presets_load() {
+        let mut v = serde_json::to_value(Document::default()).unwrap();
+        v.as_object_mut().unwrap().remove("presets");
+        assert!(serde_json::from_value::<Document>(v).unwrap().presets.is_empty());
     }
 
     #[test]
