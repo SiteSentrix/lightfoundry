@@ -15,6 +15,9 @@ A translation is a JSON file:
 
 - `strings` maps the English text, exactly as the program shows it, to your text. Anything missing
   or empty stays English.
+- Texts with values in them are keyed with named places, for example `"Job finished: {lines} lines"`;
+  keep the `{name}` places in your translation, in whatever order your language needs. A place you
+  leave out simply is not shown; one that is not recognised is left as written.
 - `font` is optional. The built-in font covers Latin scripts; for others (Cyrillic extras, Greek
   polytonic, CJK, Arabic, …) name a `.ttf` or `.otf` that has the characters. It is added behind the
   built-in one.
@@ -28,7 +31,8 @@ Limits: 4 MB per file, 20,000 strings, 2,000 characters per text, 32 MB per font
 
 ## What is covered
 
-Menus, buttons, labels, tooltips, headings, drop-downs and the fixed status messages of the
-desktop app. Not covered yet: texts built with values in them (such as "Job finished: 120 lines"),
-messages returned by the engine (errors and command results), the CLI, and the browser build (which
-has no way to pick a file).
+Menus, buttons, labels, tooltips, headings, drop-downs, and the status-bar messages the desktop app
+writes itself (including the ones with values in them). Not covered yet: messages returned by the
+engine (errors and command results, which can appear in the status bar), a few small texts such as
+layer descriptions built from layer names and durations like "1m 05s", the CLI, and the browser
+build (which has no way to pick a file).

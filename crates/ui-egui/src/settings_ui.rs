@@ -1,7 +1,7 @@
 //! The controller settings editor: the `$$` table the machine reports, editable in place, plus
 //! checks of those values against the document's machine setup.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use std::collections::BTreeMap;
 
 use lightfoundry_device::settings::{Kind, describe};
@@ -100,19 +100,19 @@ fn advice_row(app: &mut LightFoundryApp, ui: &mut egui::Ui, a: Advice, busy: boo
             }
         }
         Advice::SMaxDiffers(s) => {
-            ui.label(format!("Controller S max is {s}; the document uses {}.", app.session.doc.machine.max_s));
+            ui.label(trf!("Controller S max is {s}; the document uses {used}.", s = s, used = app.session.doc.machine.max_s));
             if ui.button(tr("Use controller's")).clicked() {
                 app.run("machine.set", json!({ "max_s": s }));
             }
         }
         Advice::AccelDiffers(a) => {
-            ui.label(format!("Controller acceleration is {a} mm/s²; time estimates use {}.", app.session.doc.machine.acceleration));
+            ui.label(trf!("Controller acceleration is {a} mm/s²; time estimates use {used}.", a = a, used = app.session.doc.machine.acceleration));
             if ui.button(tr("Use controller's")).clicked() {
                 app.run("machine.set", json!({ "acceleration": a }));
             }
         }
         Advice::BedDiffers(w, h) => {
-            ui.label(format!("Controller travel is {w} × {h} mm."));
+            ui.label(trf!("Controller travel is {w} × {h} mm.", w = w, h = h));
             if ui.button(tr("Use as bed size")).clicked() {
                 app.run("machine.set", json!({ "bed_width": w, "bed_height": h }));
                 app.view = None;

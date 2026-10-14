@@ -314,3 +314,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   text up in a JSON catalog the person supplies (View > Language: load, save a template of every text
   shown so far, back to English), optionally with a font for scripts egui's does not cover. Nothing
   ships by the assets rule. See `docs/translations.md` for the format, limits and what is not yet covered.
+- **2026-10-14 — translations, interpolated texts.** `trf!("Job finished: {lines} lines", lines = n)`
+  translates a template with named places and fills in the values (single pass, values are never
+  expanded again); about 30 status and label texts that were built with `format!` use it, and the
+  static status messages are translated where they are written.

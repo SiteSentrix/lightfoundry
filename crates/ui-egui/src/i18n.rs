@@ -45,6 +45,41 @@ pub fn tr(english: &str) -> String {
     active.as_ref().and_then(|t| t.strings.get(english)).map_or_else(|| english.to_string(), Clone::clone)
 }
 
+/// [`tr`] for a text with values in it: the template has `{name}` places, filled from `args`. The
+/// values are inserted as they are (a value that itself contains `{name}` is not filled again), and
+/// a place with no matching argument is left in the text.
+pub fn tr_fill(template: &str, args: &[(&str, String)]) -> String {
+    let text = tr(template);
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut rest = text.as_str();
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open + 1..];
+        match after.find('}').map(|close| (&after[..close], &after[close + 1..])) {
+            Some((name, tail)) if args.iter().any(|(k, _)| *k == name) => {
+                if let Some((_, value)) = args.iter().find(|(k, _)| *k == name) {
+                    out.push_str(value);
+                }
+                rest = tail;
+            }
+            _ => {
+                out.push('{');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `trf!("Opened {name}", name = file)`: a translated text with values filled in (see [`tr_fill`]).
+macro_rules! trf {
+    ($template:literal $(, $key:ident = $value:expr)* $(,)?) => {
+        $crate::i18n::tr_fill($template, &[$((stringify!($key), ($value).to_string())),*])
+    };
+}
+pub(crate) use trf;
+
 /// Makes `translation` the one in use (`None` goes back to English).
 pub fn set_active(translation: Option<Translation>) {
     *ACTIVE.write().unwrap_or_else(|e| e.into_inner()) = translation;
@@ -124,6 +159,19 @@ mod tests {
         assert_eq!(t.name, "Test");
         assert_eq!(t.strings.len(), 1, "identical and empty entries are not kept");
         assert_eq!(t.strings.get("Open…").map(String::as_str), Some("Öffnen…"));
+    }
+
+    #[test]
+    fn values_are_filled_into_translated_templates_without_being_filled_again() {
+        assert_eq!(tr_fill("Job {n} of {total}", &[("n", "3".into()), ("total", "9".into())]), "Job 3 of 9");
+        assert_eq!(tr_fill("{a}{b}", &[("a", "{b}".into()), ("b", "x".into())]), "{b}x", "values are not re-expanded");
+        assert_eq!(tr_fill("odd { brace and {missing}", &[("n", "1".into())]), "odd { brace and {missing}");
+        assert_eq!(tr_fill("", &[]), "");
+        let t = parse(r#"{"strings":{"i18n-fill {n} items":"{n} Einträge (i18n-fill)"}}"#).unwrap();
+        set_active(Some(t));
+        assert_eq!(trf!("i18n-fill {n} items", n = 4), "4 Einträge (i18n-fill)");
+        set_active(None);
+        assert_eq!(trf!("i18n-fill {n} items", n = 4), "i18n-fill 4 items");
     }
 
     #[test]

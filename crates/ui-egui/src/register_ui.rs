@@ -2,7 +2,7 @@
 //! spots really are (jog the laser onto them, or click them on a photo of the bed), and the design
 //! is moved and turned to fit.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use egui::{Align2, FontId, Stroke, vec2};
 use lightfoundry_geom::Point;
 use serde_json::json;
@@ -88,7 +88,7 @@ pub fn section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 fn mark_row(app: &mut LightFoundryApp, ui: &mut egui::Ui, actual: bool, index: usize) {
     let current = if actual { app.marks.actual } else { app.marks.design }.get(index).copied().flatten();
     ui.horizontal(|ui| {
-        ui.label(format!("Mark {}", index + 1));
+        ui.label(trf!("Mark {number}", number = index + 1));
         ui.monospace(current.map_or("not set".to_string(), |p| format!("{:.2}, {:.2}", p.x, p.y)));
         let picking = app.marks.pick == Some(Pick { actual, index });
         if ui.selectable_label(picking, "Click on canvas").clicked() {

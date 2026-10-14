@@ -1,4 +1,4 @@
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use lightfoundry_device::{JobState, Link};
 use lightfoundry_doc::{Anchor, Dither, LayerMode, Origin, ShapeKind, StartFrom, TextAlign};
 use serde_json::{Value, json};
@@ -258,7 +258,7 @@ fn properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         create_by_numbers(app, ui);
         return;
     };
-    ui.label(format!("{} object{}", sel.len(), if sel.len() == 1 { "" } else { "s" }));
+    ui.label(if sel.len() == 1 { tr("1 object") } else { trf!("{count} objects", count = sel.len()) });
     egui::Grid::new("props").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         ui.label(tr("X"));
         if let Some(x) = number(ui, b.x0, -1e6..=1e6, " mm") {
@@ -292,7 +292,7 @@ fn properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             app.run("edit.flip", json!({ "axis": "vertical" }));
         }
     });
-    if ui.button(format!("Move to layer {}", app.active_layer)).clicked() {
+    if ui.button(trf!("Move to layer {layer}", layer = app.active_layer)).clicked() {
         app.run("edit.set_layer", json!({ "layer": app.active_layer }));
     }
 }
@@ -387,7 +387,7 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     if let Some(gcode) = app.session.last_gcode.clone() {
         ui.collapsing(tr("G-code"), |ui| {
             let lines = gcode.lines().count();
-            ui.weak(format!("{lines} lines"));
+            ui.weak(trf!("{lines} lines", lines = lines));
             resume_controls(app, ui, &gcode, lines);
             egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
                 // Show the head only: a raster job can be millions of lines.
@@ -405,7 +405,7 @@ fn generate(app: &mut LightFoundryApp) {
     if let Some(v) = app.run("job.estimate", Value::Null) {
         let est = format_duration(v["seconds"].as_f64().unwrap_or(0.0));
         let lines = app.session.last_gcode.as_ref().map_or(0, |g| g.lines().count());
-        app.say(format!("{lines} lines of G-code · estimated {est}"));
+        app.say(trf!("{lines} lines of G-code · estimated {est}", lines = lines, est = est));
     }
 }
 
@@ -538,7 +538,7 @@ fn job_origin(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 fn interrupted_job(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let Some(pos) = app.interrupted.clone() else { return };
     ui.group(|ui| {
-        ui.label(format!("A job was interrupted. It can restart from line {} of {}.", pos.line, pos.total_lines));
+        ui.label(trf!("A job was interrupted. It can restart from line {line} of {total}.", line = pos.line, total = pos.total_lines));
         let same = app.session.last_gcode.as_deref().is_some_and(|g| crate::job_position::fingerprint(g) == pos.hash);
         ui.horizontal(|ui| {
             if ui
@@ -859,7 +859,7 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         let name = style.font.as_deref().map_or("Built-in stroke font".to_string(), |p| {
             std::path::Path::new(p).file_name().map_or_else(|| p.to_string(), |n| n.to_string_lossy().into_owned())
         });
-        ui.label(format!("Font: {name}"));
+        ui.label(trf!("Font: {name}", name = name));
         if ui.button(tr("Choose font…")).on_hover_text(tr("A .ttf or .otf file of yours: draws filled outlines (use a Fill layer)")).clicked()
             && let Some(path) = app.pick_open("Choose a font", &["ttf", "otf"])
             && let Some(v) = app.run("text.edit", json!({ "id": id, "font": path }))
@@ -877,7 +877,7 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             let name = style.fallback_font.as_deref().map_or("none".to_string(), |p| {
                 std::path::Path::new(p).file_name().map_or_else(|| p.to_string(), |n| n.to_string_lossy().into_owned())
             });
-            ui.label(format!("Fallback font: {name}"));
+            ui.label(trf!("Fallback font: {name}", name = name));
             if ui.button(tr("Choose…")).on_hover_text(tr("Draws characters the font above has no glyph for")).clicked()
                 && let Some(path) = app.pick_open("Choose a fallback font", &["ttf", "otf"])
                 && let Some(v) = app.run("text.edit", json!({ "id": id, "fallback_font": path }))
@@ -1162,7 +1162,7 @@ fn layer_header(app: &mut LightFoundryApp, ui: &mut egui::Ui, layer: &lightfound
         if r.lost_focus() && name != layer.name && !name.trim().is_empty() {
             app.run("layer.set", json!({ "id": layer.id, "name": name }));
         }
-        ui.label(format!("#{} of {}", position + 1, last + 1));
+        ui.label(trf!("#{position} of {total}", position = position + 1, total = last + 1));
         if ui.add_enabled(position > 0, egui::Button::new(tr("Earlier"))).on_hover_text(tr("Cut this layer sooner")).clicked() {
             app.run("layer.move", json!({ "id": layer.id, "index": position - 1 }));
         }
@@ -1194,7 +1194,7 @@ fn node_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     };
     ui.weak(tr("Drag nodes and handles. Double-click a line to add a node. Delete removes the selected node."));
     let Some(sel) = app.node_sel.filter(|s| s.shape == shape) else {
-        ui.weak(format!("{} nodes. Click a node to select it.", np.node_count()));
+        ui.weak(trf!("{count} nodes. Click a node to select it.", count = np.node_count()));
         return;
     };
     let Some(node) = np.subpaths.get(sel.subpath).and_then(|s| s.nodes.get(sel.index)) else { return };
@@ -1204,7 +1204,7 @@ fn node_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         let next = &sp.nodes[(sel.index + 1) % sp.nodes.len()];
         lightfoundry_geom::nodes::controls(node, next).is_some()
     };
-    ui.label(format!("Node {} of {}", sel.index + 1, np.subpaths[sel.subpath].nodes.len()));
+    ui.label(trf!("Node {index} of {total}", index = sel.index + 1, total = np.subpaths[sel.subpath].nodes.len()));
     ui.horizontal_wrapped(|ui| {
         let base = json!({ "id": shape, "subpath": sel.subpath });
         let with = |extra: serde_json::Value| {
