@@ -53,6 +53,7 @@ pub struct LightFoundryApp {
     polygon_sides: u32,
     status: Option<(String, bool)>,
     geometry: GeometryCache,
+    thumbs: crate::geometry::ImageTextures,
     preview: PreviewCache,
     link: Option<Link>,
     /// Latest state of the machine link, refreshed once per frame.
@@ -88,6 +89,7 @@ impl LightFoundryApp {
             polygon_sides: 6,
             status: None,
             geometry: GeometryCache::default(),
+            thumbs: Default::default(),
             preview: PreviewCache::default(),
             link: None,
             snap: None,

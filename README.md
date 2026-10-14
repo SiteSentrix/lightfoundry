@@ -12,6 +12,7 @@ simulator when nothing is plugged in.
 
 ## What works today
 
+- **Images:** shown on the canvas as real thumbnails (rotation and flips included); brightness, contrast, gamma and negative adjustments (non-destructive, applied before dithering); a picture flush with the bed edge gets a shorter lead-in rather than a job that cannot run.
 - **Combine:** boolean union / subtract / intersect / XOR of closed shapes (holes preserved), and offset (grow, shrink, kerf-style; round, miter or bevel joins; open lines and stroke text become an outline around the line).
 - **Create:** rectangle, ellipse, line, regular-polygon and text tools (editable multi-line text in an original single-line stroke font: size, letter/line gap, alignment; click anywhere in the block to select); drag, rubber-band select, corner-handle resize, nudge, align, flip, rotate, duplicate, undo/redo (200 steps).
 - **Import:** SVG (shapes, groups, transforms, units; stroke/fill colours map to cut layers), DXF (LINE, LWPOLYLINE with bulges, POLYLINE, CIRCLE, ARC; `$INSUNITS` honoured; DXF layers become cut layers), and raster images (PNG/JPEG/BMP/GIF/WebP).

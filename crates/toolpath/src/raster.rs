@@ -62,7 +62,7 @@ pub struct Grid {
 /// non-image shape yields an all-white grid.
 pub fn sample_grid(shape: &Shape, grid: &Grid) -> Vec<f32> {
     let mut out = vec![255.0f32; grid.nx.saturating_mul(grid.ny)];
-    let ShapeKind::Image { image: img, width_mm: w_mm, height_mm: h_mm } = &shape.kind else { return out };
+    let ShapeKind::Image { image: img, width_mm: w_mm, height_mm: h_mm, adjust } = &shape.kind else { return out };
     let inv = shape.transform.inverse();
     for iy in 0..grid.ny {
         for ix in 0..grid.nx {
@@ -74,7 +74,10 @@ pub fn sample_grid(shape: &Shape, grid: &Grid) -> Vec<f32> {
             let fx = local.x / w_mm * f64::from(img.width) - 0.5;
             let fy = local.y / h_mm * f64::from(img.height) - 0.5;
             if let Some(c) = out.get_mut(iy * grid.nx + ix) {
-                *c = bilinear(img, fx, fy);
+                // Only pixels inside the image are adjusted: the white outside must stay white, or a
+                // negative would burn everything around the picture.
+                let v = bilinear(img, fx, fy);
+                *c = if adjust.is_identity() { v } else { adjust.apply(v) };
             }
         }
     }
@@ -117,6 +120,10 @@ pub(crate) fn plan_image(doc: &Document, layer: &Layer, shape: &Shape) -> Result
     let over = if doc.machine.overscan.is_finite() { doc.machine.overscan.clamp(0.0, 50.0) } else { 0.0 };
     let (min_p, max_p) = (layer.min_power.clamp(0.0, 100.0), layer.max_power.clamp(0.0, 100.0));
     let x_at = |i: usize| b.x0 + i as f64 * pitch;
+    // With absolute placement the bed edges are known: a picture flush with an edge gets a shorter
+    // lead-in rather than a job that cannot run. (Relative placements cannot know the room.)
+    let absolute = doc.job_origin.start_from == lightfoundry_doc::StartFrom::Absolute;
+    let room = |x: f64| if absolute { x.clamp(0.0, doc.machine.bed_width) } else { x };
     let mut moves = Vec::new();
     for (iy, row) in intensity.chunks_exact(nx).enumerate() {
         let Some(first) = row.iter().position(|v| *v > 0.0) else { continue };
@@ -126,7 +133,7 @@ pub(crate) fn plan_image(doc: &Document, layer: &Layer, shape: &Shape) -> Result
         let reverse = layer.bidirectional && iy % 2 == 1;
         let (start_x, end_x, dir) = if reverse { (x_at(to), x_at(from), -1.0) } else { (x_at(from), x_at(to), 1.0) };
 
-        moves.push(Move::Travel(Point::new(start_x - dir * over, y)));
+        moves.push(Move::Travel(Point::new(room(start_x - dir * over), y)));
         if over > 0.0 {
             moves.push(Move::Cut { to: Point::new(start_x, y), power: 0.0 });
         }
@@ -144,7 +151,7 @@ pub(crate) fn plan_image(doc: &Document, layer: &Layer, shape: &Shape) -> Result
             run_power = Some(power);
         }
         if over > 0.0 {
-            moves.push(Move::Cut { to: Point::new(end_x + dir * over, y), power: 0.0 });
+            moves.push(Move::Cut { to: Point::new(room(end_x + dir * over), y), power: 0.0 });
         }
     }
     Ok(moves)

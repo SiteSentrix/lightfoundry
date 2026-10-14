@@ -35,6 +35,8 @@ pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let canvas_rect = resp.rect;
     let painter = painter.with_clip_rect(canvas_rect);
     app.geometry.refresh(&app.session);
+    let doc = &app.session.doc;
+    app.thumbs.retain(|id| doc.shape(id).is_some());
     if app.show_preview {
         app.preview.refresh(&app.session);
     }
@@ -259,7 +261,7 @@ fn draw_bed(app: &LightFoundryApp, painter: &egui::Painter, view: &View, w: f64,
     painter.circle_filled(o, 3.0, t.origin);
 }
 
-fn draw_shapes(app: &LightFoundryApp, painter: &egui::Painter, view: &View, clip: egui::Rect, offset: (f64, f64)) {
+fn draw_shapes(app: &mut LightFoundryApp, painter: &egui::Painter, view: &View, clip: egui::Rect, offset: (f64, f64)) {
     let shift = Affine::translate(offset);
     let dim = app.show_preview;
     for item in &app.geometry.items {
@@ -282,14 +284,38 @@ fn draw_shapes(app: &LightFoundryApp, painter: &egui::Painter, view: &View, clip
             painter.add(if line.closed { Shape::closed_line(pts, stroke) } else { Shape::line(pts, stroke) });
         }
         if item.is_image {
-            let r = egui::Rect::from_two_pos(
-                view.to_screen(m * Point::new(item.bounds.x0, item.bounds.y0)),
-                view.to_screen(m * Point::new(item.bounds.x1, item.bounds.y1)),
-            );
-            painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(200, 200, 200, 40));
-            painter.text(r.center(), Align2::CENTER_CENTER, "image", FontId::proportional(11.0), Color32::from_gray(160));
+            draw_image(&mut app.thumbs, &app.session.doc, painter, view, item.id, m);
         }
     }
+}
+
+/// Draws an image shape as a textured quad through its transform (so rotation and flips work),
+/// falling back to a labelled box if no texture can be made.
+fn draw_image(
+    thumbs: &mut crate::geometry::ImageTextures,
+    doc: &lightfoundry_doc::Document,
+    painter: &egui::Painter,
+    view: &View,
+    id: lightfoundry_doc::ShapeId,
+    extra: Affine,
+) {
+    let Some(shape) = doc.shape(id).cloned() else { return };
+    let lightfoundry_doc::ShapeKind::Image { width_mm, height_mm, .. } = &shape.kind else { return };
+    let (w, h) = (*width_mm, *height_mm);
+    let Some(texture) = thumbs.get(painter.ctx(), &shape) else { return };
+    let corner = |x: f64, y: f64| view.to_screen(extra * shape.transform * Point::new(x, y));
+    let corners = [
+        (corner(0.0, 0.0), egui::pos2(0.0, 0.0)),
+        (corner(w, 0.0), egui::pos2(1.0, 0.0)),
+        (corner(w, h), egui::pos2(1.0, 1.0)),
+        (corner(0.0, h), egui::pos2(0.0, 1.0)),
+    ];
+    let mut mesh = egui::Mesh::with_texture(texture);
+    for (pos, uv) in corners {
+        mesh.vertices.push(egui::epaint::Vertex { pos, uv, color: Color32::WHITE });
+    }
+    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+    painter.add(Shape::mesh(mesh));
 }
 
 /// Cheap bounding test so long shapes spanning the whole canvas are not culled.

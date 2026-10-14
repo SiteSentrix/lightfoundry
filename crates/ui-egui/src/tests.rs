@@ -187,6 +187,60 @@ mod text_tool_tests {
     }
 }
 
+mod image_tests {
+    use std::sync::Arc;
+
+    use lightfoundry_doc::{ImageAdjust, RasterImage, Shape, ShapeKind};
+    use lightfoundry_geom::Affine;
+
+    use super::*;
+
+    fn add_gradient(h: &mut Harness, transform: Affine) -> u64 {
+        let gray: Vec<u8> = (0..16 * 16).map(|i| ((i % 16) * 16) as u8).collect();
+        let image = Arc::new(RasterImage::new(16, 16, gray).unwrap());
+        let id = h.app.session.doc.add_shape(Shape {
+            id: 0,
+            name: "pic".into(),
+            layer: 0,
+            transform,
+            kind: ShapeKind::Image { image, width_mm: 40.0, height_mm: 40.0, adjust: ImageAdjust::default() },
+        });
+        h.app.session.revision += 1;
+        id
+    }
+
+    #[test]
+    fn images_get_a_texture_that_follows_their_adjustment_and_is_dropped_with_the_shape() {
+        let mut h = Harness::new();
+        let id = add_gradient(&mut h, Affine::translate((20.0, 20.0)));
+        h.frame(vec![]);
+        assert!(h.app.thumbs.map_len() == 1);
+        let before = h.app.thumbs.cached_key(id);
+        h.app.run("image.adjust", json!({"id": id, "negative": true}));
+        h.frame(vec![]);
+        assert_ne!(h.app.thumbs.cached_key(id), before, "a changed adjustment rebuilds the thumbnail");
+        let key = h.app.thumbs.cached_key(id);
+        h.app.run("edit.move", json!({"ids": [id], "dx": 10, "dy": 0}));
+        h.frame(vec![]);
+        assert_eq!(h.app.thumbs.cached_key(id), key, "moving does not rebuild it");
+        h.app.run("edit.delete", json!({"ids": [id]}));
+        h.frame(vec![]);
+        assert_eq!(h.app.thumbs.map_len(), 0);
+    }
+
+    #[test]
+    fn rotated_and_flipped_images_render_and_are_selectable() {
+        let mut h = Harness::new();
+        let id = add_gradient(&mut h, Affine::translate((80.0, 80.0)) * Affine::rotate(0.7) * Affine::scale_non_uniform(-1.0, 1.0));
+        h.frame(vec![]);
+        h.frame(vec![]);
+        let c = h.app.session.doc.bounds_of(&[id]).unwrap().center();
+        h.click(h.at(c.x, c.y));
+        assert_eq!(h.app.session.selection, vec![id]);
+        h.frame(vec![]); // the Image inspector is drawn for it
+    }
+}
+
 mod shape_operation_tests {
     use super::*;
 

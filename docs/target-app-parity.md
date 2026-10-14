@@ -9,7 +9,7 @@
 | Area                  | Score | Shipped                                                                 | Missing (highlights)                                                                                     |
 |-----------------------|------:|-------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
 | Drawing tools         |   35% | rectangle, ellipse, line, polygon, editable text (stroke font), boolean ops, offset; move, resize, rotate, flip, align | pen/Bézier editing, node edit, outline fonts (Fill-mode text), rounded rect, array/grid, groups, tabs/bridges, weld-by-selection of open paths |
-| Import                |   35% | SVG, DXF (basic entities), raster images                                | AI/PDF/EPS, DXF splines/ellipses/text/blocks, image trace, image adjustments, SVG text/images            |
+| Import                |   40% | SVG, DXF (basic entities), raster images with thumbnails and tone adjustments (brightness, contrast, gamma, negative) | AI/PDF/EPS, DXF splines/ellipses/text/blocks, image trace, crop/resize-resample, sharpen, SVG text/images |
 | Layers & cut settings |   40% | 16 layers; line, fill, fill+line, image; speed, power, passes, interval, kerf offset | sub-layers, lead-in/out, perforation, dot width, ramp, Z offset, per-layer overscan        |
 | Toolpath planning     |   30% | inner-first, nearest neighbour, scan fill, dithered raster, estimate    | cut-order optimiser options, remove overlaps, start-point choice, cut selected only, job origin modes    |
 | Output                |   35% | GRBL G-code (M3/M4, origin flip, bounds refusal), frame, job origin (absolute / user origin / current position, 9-point anchor) | GRBL 0.9 variants, Smoothieware/Marlin, Ruida/Trocen/TopWisdom, galvo, rotary |
@@ -25,7 +25,7 @@ low power, and stay present.
 
 ## Evidence of what ships
 
-- 195 tests across the workspace (`cargo test --workspace`); gates in `cargo xtask ci`.
+- 203 tests across the workspace (`cargo test --workspace`); gates in `cargo xtask ci`.
 - End-to-end: `lightfoundry-cli gcode demo.svg` → G-code; the desktop app was driven under Xvfb
   (draw with each tool, generate, start on the simulator, progress and completion shown; jog pad
   clicks moved the simulated head the expected way and the console logged each `$J=` line).
