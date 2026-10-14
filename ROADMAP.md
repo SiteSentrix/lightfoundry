@@ -145,4 +145,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   simplifies with Douglas-Peucker (bounded: 16 Mpixel, 4 M edges, 50 000 loops). `image.trace`
   applies the picture's tone adjustments, scales to the picture's size and position, and adds the
   outlines as a path (optionally replacing the picture). Image inspector gets a Trace section.
+- **2026-10-14 — cut selected shapes only.** `Session::job_doc()` (the document, or just the
+  selection) feeds generate, estimate, frame and the preview, so job origins anchor to the selection
+  too; `job.set_scope` and a Laser-panel checkbox switch it (a session setting, not saved).
 

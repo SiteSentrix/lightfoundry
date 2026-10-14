@@ -319,6 +319,10 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         }
     });
 
+    let mut only = app.session.job_selection_only;
+    if ui.checkbox(&mut only, "Cut selected shapes only").on_hover_text("Generate, estimate, frame and preview just the selection").changed() {
+        app.run("job.set_scope", json!({ "selection_only": only }));
+    }
     job_origin(app, ui);
     cut_order(app, ui);
     test_grid_section(app, ui);

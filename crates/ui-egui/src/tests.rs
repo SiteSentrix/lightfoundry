@@ -1424,3 +1424,25 @@ mod create_by_numbers_tests {
         assert!((b.x0 - 120.0).abs() < 1e-6, "{b:?}");
     }
 }
+
+mod selection_scope_tests {
+    use super::*;
+
+    #[test]
+    fn the_preview_follows_the_selection_when_only_it_is_cut() {
+        let mut h = Harness::new();
+        let a = h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 20, "height": 10})).unwrap()["id"].as_u64().unwrap();
+        h.app.run("shape.rectangle", json!({"x": 100, "y": 100, "width": 20, "height": 10}));
+        h.app.show_preview = true;
+        h.frame(vec![]);
+        let all = h.app.preview.segments.len();
+        h.app.run("job.set_scope", json!({"selection_only": true}));
+        h.app.run("edit.select", json!({"ids": [a]}));
+        h.frame(vec![]);
+        let some = h.app.preview.segments.len();
+        assert!(some > 0 && some < all, "{some} of {all}");
+        h.app.run("edit.select", json!({"ids": []}));
+        h.frame(vec![]);
+        assert_eq!(h.app.preview.segments.len(), 0, "no selection, nothing to preview");
+    }
+}

@@ -77,7 +77,8 @@ pub struct PreviewSegment {
 
 #[derive(Default)]
 pub struct PreviewCache {
-    revision: Option<u64>,
+    /// What the preview was built from: the document revision, and the selection when only that is cut.
+    key: Option<(u64, Option<Vec<ShapeId>>)>,
     pub segments: Vec<PreviewSegment>,
     pub error: Option<String>,
     pub truncated: bool,
@@ -86,18 +87,20 @@ pub struct PreviewCache {
 
 impl PreviewCache {
     pub fn refresh(&mut self, s: &Session) {
-        if self.revision == Some(s.revision) {
+        let key = (s.revision, s.job_selection_only.then(|| s.selection.clone()));
+        if self.key.as_ref() == Some(&key) {
             return;
         }
-        self.revision = Some(s.revision);
+        self.key = Some(key);
         self.segments.clear();
         self.error = None;
         self.truncated = false;
         self.timeline = Timeline::default();
-        match plan(&s.doc) {
+        let job_doc = s.job_doc();
+        match plan(&job_doc) {
             Err(e) => self.error = Some(e.to_string()),
             Ok(job) => {
-                let rapid = s.doc.machine.rapid_speed;
+                let rapid = job_doc.machine.rapid_speed;
                 self.timeline = Timeline::new(&job, rapid);
                 // The head's real start position is unknown, so the first move draws nothing.
                 let mut at: Option<Point> = None;

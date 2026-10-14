@@ -27,6 +27,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         run: set_origin,
     },
     CommandSpec {
+        id: "job.set_scope",
+        label: "Cut Selected Shapes Only",
+        menu: "Laser",
+        shortcut: None,
+        params_doc: "{selection_only: bool}  — when true, generate/estimate/frame/preview use only the selected shapes (a session setting, not saved in the file)",
+        mutates: false,
+        run: set_scope,
+    },
+    CommandSpec {
         id: "job.set_optimize",
         label: "Cut Order Options",
         menu: "Laser",
@@ -58,8 +67,9 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
 
 /// Plans the document and renders it as G-code.
 pub(super) fn generate(s: &Session) -> Result<String, EngineError> {
-    let job = lightfoundry_toolpath::plan(&s.doc)?;
-    Ok(lightfoundry_gcode::generate(&job, &s.doc.machine, placement(s)?)?)
+    let doc = s.job_doc();
+    let job = lightfoundry_toolpath::plan(&doc)?;
+    Ok(lightfoundry_gcode::generate(&job, &doc.machine, placement(s)?)?)
 }
 
 /// Machine placement for the document's "start from" setting.
@@ -68,7 +78,7 @@ fn placement(s: &Session) -> Result<Placement, EngineError> {
     if origin.start_from == StartFrom::Absolute {
         return Ok(Placement::Absolute);
     }
-    let bounds = lightfoundry_toolpath::job_bounds(&s.doc).ok_or_else(|| EngineError::NotFound("there is nothing to output".into()))?;
+    let bounds = lightfoundry_toolpath::job_bounds(&s.job_doc()).ok_or_else(|| EngineError::NotFound("there is nothing to output".into()))?;
     Ok(Placement::Relative {
         anchor: origin.anchor.point(bounds),
         extent: (bounds.width(), bounds.height()),
@@ -88,6 +98,17 @@ fn set_origin(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     o.start_from = p.start_from.unwrap_or(o.start_from);
     o.anchor = p.anchor.unwrap_or(o.anchor);
     Ok(json!({ "start_from": o.start_from, "anchor": o.anchor }))
+}
+
+#[derive(Deserialize)]
+struct SetScopeParams {
+    selection_only: bool,
+}
+
+fn set_scope(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: SetScopeParams = parse(params)?;
+    s.job_selection_only = p.selection_only;
+    Ok(json!({ "selection_only": s.job_selection_only }))
 }
 
 #[derive(Deserialize)]
@@ -122,7 +143,7 @@ fn gcode(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
 }
 
 fn estimate(s: &mut Session, _: &Value) -> Result<Value, EngineError> {
-    let job = lightfoundry_toolpath::plan(&s.doc)?;
+    let job = lightfoundry_toolpath::plan(&s.job_doc())?;
     let t = lightfoundry_toolpath::Timeline::new(&job, s.doc.machine.rapid_speed);
     let layers: Vec<Value> = t
         .layers()
@@ -149,7 +170,7 @@ fn frame_speed() -> f64 {
 
 fn frame(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let p: FrameParams = parse(params)?;
-    let bounds = lightfoundry_toolpath::job_bounds(&s.doc).ok_or_else(|| EngineError::NotFound("there is nothing to frame".into()))?;
+    let bounds = lightfoundry_toolpath::job_bounds(&s.job_doc()).ok_or_else(|| EngineError::NotFound("there is nothing to frame".into()))?;
     let program = lightfoundry_gcode::frame(bounds, &s.doc.machine, placement(s)?, p.speed, p.power)?;
     Ok(json!({ "gcode": program, "bounds": [bounds.x0, bounds.y0, bounds.x1, bounds.y1] }))
 }
