@@ -81,6 +81,15 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         run: flip,
     },
     CommandSpec {
+        id: "edit.distribute",
+        label: "Distribute",
+        menu: "Arrange/Align",
+        shortcut: None,
+        params_doc: "{ids?, axis: horizontal|vertical, gap? (mm)}  — spaces three or more shapes evenly between the outermost two (or, with gap, one after another from the first)",
+        mutates: true,
+        run: distribute,
+    },
+    CommandSpec {
         id: "edit.align",
         label: "Align",
         menu: "Arrange/Align",
@@ -264,7 +273,7 @@ struct FlipParams {
     axis: Axis,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum Axis {
     Horizontal,
@@ -319,6 +328,55 @@ fn align(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
         transform_all(s, &[*id], Affine::translate((dx, dy)));
     }
     Ok(json!({ "aligned": ids.len() }))
+}
+
+#[derive(Deserialize)]
+struct DistributeParams {
+    #[serde(flatten)]
+    ids: Ids,
+    axis: Axis,
+    gap: Option<f64>,
+}
+
+/// Evens out the spaces between shapes along an axis. Shapes keep their order along the axis.
+fn distribute(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: DistributeParams = parse(params)?;
+    let ids = targets(s, &p.ids)?;
+    if ids.len() < 3 && p.gap.is_none() || ids.len() < 2 {
+        return Err(EngineError::BadParams("distributing needs at least three shapes (two with a gap)".into()));
+    }
+    if let Some(g) = p.gap
+        && !(g.is_finite() && g.abs() <= 1e6)
+    {
+        return Err(EngineError::BadParams("gap must be a finite number".into()));
+    }
+    // (id, start, end) along the axis, in order.
+    let span = |b: Rect| match p.axis {
+        Axis::Horizontal => (b.x0, b.x1),
+        Axis::Vertical => (b.y0, b.y1),
+    };
+    let mut items: Vec<(ShapeId, f64, f64)> =
+        ids.iter().filter_map(|id| s.doc.shape(*id).and_then(|sh| sh.world_bounds()).map(|b| (*id, span(b).0, span(b).1))).collect();
+    items.sort_by(|a, b| (a.1 + a.2).total_cmp(&(b.1 + b.2)));
+    let (Some(first), Some(last)) = (items.first().copied(), items.last().copied()) else { return Err(EngineError::NothingSelected) };
+    let gap = match p.gap {
+        Some(g) => g,
+        None => {
+            let widths: f64 = items.iter().map(|(_, a, b)| b - a).sum();
+            (last.2 - first.1 - widths) / (items.len() - 1) as f64
+        }
+    };
+    let mut cursor = first.1;
+    for (id, start, end) in &items {
+        let shift = cursor - start;
+        let m = match p.axis {
+            Axis::Horizontal => Affine::translate((shift, 0.0)),
+            Axis::Vertical => Affine::translate((0.0, shift)),
+        };
+        transform_all(s, &[*id], m);
+        cursor += (end - start) + gap;
+    }
+    Ok(json!({ "distributed": items.len(), "gap": gap }))
 }
 
 #[derive(Deserialize)]

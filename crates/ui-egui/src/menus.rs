@@ -146,6 +146,14 @@ fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 ui.close();
             }
         }
+        ui.add_enabled_ui(app.session.selection.len() >= 3, |ui| {
+            for (label, axis) in [("Distribute Horizontally", "horizontal"), ("Distribute Vertically", "vertical")] {
+                if ui.button(label).clicked() {
+                    app.run("edit.distribute", json!({ "axis": axis }));
+                    ui.close();
+                }
+            }
+        });
         ui.separator();
         ui.add_enabled_ui(app.session.selection.len() >= 2, |ui| {
             ui.menu_button("Boolean", |ui| {
