@@ -21,7 +21,7 @@ simulator when nothing is plugged in.
 - **Output:** GRBL G-code (`M4` dynamic power or `M3`, configurable `$30` S range, bottom-left or top-left origin, bed-bounds refusal), frame-the-job, save G-code.
 - **Job origin:** Absolute coordinates, User origin, or Current position, with a 9-point anchor on the job bounds, so work can be placed on material wherever the head is (`G92` for current position).
 - **Machine control:** a persistent GRBL connection with live status and position, jog pad (direction follows the machine's origin corner), home, unlock, set origin here, go to origin, pause/resume (feed hold), stop (soft reset, laser off), a console with a command line, and character-counting job streaming with progress. Serial ports are behind the `serial` feature (on by default in the desktop app); a built-in simulated controller needs no hardware and checks the 128-byte RX buffer is never overrun.
-- **Files:** native `.lightfoundry` (versioned JSON, atomic saves, validated on load).
+- **Files:** native `.lightfoundry` (versioned JSON, atomic saves, validated on load). Unsaved work is autosaved every 20 s to a per-user recovery file and offered back after a crash; New, Open and closing the window ask before discarding changes; the title shows `*` while there are unsaved changes.
 - **Headless:** `lightfoundry-cli` converts files to G-code and runs JSON command scripts.
 
 ## Quick start

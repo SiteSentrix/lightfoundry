@@ -55,6 +55,24 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         run: import_image,
     },
     CommandSpec {
+        id: "file.autosave",
+        label: "Autosave",
+        menu: "",
+        shortcut: None,
+        params_doc: "{path}  — writes a recovery copy; does not change the document's path or unsaved state",
+        mutates: false,
+        run: autosave,
+    },
+    CommandSpec {
+        id: "file.recover",
+        label: "Recover",
+        menu: "",
+        shortcut: None,
+        params_doc: "{path}  — opens a recovery copy as an unsaved, untitled document",
+        mutates: false,
+        run: recover,
+    },
+    CommandSpec {
         id: "file.export_gcode",
         label: "Save G-code…",
         menu: "File/Export",
@@ -190,6 +208,22 @@ fn import_image(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     let id = s.doc.add_shape(shape);
     s.selection = vec![id];
     Ok(json!({ "id": id, "width_mm": width_mm, "height_mm": width_mm * aspect }))
+}
+
+fn autosave(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: PathParams = parse(params)?;
+    lightfoundry_format::save(&p.path, &s.doc)?;
+    Ok(json!({ "path": p.path, "revision": s.revision }))
+}
+
+fn recover(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
+    let p: PathParams = parse(params)?;
+    let doc = lightfoundry_format::load(&p.path)?;
+    let shapes = doc.shapes.len();
+    s.replace_document(doc, None);
+    // Recovered work was never saved: keep it marked as changed so closing asks first.
+    s.dirty = true;
+    Ok(json!({ "shapes": shapes }))
 }
 
 fn export_gcode(s: &mut Session, params: &Value) -> Result<Value, EngineError> {

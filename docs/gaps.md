@@ -17,7 +17,7 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 10 | Lead-in/out, tabs/bridges, perforation, ramp, per-layer overscan                     | Clean cuts, holding parts                                           |
 | 11 | Timeline preview with scrubbing and per-layer time breakdown                         | Catch mistakes before burning                                       |
 | 12 | Groups, layers list with reorder/rename, per-shape cut settings overrides            | Larger projects                                                     |
-| 13 | Autosave and data recovery; recent files                                             | Never lose work                                                     |
+| 13 | Recent files; keep several autosave generations; periodic recovery-health check      | Never lose work                                                     |
 | 14 | Material library and test grids (power/speed matrix generator)                       | Finding settings for a new material (original library only)         |
 | 15 | Other controllers (Marlin/Smoothieware dialects first; Ruida is a large project)     | Reach beyond GRBL                                                   |
 | 16 | Camera overlay and print-and-cut alignment                                           | Placing work on printed or irregular material                       |

@@ -488,6 +488,30 @@ mod file_tests {
     }
 
     #[test]
+    fn autosave_leaves_the_document_state_alone_and_recover_reopens_it_as_unsaved() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-recover-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (saved, recovery) = (dir.join("real.lightfoundry"), dir.join("recovery.lightfoundry"));
+        let mut s = Session::new();
+        rect(&mut s);
+        s.execute("file.save", &json!({"path": saved})).unwrap();
+        rect(&mut s);
+        assert!(s.dirty);
+        s.execute("file.autosave", &json!({"path": recovery})).unwrap();
+        assert!(s.dirty, "autosave does not mark the document clean");
+        assert_eq!(s.path.as_deref(), Some(saved.as_path()), "nor does it retarget Save");
+
+        let mut t = Session::new();
+        t.execute("file.recover", &json!({"path": recovery})).unwrap();
+        assert_eq!(t.doc, s.doc);
+        assert!(t.dirty && t.path.is_none(), "recovered work is untitled and unsaved");
+        assert!(Session::new().execute("file.recover", &json!({"path": dir.join("missing")})).is_err());
+        std::fs::write(dir.join("junk"), b"not a project").unwrap();
+        assert!(Session::new().execute("file.recover", &json!({"path": dir.join("junk")})).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn save_without_a_path_is_an_error() {
         assert!(Session::new().execute("file.save", &json!({})).is_err());
     }

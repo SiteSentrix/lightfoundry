@@ -17,6 +17,19 @@ impl eframe::App for Host {
 pub struct DesktopPlatform;
 
 impl Platform for DesktopPlatform {
+    fn recovery_file(&self) -> Option<PathBuf> {
+        Some(data_dir()?.join("LightFoundry").join("recovery.lightfoundry"))
+    }
+
+    fn clear_recovery(&self) {
+        if let Some(path) = self.recovery_file()
+            && let Err(e) = std::fs::remove_file(&path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!("could not remove {}: {e}", path.display());
+        }
+    }
+
     fn pick_open(&self, title: &str, extensions: &[&str]) -> Option<PathBuf> {
         rfd::FileDialog::new().set_title(title).add_filter("Supported files", extensions).pick_file()
     }
@@ -44,5 +57,18 @@ impl Platform for DesktopPlatform {
     #[cfg(not(feature = "serial"))]
     fn open_serial(&self, _port: &str) -> Result<Box<dyn Transport + Send>, String> {
         Err("this build has no serial support".into())
+    }
+}
+
+/// The per-user data folder: `$XDG_DATA_HOME` or `~/.local/share` on Linux, `~/Library/Application
+/// Support` on macOS, `%APPDATA%` on Windows.
+fn data_dir() -> Option<PathBuf> {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+    if cfg!(target_os = "windows") {
+        var("APPDATA")
+    } else if cfg!(target_os = "macos") {
+        var("HOME").map(|h| h.join("Library").join("Application Support"))
+    } else {
+        var("XDG_DATA_HOME").or_else(|| var("HOME").map(|h| h.join(".local").join("share")))
     }
 }

@@ -46,3 +46,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   canvas through the shape transform, an Image section in the inspector. Found by streaming a
   120k-pixel picture to the simulator: an image flush against the bed edge made the job unrunnable
   because of the 2 mm lead-in, so absolute placements now shorten the lead-in to the room available.
+- **2026-10-14 — never lose work.** Autosave to a per-user recovery file (`file.autosave`), a
+  startup offer to recover it (`file.recover`: reopens as untitled and unsaved), prompts before New,
+  Open and closing discard changes (a save that does not complete keeps the question open), and a
+  title with an unsaved marker. Found by killing the app with `kill -9`: egui only repaints on
+  input, so an idle window never autosaved; a repaint is now scheduled while there are unsaved
+  changes (with a regression test).
