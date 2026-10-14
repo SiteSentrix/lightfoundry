@@ -61,6 +61,7 @@ fn file_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         app.request(PendingAction::Open);
     }
     recent_menu(app, ui);
+    template_menu(app, ui);
     let can_save = true;
     if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() {
         save(app, false);
@@ -97,6 +98,37 @@ fn file_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             app.say("G-code saved");
         }
         ui.close();
+    }
+}
+
+fn template_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    if app.templates_available() {
+        let templates = app.templates();
+        let mut chosen = None;
+        ui.menu_button("New from Template", |ui| {
+            if templates.is_empty() {
+                ui.weak("No templates yet");
+            }
+            for (name, path) in &templates {
+                if ui.button(name).clicked() {
+                    chosen = Some(path.clone());
+                    ui.close();
+                }
+            }
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut app.template_name).hint_text("Template name").desired_width(120.0));
+                if ui.add_enabled(!app.template_name.trim().is_empty(), egui::Button::new("Save current")).clicked() {
+                    let name = std::mem::take(&mut app.template_name);
+                    app.save_template(&name);
+                    ui.close();
+                }
+            });
+        });
+        if let Some(path) = chosen {
+            app.request(PendingAction::FromTemplate(path));
+            ui.close();
+        }
     }
 }
 

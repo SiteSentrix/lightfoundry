@@ -2039,3 +2039,74 @@ mod preset_library_tests {
         assert!(matches!(&h.app.status, Some((m, false)) if m.contains("empty")), "{:?}", h.app.status);
     }
 }
+
+mod template_tests {
+    use lightfoundry_device::Transport;
+
+    use super::*;
+    use crate::PendingAction;
+
+    struct Templates(std::path::PathBuf);
+
+    impl Platform for Templates {
+        fn pick_open(&self, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        fn pick_save(&self, _: &str, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        fn templates_dir(&self) -> Option<std::path::PathBuf> {
+            Some(self.0.clone())
+        }
+
+        fn serial_ports(&self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn open_serial(&self, _: &str) -> Result<Box<dyn Transport + Send>, String> {
+            Err("none".into())
+        }
+    }
+
+    fn harness(dir: &std::path::Path) -> Harness {
+        let mut h = Harness {
+            ctx: egui::Context::default(),
+            app: LightFoundryApp::new(Session::new(), Box::new(Templates(dir.to_path_buf()))),
+            time: 0.0,
+            modifiers: Modifiers::NONE,
+            sent_modifiers: Modifiers::NONE,
+        };
+        h.frame(vec![]);
+        h
+    }
+
+    #[test]
+    fn a_template_is_saved_listed_and_opens_as_a_new_untitled_project() {
+        let dir = temp_dir("templates").join("t");
+        let mut h = harness(&dir);
+        assert!(h.app.templates().is_empty(), "a missing folder is an empty list");
+        h.app.run("machine.set", json!({"bed_width": 123}));
+        h.app.run("layer.set", json!({"id": 0, "speed": 777}));
+        h.app.save_template("  My ../setup! ");
+        let list = h.app.templates();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].0, "My setup", "only plain characters survive in the name");
+        assert!(list[0].1.starts_with(&dir), "the file stays inside the templates folder");
+        assert!(h.app.session.dirty, "saving a template does not count as saving the project");
+
+        let mut other = harness(&dir);
+        other.app.request(PendingAction::FromTemplate(list[0].1.clone()));
+        assert_eq!(other.app.session.doc.machine.bed_width, 123.0);
+        assert_eq!(other.app.session.doc.layer(0).unwrap().speed, 777.0);
+        assert!(other.app.session.path.is_none() && other.app.session.dirty, "untitled, unsaved");
+        assert!(list[0].1.exists());
+        h.app.save_template("   ");
+        assert!(matches!(&h.app.status, Some((m, true)) if m.contains("name")));
+        for i in 0..3 {
+            h.app.save_template(&format!("t{i}"));
+        }
+        assert_eq!(h.app.templates().len(), 4);
+    }
+}

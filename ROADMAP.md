@@ -254,4 +254,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   so short segments cost realistically; used by `job.estimate` and the preview timeline.
 - **2026-10-14 — preview colours.** View > Preview colours: by layer (as before), by power, or by
   speed (blue to red; slow is hot), scaled to the ranges present in the job.
+- **2026-10-14 — project templates.** File > New from Template lists `.lightfoundry` files in the
+  per-user templates folder (`Platform::templates_dir`), opens one as a new untitled unsaved project
+  (`file.open` with `template: true`), and saves the current project there under a sanitised name
+  without touching its own saved state.
 

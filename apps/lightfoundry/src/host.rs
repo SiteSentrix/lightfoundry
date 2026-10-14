@@ -25,6 +25,10 @@ impl Platform for DesktopPlatform {
         Some(data_dir()?.join("LightFoundry").join("presets.json"))
     }
 
+    fn templates_dir(&self) -> Option<PathBuf> {
+        Some(data_dir()?.join("LightFoundry").join("templates"))
+    }
+
     fn recent_file(&self) -> Option<PathBuf> {
         Some(data_dir()?.join("LightFoundry").join("recent.json"))
     }
