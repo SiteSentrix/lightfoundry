@@ -3,7 +3,7 @@ use lightfoundry_doc::{Anchor, Dither, LayerMode, Origin, ShapeKind, StartFrom, 
 use serde_json::{Value, json};
 
 use crate::menus::format_duration;
-use crate::theme::{on_dark, parse_hex};
+
 use crate::{LightFoundryApp, Target, Tool};
 
 pub fn toolbar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
@@ -63,7 +63,7 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             for layer in row {
                 let (rect, resp) = ui.allocate_exact_size(egui::vec2(30.0, 24.0), egui::Sense::click());
-                let color = on_dark(parse_hex(&layer.color));
+                let color = app.tokens.layer_color(&layer.color);
                 let fill = if layer.output { color } else { color.gamma_multiply(0.25) };
                 ui.painter().rect_filled(rect, 3.0, fill);
                 if app.active_layer == layer.id {

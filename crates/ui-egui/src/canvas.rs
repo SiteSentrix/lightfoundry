@@ -4,7 +4,7 @@ use lightfoundry_geom::{Affine, Point, Rect};
 use serde_json::json;
 
 use crate::snap::{self, SnapSettings, SnapTargets};
-use crate::theme::{on_dark, parse_hex};
+
 use crate::view::View;
 use crate::{LightFoundryApp, Tool};
 use crate::{crop_ui, head_ui, nodes_ui, register_ui, timeline_ui};
@@ -463,7 +463,7 @@ fn draw_shapes(app: &mut LightFoundryApp, painter: &egui::Painter, view: &View, 
     let dim = app.show_preview;
     for item in &app.geometry.items {
         let selected = app.session.selection.contains(&item.id);
-        let base = app.session.doc.layer(item.layer).map_or(Color32::WHITE, |l| on_dark(parse_hex(&l.color)));
+        let base = app.session.doc.layer(item.layer).map_or(Color32::WHITE, |l| app.tokens.layer_color(&l.color));
         let color = if selected {
             app.tokens.selection
         } else if dim {
@@ -583,7 +583,7 @@ fn preview_stroke(app: &LightFoundryApp, seg: &crate::geometry::PreviewSegment, 
         }
         timeline_ui::PreviewColors::Layer => {}
     }
-    let base = app.session.doc.layer(seg.layer).map_or(Color32::WHITE, |l| on_dark(parse_hex(&l.color)));
+    let base = app.session.doc.layer(seg.layer).map_or(Color32::WHITE, |l| app.tokens.layer_color(&l.color));
     Stroke::new(1.0, base.gamma_multiply(0.4 + 0.6 * (seg.power / 100.0).clamp(0.0, 1.0)))
 }
 

@@ -134,7 +134,7 @@ pub fn bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         for l in app.preview.timeline.layers() {
             let Some(layer) = app.session.doc.layer(l.layer) else { continue };
-            let color = crate::theme::on_dark(crate::theme::parse_hex(&layer.color));
+            let color = app.tokens.layer_color(&layer.color);
             let (rect, _) = ui.allocate_exact_size(vec2(10.0, 10.0), egui::Sense::hover());
             ui.painter().rect_filled(rect, 2.0, color);
             let share = if total > 0.0 { l.seconds / total * 100.0 } else { 0.0 };

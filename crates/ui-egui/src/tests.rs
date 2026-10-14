@@ -2110,3 +2110,36 @@ mod template_tests {
         assert_eq!(h.app.templates().len(), 4);
     }
 }
+
+mod theme_tests {
+    use super::*;
+    use crate::theme::{ThemeChoice, Tokens};
+
+    #[test]
+    fn the_theme_choice_switches_egui_and_the_canvas_colours() {
+        let mut h = Harness::new();
+        for (choice, dark) in [(ThemeChoice::Light, false), (ThemeChoice::Dark, true), (ThemeChoice::Light, false)] {
+            h.app.theme = choice;
+            for _ in 0..3 {
+                h.frame(vec![]);
+            }
+            let expected = if dark { Tokens::DARK.workspace } else { Tokens::LIGHT.workspace };
+            assert_eq!(h.app.tokens.workspace, expected, "{choice:?}");
+            assert_eq!(h.ctx.global_style().visuals.dark_mode, dark);
+        }
+        assert_eq!(ThemeChoice::ALL.len(), 3);
+        h.app.theme = ThemeChoice::Auto;
+        h.frame(vec![]); // follows the system without panicking
+    }
+
+    #[test]
+    fn the_light_and_dark_palettes_are_different_and_every_token_is_visible_on_its_background() {
+        let luma = |c: egui::Color32| 0.299 * f32::from(c.r()) + 0.587 * f32::from(c.g()) + 0.114 * f32::from(c.b());
+        assert!(luma(Tokens::LIGHT.workspace) > luma(Tokens::DARK.workspace));
+        for t in [&Tokens::LIGHT, &Tokens::DARK] {
+            for fg in [t.selection, t.error, t.ok, t.origin, t.ruler_text] {
+                assert!((luma(fg) - luma(t.bed)).abs() > 40.0 || (luma(fg) - luma(t.ruler)).abs() > 40.0, "{fg:?}");
+            }
+        }
+    }
+}
