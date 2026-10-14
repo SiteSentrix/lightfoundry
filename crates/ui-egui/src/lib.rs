@@ -5,6 +5,7 @@ mod canvas;
 mod crop_ui;
 mod geometry;
 mod head_ui;
+pub(crate) mod i18n;
 mod job_position;
 mod menus;
 mod nodes_ui;
@@ -22,6 +23,7 @@ mod view;
 
 pub use platform::{NoPlatform, Platform, Upload};
 
+use crate::i18n::tr;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -138,6 +140,8 @@ pub struct LightFoundryApp {
     recent: recent::Recent,
     shortcuts: shortcuts::Shortcuts,
     shortcuts_open: bool,
+    /// The fonts must be rebuilt (a translation with its own font was loaded or removed).
+    fonts_dirty: bool,
     /// The action waiting for its new key combination.
     capturing: Option<shortcuts::Action>,
     shortcut_error: Option<String>,
@@ -223,7 +227,7 @@ impl LightFoundryApp {
         let interrupted = platform.job_position_file().and_then(|p| job_position::load(&p));
         let recent = platform.recent_file().map(|p| recent::Recent::load(&p)).unwrap_or_default();
         let shortcuts = platform.shortcuts_file().map(|p| shortcuts::Shortcuts::load(&p)).unwrap_or_default();
-        Self {
+        let mut app = Self {
             session,
             platform,
             tokens: Tokens::DARK,
@@ -284,6 +288,7 @@ impl LightFoundryApp {
             recent,
             shortcuts,
             shortcuts_open: false,
+            fonts_dirty: false,
             capturing: None,
             shortcut_error: None,
             crop_pct: [0.0; 4],
@@ -312,12 +317,15 @@ impl LightFoundryApp {
             recorded_path: None,
             allow_close: false,
             last_title: String::new(),
-        }
+        };
+        app.load_saved_translation();
+        app
     }
 
     /// Draws one frame. Called from the host's `eframe::App::ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.apply_theme(ui.ctx());
+        self.apply_translation_font(ui.ctx());
         self.poll_link(ui.ctx());
         self.autosave_tick(ui.ctx());
         self.watch_close_and_title(ui.ctx());
@@ -337,6 +345,80 @@ impl LightFoundryApp {
         }
         egui::CentralPanel::default().show(ui, |ui| canvas::show(self, ui));
         self.dialogs(ui.ctx());
+    }
+
+    /// Loads the saved translation, if there is one. A damaged file is reported and ignored.
+    fn load_saved_translation(&mut self) {
+        let Some(path) = self.platform.translation_file().filter(|p| p.exists()) else { return };
+        match i18n::load(&path) {
+            Ok(t) => {
+                i18n::set_active(Some(t));
+                self.fonts_dirty = true;
+            }
+            Err(e) => self.status = Some((format!("Could not use the saved translation: {e}"), true)),
+        }
+    }
+
+    /// Adds the translation's font (if it names one) behind egui's own, or restores the default fonts.
+    fn apply_translation_font(&mut self, ctx: &egui::Context) {
+        if !std::mem::take(&mut self.fonts_dirty) {
+            return;
+        }
+        let mut fonts = egui::FontDefinitions::default();
+        if let Some(path) = i18n::active_font() {
+            match i18n::read_font(&path) {
+                Ok(bytes) => {
+                    fonts.font_data.insert("translation".into(), std::sync::Arc::new(egui::FontData::from_owned(bytes)));
+                    for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+                        fonts.families.entry(family).or_default().push("translation".into());
+                    }
+                }
+                Err(e) => self.status = Some((e, true)),
+            }
+        }
+        ctx.set_fonts(fonts);
+    }
+
+    /// Asks for a translation file, keeps a copy as the saved translation, and starts using it.
+    pub(crate) fn choose_translation(&mut self) {
+        let Some(path) = self.pick_open("Choose a translation", &["json"]) else { return };
+        match i18n::load(&path) {
+            Ok(t) => {
+                if let Some(saved) = self.platform.translation_file() {
+                    if let Some(parent) = saved.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Err(e) = std::fs::copy(&path, &saved) {
+                        log::warn!("could not keep a copy of the translation at {}: {e}", saved.display());
+                    }
+                }
+                self.status = Some((format!("Using the translation {}", if t.name.is_empty() { "(unnamed)" } else { &t.name }), false));
+                i18n::set_active(Some(t));
+                self.fonts_dirty = true;
+            }
+            Err(e) => self.status = Some((e, true)),
+        }
+    }
+
+    /// Goes back to English and forgets the saved translation.
+    pub(crate) fn use_english(&mut self) {
+        i18n::set_active(None);
+        self.fonts_dirty = true;
+        if let Some(saved) = self.platform.translation_file()
+            && let Err(e) = std::fs::remove_file(&saved)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!("could not remove {}: {e}", saved.display());
+        }
+    }
+
+    /// Writes every string the interface has shown so far as a catalog to translate.
+    pub(crate) fn save_translation_template(&mut self) {
+        let Some(path) = self.pick_save("Save translation template", "translation-template.json", &["json"]) else { return };
+        self.status = Some(match std::fs::write(&path, i18n::template()) {
+            Ok(()) => (format!("Saved the translation template to {}", path.display()), false),
+            Err(e) => (format!("Could not save the template: {e}"), true),
+        });
     }
 
     /// Hands the chosen theme to egui and picks matching canvas colours.
@@ -583,14 +665,14 @@ impl LightFoundryApp {
         if self.pending_recovery.is_some() {
             let mut choice = None;
             egui::Modal::new(egui::Id::new("recovery")).show(ctx, |ui| {
-                ui.heading("Recover unsaved work?");
-                ui.label("LightFoundry found work from a previous session that was never saved.");
+                ui.heading(tr("Recover unsaved work?"));
+                ui.label(tr("LightFoundry found work from a previous session that was never saved."));
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button("Recover").clicked() {
+                    if ui.button(tr("Recover")).clicked() {
                         choice = Some(true);
                     }
-                    if ui.button("Discard").clicked() {
+                    if ui.button(tr("Discard")).clicked() {
                         choice = Some(false);
                     }
                 });
@@ -604,17 +686,17 @@ impl LightFoundryApp {
         let name = self.session.path.as_ref().and_then(|p| p.file_name()).map_or("Untitled".to_string(), |n| n.to_string_lossy().into_owned());
         let mut answer = None;
         egui::Modal::new(egui::Id::new("unsaved")).show(ctx, |ui| {
-            ui.heading("Unsaved changes");
+            ui.heading(tr("Unsaved changes"));
             ui.label(format!("Save changes to {name} first?"));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("Save").clicked() {
+                if ui.button(tr("Save")).clicked() {
                     answer = Some(Answer::Save);
                 }
-                if ui.button("Discard").clicked() {
+                if ui.button(tr("Discard")).clicked() {
                     answer = Some(Answer::Discard);
                 }
-                if ui.button("Cancel").clicked() {
+                if ui.button(tr("Cancel")).clicked() {
                     answer = Some(Answer::Cancel);
                 }
             });
@@ -999,13 +1081,13 @@ impl LightFoundryApp {
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| match &self.status {
             Some((text, true)) => {
-                ui.colored_label(self.tokens.error, text);
+                ui.colored_label(self.tokens.error, tr(text));
             }
             Some((text, false)) => {
-                ui.colored_label(self.tokens.ok, text);
+                ui.colored_label(self.tokens.ok, tr(text));
             }
             None => {
-                ui.label("Ready");
+                ui.label(tr("Ready"));
             }
         });
     }

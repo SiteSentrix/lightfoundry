@@ -309,3 +309,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   least squares (Schneider's method) through each traced outline, splitting where the fit is worst and
   keeping sharp bends as corners: a traced disc becomes four curves instead of dozens of nodes.
   Use `tolerance` of 1 or more so single-pixel steps are not read as corners. Gap 9 is closed.
+- **2026-10-14 — translations.** All fixed interface text (about 275 call sites: menus, panels,
+  tooltips, headings, combo boxes, the status bar) goes through `i18n::tr`, which looks the English
+  text up in a JSON catalog the person supplies (View > Language: load, save a template of every text
+  shown so far, back to English), optionally with a font for scripts egui's does not cover. Nothing
+  ships by the assets rule. See `docs/translations.md` for the format, limits and what is not yet covered.

@@ -1,6 +1,7 @@
 //! Rebindable keyboard shortcuts for the editing commands, kept in a small JSON file the platform
 //! provides. Navigation keys (arrows, Delete, Enter, Escape) are fixed.
 
+use crate::i18n::tr;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -247,7 +248,7 @@ pub(crate) fn window(app: &mut LightFoundryApp, ctx: &egui::Context) {
     egui::Window::new("Keyboard shortcuts").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
         egui::Grid::new("shortcut_grid").num_columns(2).show(ui, |ui| {
             for action in Action::ALL {
-                ui.label(action.label());
+                ui.label(tr(action.label()));
                 let waiting = app.capturing == Some(action);
                 let text = if waiting { "Press keys… (Esc cancels)".to_string() } else { app.shortcuts.text(action) };
                 if ui.button(text).clicked() {
@@ -260,7 +261,7 @@ pub(crate) fn window(app: &mut LightFoundryApp, ctx: &egui::Context) {
         if let Some(e) = &app.shortcut_error {
             ui.colored_label(app.tokens.error, e);
         }
-        if ui.button("Reset to defaults").clicked() {
+        if ui.button(tr("Reset to defaults")).clicked() {
             app.shortcuts.reset();
             app.capturing = None;
             app.shortcut_error = None;

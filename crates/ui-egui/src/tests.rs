@@ -92,6 +92,10 @@ impl Platform for RecoveryPlatform {
         Some(self.file.with_file_name("job-position.json"))
     }
 
+    fn translation_file(&self) -> Option<std::path::PathBuf> {
+        Some(self.file.with_file_name("translation.json"))
+    }
+
     fn clear_recovery(&self) {
         let _ = std::fs::remove_file(&self.file);
     }
@@ -123,6 +127,42 @@ fn harness_with(platform: RecoveryPlatform) -> Harness {
     h.frame(vec![]);
     h.frame(vec![]);
     h
+}
+
+mod translation_tests {
+    use super::*;
+    use crate::i18n;
+
+    #[test]
+    fn a_chosen_translation_is_kept_used_at_next_start_and_removed_by_going_back_to_english() {
+        let dir = temp_dir("translation");
+        let catalog = dir.join("de.json");
+        std::fs::write(&catalog, r#"{"name":"Testsprache","strings":{"i18n-ui-test-key":"Übersetzt"}}"#).unwrap();
+        let kept = dir.join("translation.json");
+        let platform = RecoveryPlatform { file: dir.join("recovery.lightfoundry"), open_answer: Some(catalog.clone()), recent: None };
+        let mut h = harness_with(platform);
+        h.app.choose_translation();
+        assert_eq!(i18n::tr("i18n-ui-test-key"), "Übersetzt");
+        assert_eq!(i18n::active_name().as_deref(), Some("Testsprache"));
+        assert!(kept.exists(), "a copy is kept for the next start");
+        h.frame(vec![]);
+        h.frame(vec![]); // the menus and panels draw with a translation active
+
+        let h2 = harness_with(RecoveryPlatform { file: dir.join("recovery.lightfoundry"), open_answer: None, recent: None });
+        assert_eq!(i18n::tr("i18n-ui-test-key"), "Übersetzt", "loaded at start");
+        drop(h2);
+
+        h.app.use_english();
+        assert_eq!(i18n::tr("i18n-ui-test-key"), "i18n-ui-test-key");
+        assert!(!kept.exists());
+        h.frame(vec![]);
+
+        // A damaged catalog is reported, not used.
+        std::fs::write(&catalog, "nope").unwrap();
+        h.app.choose_translation();
+        assert!(matches!(&h.app.status, Some((_, true))));
+        assert_eq!(i18n::active_name(), None);
+    }
 }
 
 mod job_position_tests {

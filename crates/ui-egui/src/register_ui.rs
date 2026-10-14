@@ -2,6 +2,7 @@
 //! spots really are (jog the laser onto them, or click them on a photo of the bed), and the design
 //! is moved and turned to fit.
 
+use crate::i18n::tr;
 use egui::{Align2, FontId, Stroke, vec2};
 use lightfoundry_geom::Point;
 use serde_json::json;
@@ -42,16 +43,16 @@ impl Marks {
 }
 
 pub fn section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
-    ui.collapsing("Align to marks (print and cut)", |ui| {
-        ui.weak("1. Mark two spots in the design. 2. Say where they really are: jog the laser onto each printed mark, or click it on a photo of the bed. 3. Align.");
+    ui.collapsing(tr("Align to marks (print and cut)"), |ui| {
+        ui.weak(tr("1. Mark two spots in the design. 2. Say where they really are: jog the laser onto each printed mark, or click it on a photo of the bed. 3. Align."));
         for actual in [false, true] {
-            ui.label(egui::RichText::new(if actual { "Where they really are" } else { "Marks in the design" }).strong());
+            ui.label(egui::RichText::new(if actual { tr("Where they really are") } else { tr("Marks in the design") }).strong());
             for index in 0..2 {
                 mark_row(app, ui, actual, index);
             }
             if !actual {
                 let two = app.session.selection.len() == 2;
-                if ui.add_enabled(two, egui::Button::new("Use the centres of the 2 selected shapes")).clicked() {
+                if ui.add_enabled(two, egui::Button::new(tr("Use the centres of the 2 selected shapes"))).clicked() {
                     let centres: Vec<Point> = app.session.selection.iter().filter_map(|id| app.session.doc.bounds_of(&[*id])).map(|b| b.center()).collect();
                     if let [a, b] = centres[..] {
                         app.marks.design = [Some(a), Some(b)];
@@ -59,9 +60,9 @@ pub fn section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 }
             }
         }
-        ui.checkbox(&mut app.marks.free_scale, "Also correct the size (printer scaling)");
+        ui.checkbox(&mut app.marks.free_scale, tr("Also correct the size (printer scaling)"));
         ui.horizontal(|ui| {
-            if ui.add_enabled(app.marks.complete().is_some(), egui::Button::new("Align design to marks")).clicked()
+            if ui.add_enabled(app.marks.complete().is_some(), egui::Button::new(tr("Align design to marks"))).clicked()
                 && let Some((design, actual)) = app.marks.complete()
             {
                 let params = json!({
@@ -77,7 +78,7 @@ pub fn section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                     app.marks = Marks { free_scale: app.marks.free_scale, ..Marks::default() };
                 }
             }
-            if ui.button("Clear marks").clicked() {
+            if ui.button(tr("Clear marks")).clicked() {
                 app.marks = Marks { free_scale: app.marks.free_scale, ..Marks::default() };
             }
         });
@@ -96,8 +97,8 @@ fn mark_row(app: &mut LightFoundryApp, ui: &mut egui::Ui, actual: bool, index: u
         if actual {
             let head = crate::head_ui::head_world(app);
             if ui
-                .add_enabled(head.is_some(), egui::Button::new("From laser"))
-                .on_hover_text("Use where the laser head is now (needs a connection and absolute coordinates)")
+                .add_enabled(head.is_some(), egui::Button::new(tr("From laser")))
+                .on_hover_text(tr("Use where the laser head is now (needs a connection and absolute coordinates)"))
                 .clicked()
                 && let Some(p) = head
             {

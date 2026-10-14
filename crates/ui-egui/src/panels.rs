@@ -1,3 +1,4 @@
+use crate::i18n::tr;
 use lightfoundry_device::{JobState, Link};
 use lightfoundry_doc::{Anchor, Dither, LayerMode, Origin, ShapeKind, StartFrom, TextAlign};
 use serde_json::{Value, json};
@@ -29,12 +30,12 @@ pub fn toolbar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     }
     if app.tool == Tool::Rectangle {
         ui.add_space(6.0);
-        ui.label("Corner radius");
+        ui.label(tr("Corner radius"));
         ui.add(egui::DragValue::new(&mut app.corner_radius).range(0.0..=500.0).speed(0.1).suffix(" mm"));
     }
     if app.tool == Tool::Polygon {
         ui.add_space(6.0);
-        ui.label("Sides");
+        ui.label(tr("Sides"));
         ui.add(egui::DragValue::new(&mut app.polygon_sides).range(3..=100));
     }
 }
@@ -84,22 +85,22 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     ui.add_space(4.0);
     layer_header(app, ui, &layer);
     let mut output = layer.output;
-    if ui.checkbox(&mut output, "Output").changed() {
+    if ui.checkbox(&mut output, tr("Output")).changed() {
         app.run("layer.set", json!({ "id": layer.id, "output": output }));
     }
     egui::Grid::new("layer_settings").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-        ui.label("Mode");
+        ui.label(tr("Mode"));
         let mut mode = layer.mode;
         egui::ComboBox::from_id_salt("mode")
             .selected_text(match mode {
-                LayerMode::Line => "Line",
-                LayerMode::Fill => "Fill",
-                LayerMode::FillAndLine => "Fill + Line",
+                LayerMode::Line => tr("Line"),
+                LayerMode::Fill => tr("Fill"),
+                LayerMode::FillAndLine => tr("Fill + Line"),
             })
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut mode, LayerMode::Line, "Line");
-                ui.selectable_value(&mut mode, LayerMode::Fill, "Fill");
-                ui.selectable_value(&mut mode, LayerMode::FillAndLine, "Fill + Line");
+                ui.selectable_value(&mut mode, LayerMode::Line, tr("Line"));
+                ui.selectable_value(&mut mode, LayerMode::Fill, tr("Fill"));
+                ui.selectable_value(&mut mode, LayerMode::FillAndLine, tr("Fill + Line"));
             });
         if mode != layer.mode {
             app.run("layer.set", json!({ "id": layer.id, "mode": mode }));
@@ -123,14 +124,14 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ("Dash cut", "perf_cut", layer.perf_cut, 0.0..=1000.0, " mm"),
             ("Dash gap", "perf_gap", layer.perf_gap, 0.0..=1000.0, " mm"),
         ] {
-            ui.label(label);
+            ui.label(tr(label));
             if let Some(v) = number(ui, value, range, suffix) {
                 app.run("layer.set", json!({ "id": layer.id, key: v }));
             }
             ui.end_row();
         }
 
-        ui.label("Tabs");
+        ui.label(tr("Tabs"));
         let mut tabs = layer.tab_count;
         let r = ui.add(egui::DragValue::new(&mut tabs).range(0..=1000));
         if committed(&r) && tabs != layer.tab_count {
@@ -138,7 +139,7 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         }
         ui.end_row();
 
-        ui.label("Passes");
+        ui.label(tr("Passes"));
         let mut passes = layer.passes;
         let r = ui.add(egui::DragValue::new(&mut passes).range(1..=1000));
         if committed(&r) && passes != layer.passes {
@@ -146,11 +147,11 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         }
         ui.end_row();
 
-        ui.label("Image");
+        ui.label(tr("Image"));
         let mut dither = layer.dither;
-        egui::ComboBox::from_id_salt("dither").selected_text(dither.label()).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("dither").selected_text(tr(dither.label())).show_ui(ui, |ui| {
             for d in Dither::ALL {
-                ui.selectable_value(&mut dither, d, d.label());
+                ui.selectable_value(&mut dither, d, tr(d.label()));
             }
         });
         if dither != layer.dither {
@@ -159,15 +160,15 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         ui.end_row();
     });
     let mut bidi = layer.bidirectional;
-    if ui.checkbox(&mut bidi, "Bi-directional fill").changed() {
+    if ui.checkbox(&mut bidi, tr("Bi-directional fill")).changed() {
         app.run("layer.set", json!({ "id": layer.id, "bidirectional": bidi }));
     }
     let mut cross = layer.crosshatch;
-    if ui.checkbox(&mut cross, "Cross-hatch fill").on_hover_text("Fill a second time at right angles").changed() {
+    if ui.checkbox(&mut cross, tr("Cross-hatch fill")).on_hover_text(tr("Fill a second time at right angles")).changed() {
         app.run("layer.set", json!({ "id": layer.id, "crosshatch": cross }));
     }
     let mut air = layer.air_assist;
-    if ui.checkbox(&mut air, "Air assist").changed() {
+    if ui.checkbox(&mut air, tr("Air assist")).changed() {
         app.run("layer.set", json!({ "id": layer.id, "air_assist": air }));
     }
     presets_section(app, ui, layer.id);
@@ -175,41 +176,41 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 
 /// Named cut settings kept in the project: apply one to this layer, or save this layer's as one.
 fn presets_section(app: &mut LightFoundryApp, ui: &mut egui::Ui, layer: u32) {
-    ui.collapsing("Presets", |ui| {
+    ui.collapsing(tr("Presets"), |ui| {
         let names: Vec<String> = app.session.doc.presets.iter().map(|p| p.name.clone()).collect();
         if names.is_empty() {
-            ui.weak("No presets yet. Set up this layer, name it below and save.");
+            ui.weak(tr("No presets yet. Set up this layer, name it below and save."));
         }
         if ui
-            .small_button("Add starter presets")
-            .on_hover_text("Generic first guesses, by operation. Always run a material test grid before trusting them.")
+            .small_button(tr("Add starter presets"))
+            .on_hover_text(tr("Generic first guesses, by operation. Always run a material test grid before trusting them."))
             .clicked()
         {
             app.run("preset.add_starters", json!({}));
         }
         for name in &names {
             ui.horizontal(|ui| {
-                if ui.button(name).on_hover_text("Apply to this layer").clicked() {
+                if ui.button(name).on_hover_text(tr("Apply to this layer")).clicked() {
                     app.run("preset.apply", json!({ "name": name, "layer": layer }));
                 }
-                if ui.small_button("✕").on_hover_text("Delete this preset").clicked() {
+                if ui.small_button("✕").on_hover_text(tr("Delete this preset")).clicked() {
                     app.run("preset.delete", json!({ "name": name }));
                 }
             });
         }
         if let Some(file) = app.platform_preset_library() {
             ui.horizontal(|ui| {
-                if ui.small_button("Save all to my library").on_hover_text("Keep these presets for other projects").clicked() {
+                if ui.small_button(tr("Save all to my library")).on_hover_text(tr("Keep these presets for other projects")).clicked() {
                     app.save_preset_library(&file);
                 }
-                if ui.small_button("Add from my library").clicked() {
+                if ui.small_button(tr("Add from my library")).clicked() {
                     app.load_preset_library(&file);
                 }
             });
         }
         ui.horizontal(|ui| {
             ui.add(egui::TextEdit::singleline(&mut app.preset_name).hint_text("Preset name").desired_width(120.0));
-            if ui.add_enabled(!app.preset_name.trim().is_empty(), egui::Button::new("Save")).clicked()
+            if ui.add_enabled(!app.preset_name.trim().is_empty(), egui::Button::new(tr("Save"))).clicked()
                 && app.run("preset.save", json!({ "name": app.preset_name, "layer": layer })).is_some()
             {
                 app.preset_name.clear();
@@ -221,10 +222,10 @@ fn presets_section(app: &mut LightFoundryApp, ui: &mut egui::Ui, layer: u32) {
 /// Rectangles and ellipses from typed positions and sizes, for when dragging is not precise enough.
 fn create_by_numbers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     ui.separator();
-    ui.label(egui::RichText::new("Create by numbers").strong());
+    ui.label(egui::RichText::new(tr("Create by numbers")).strong());
     egui::Grid::new("create_numbers").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         for (label, slot, min) in [("X", 0, -1e6), ("Y", 1, -1e6), ("Width", 2, 0.01), ("Height", 3, 0.01)] {
-            ui.label(label);
+            ui.label(tr(label));
             if let Some(v) = app.new_shape.get_mut(slot) {
                 ui.add(egui::DragValue::new(v).range(min..=1e5).speed(0.5).suffix(" mm").max_decimals(3));
             }
@@ -234,13 +235,13 @@ fn create_by_numbers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let [x, y, w, h] = app.new_shape;
     let layer = app.active_layer;
     ui.horizontal(|ui| {
-        if ui.button("Rectangle").clicked() {
+        if ui.button(tr("Rectangle")).clicked() {
             app.run("shape.rectangle", json!({ "x": x, "y": y, "width": w, "height": h, "layer": layer }));
         }
-        if ui.button("Ellipse").clicked() {
+        if ui.button(tr("Ellipse")).clicked() {
             app.run("shape.ellipse", json!({ "cx": x + w / 2.0, "cy": y + h / 2.0, "rx": w / 2.0, "ry": h / 2.0, "layer": layer }));
         }
-        if ui.button("Star").on_hover_text("Five points, fitted to the width and height boxes").clicked() {
+        if ui.button(tr("Star")).on_hover_text(tr("Five points, fitted to the width and height boxes")).clicked() {
             let r = w.min(h) / 2.0;
             app.run(
                 "shape.star",
@@ -253,41 +254,41 @@ fn create_by_numbers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 fn properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let sel = app.session.selection.clone();
     let Some(b) = app.session.doc.bounds_of(&sel) else {
-        ui.weak("Nothing selected");
+        ui.weak(tr("Nothing selected"));
         create_by_numbers(app, ui);
         return;
     };
     ui.label(format!("{} object{}", sel.len(), if sel.len() == 1 { "" } else { "s" }));
     egui::Grid::new("props").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-        ui.label("X");
+        ui.label(tr("X"));
         if let Some(x) = number(ui, b.x0, -1e6..=1e6, " mm") {
             app.run("edit.move_to", json!({ "x": x, "y": b.y0 }));
         }
         ui.end_row();
-        ui.label("Y");
+        ui.label(tr("Y"));
         if let Some(y) = number(ui, b.y0, -1e6..=1e6, " mm") {
             app.run("edit.move_to", json!({ "x": b.x0, "y": y }));
         }
         ui.end_row();
-        ui.label("Width");
+        ui.label(tr("Width"));
         if let Some(w) = number(ui, b.width(), 0.01..=1e5, " mm") {
             app.run("edit.resize", json!({ "width": w }));
         }
         ui.end_row();
-        ui.label("Height");
+        ui.label(tr("Height"));
         if let Some(h) = number(ui, b.height(), 0.01..=1e5, " mm") {
             app.run("edit.resize", json!({ "height": h }));
         }
         ui.end_row();
     });
     ui.horizontal(|ui| {
-        if ui.button("Rotate 90°").clicked() {
+        if ui.button(tr("Rotate 90°")).clicked() {
             app.run("edit.rotate", json!({ "degrees": 90 }));
         }
-        if ui.button("Flip H").clicked() {
+        if ui.button(tr("Flip H")).clicked() {
             app.run("edit.flip", json!({ "axis": "horizontal" }));
         }
-        if ui.button("Flip V").clicked() {
+        if ui.button(tr("Flip V")).clicked() {
             app.run("edit.flip", json!({ "axis": "vertical" }));
         }
     });
@@ -298,45 +299,45 @@ fn properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 
 fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let m = app.session.doc.machine.clone();
-    ui.collapsing("Device", |ui| {
+    ui.collapsing(tr("Device"), |ui| {
         egui::Grid::new("device").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-            ui.label("Bed width");
+            ui.label(tr("Bed width"));
             if let Some(v) = number(ui, m.bed_width, 1.0..=100_000.0, " mm") {
                 app.run("machine.set", json!({ "bed_width": v }));
                 app.view = None;
             }
             ui.end_row();
-            ui.label("Bed height");
+            ui.label(tr("Bed height"));
             if let Some(v) = number(ui, m.bed_height, 1.0..=100_000.0, " mm") {
                 app.run("machine.set", json!({ "bed_height": v }));
                 app.view = None;
             }
             ui.end_row();
-            ui.label("Origin");
+            ui.label(tr("Origin"));
             let mut origin = m.origin;
-            egui::ComboBox::from_id_salt("origin").selected_text(if origin == Origin::BottomLeft { "Bottom-left" } else { "Top-left" }).show_ui(
+            egui::ComboBox::from_id_salt("origin").selected_text(if origin == Origin::BottomLeft { tr("Bottom-left") } else { tr("Top-left") }).show_ui(
                 ui,
                 |ui| {
-                    ui.selectable_value(&mut origin, Origin::BottomLeft, "Bottom-left");
-                    ui.selectable_value(&mut origin, Origin::TopLeft, "Top-left");
+                    ui.selectable_value(&mut origin, Origin::BottomLeft, tr("Bottom-left"));
+                    ui.selectable_value(&mut origin, Origin::TopLeft, tr("Top-left"));
                 },
             );
             if origin != m.origin {
                 app.run("machine.set", json!({ "origin": origin }));
             }
             ui.end_row();
-            ui.label("Acceleration");
+            ui.label(tr("Acceleration"));
             if let Some(v) = number(ui, m.acceleration, 0.0..=100_000.0, " mm/s²") {
                 app.run("machine.set", json!({ "acceleration": v }));
             }
             ui.end_row();
-            ui.label("Overscan");
+            ui.label(tr("Overscan"));
             let mut by_speed = m.overscan_by_speed;
-            if ui.checkbox(&mut by_speed, "from speed").on_hover_text("Run-up and run-out sized to the layer's speed and the acceleration above").changed() {
+            if ui.checkbox(&mut by_speed, tr("from speed")).on_hover_text(tr("Run-up and run-out sized to the layer's speed and the acceleration above")).changed() {
                 app.run("machine.set", json!({ "overscan_by_speed": by_speed }));
             }
             ui.end_row();
-            ui.label("Max S ($30)");
+            ui.label(tr("Max S ($30)"));
             let mut max_s = m.max_s;
             if committed(&ui.add(egui::DragValue::new(&mut max_s).range(1..=100_000))) && max_s != m.max_s {
                 app.run("machine.set", json!({ "max_s": max_s }));
@@ -345,10 +346,10 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         });
         let mut dialect = m.dialect;
         ui.horizontal(|ui| {
-            ui.label("G-code");
-            egui::ComboBox::from_id_salt("dialect").selected_text(dialect.label()).show_ui(ui, |ui| {
+            ui.label(tr("G-code"));
+            egui::ComboBox::from_id_salt("dialect").selected_text(tr(dialect.label())).show_ui(ui, |ui| {
                 for d in lightfoundry_doc::Dialect::ALL {
-                    ui.selectable_value(&mut dialect, d, d.label());
+                    ui.selectable_value(&mut dialect, d, tr(d.label()));
                 }
             });
         });
@@ -356,17 +357,18 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             app.run("machine.set", json!({ "dialect": dialect }));
         }
         if dialect != lightfoundry_doc::Dialect::Grbl {
-            ui.weak("Written from the firmware's public documentation and untested on a machine. Use Frame at 0% power first. The controller-link features ($$, jog) are GRBL only.");
+            ui.weak(tr("Written from the firmware's public documentation and untested on a machine. Use Frame at 0% power first. The controller-link features ($$, jog) are GRBL only."));
         }
         rotary_section(app, ui, &m);
         let mut dynamic = m.dynamic_power;
-        if ui.checkbox(&mut dynamic, "Dynamic power (M4)").changed() {
+        if ui.checkbox(&mut dynamic, tr("Dynamic power (M4)")).changed() {
             app.run("machine.set", json!({ "dynamic_power": dynamic }));
         }
     });
 
     let mut only = app.session.job_selection_only;
-    if ui.checkbox(&mut only, "Cut selected shapes only").on_hover_text("Generate, estimate, frame and preview just the selection").changed() {
+    if ui.checkbox(&mut only, tr("Cut selected shapes only")).on_hover_text(tr("Generate, estimate, frame and preview just the selection")).changed()
+    {
         app.run("job.set_scope", json!({ "selection_only": only }));
     }
     job_origin(app, ui);
@@ -383,7 +385,7 @@ fn laser(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     }
     interrupted_job(app, ui);
     if let Some(gcode) = app.session.last_gcode.clone() {
-        ui.collapsing("G-code", |ui| {
+        ui.collapsing(tr("G-code"), |ui| {
             let lines = gcode.lines().count();
             ui.weak(format!("{lines} lines"));
             resume_controls(app, ui, &gcode, lines);
@@ -429,7 +431,7 @@ pub(crate) fn machine_delta(origin: Origin, dx: f64, dy: f64) -> (f64, f64) {
 
 fn cut_order(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let o = app.session.doc.optimize;
-    ui.collapsing("Cut order", |ui| {
+    ui.collapsing(tr("Cut order"), |ui| {
         for (key, label, tip, on) in [
             ("inner_first", "Inner shapes first", "Cut holes and nested shapes before the outlines around them", o.inner_first),
             ("reduce_travel", "Reduce travel", "Go to the nearest outline next instead of following the drawing order", o.reduce_travel),
@@ -437,13 +439,13 @@ fn cut_order(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ("by_group", "Finish each group first", "Cut one group of shapes completely before starting the next", o.by_group),
         ] {
             let mut v = on;
-            if ui.checkbox(&mut v, label).on_hover_text(tip).changed() {
+            if ui.checkbox(&mut v, tr(label)).on_hover_text(tr(tip)).changed() {
                 app.run("job.set_optimize", json!({ key: v }));
             }
         }
         let start = o.start;
         ui.horizontal(|ui| {
-            ui.label("Start near");
+            ui.label(tr("Start near"));
             let mut xy = start.unwrap_or([0.0, 0.0]);
             let mut changed = false;
             for v in &mut xy {
@@ -452,7 +454,7 @@ fn cut_order(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             if changed {
                 app.run("job.set_optimize", json!({ "start": xy }));
             }
-            if start.is_some() && ui.small_button("Origin").on_hover_text("Back to the bed's origin").clicked() {
+            if start.is_some() && ui.small_button(tr("Origin")).on_hover_text(tr("Back to the bed's origin")).clicked() {
                 app.run("job.set_optimize", json!({ "default_start": true }));
             }
         });
@@ -462,8 +464,8 @@ fn cut_order(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 fn rotary_section(app: &mut LightFoundryApp, ui: &mut egui::Ui, m: &lightfoundry_doc::Machine) {
     let mut on = m.rotary.enabled;
     if ui
-        .checkbox(&mut on, "Rotary attachment")
-        .on_hover_text("Y turns the workpiece: Y distances are scaled by reference / object diameter")
+        .checkbox(&mut on, tr("Rotary attachment"))
+        .on_hover_text(tr("Y turns the workpiece: Y distances are scaled by reference / object diameter"))
         .changed()
     {
         app.run("machine.set", json!({ "rotary_enabled": on }));
@@ -472,18 +474,18 @@ fn rotary_section(app: &mut LightFoundryApp, ui: &mut egui::Ui, m: &lightfoundry
         return;
     }
     egui::Grid::new("rotary").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-        ui.label("Roller / chuck diameter");
+        ui.label(tr("Roller / chuck diameter"));
         if let Some(v) = number(ui, m.rotary.reference_diameter, 1.0..=10_000.0, " mm") {
             app.run("machine.set", json!({ "rotary_reference_diameter": v }));
         }
         ui.end_row();
-        ui.label("Object diameter");
+        ui.label(tr("Object diameter"));
         if let Some(v) = number(ui, m.rotary.object_diameter, 1.0..=10_000.0, " mm") {
             app.run("machine.set", json!({ "rotary_object_diameter": v }));
         }
         ui.end_row();
     });
-    if ui.button("Set bed height to the circumference").on_hover_text("The design's Y range becomes one turn of the object").clicked() {
+    if ui.button(tr("Set bed height to the circumference")).on_hover_text(tr("The design's Y range becomes one turn of the object")).clicked() {
         let c = m.rotary.circumference();
         app.run("machine.set", json!({ "bed_height": c }));
         app.view = None;
@@ -493,18 +495,18 @@ fn rotary_section(app: &mut LightFoundryApp, ui: &mut egui::Ui, m: &lightfoundry
 fn job_origin(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let o = app.session.doc.job_origin;
     ui.horizontal(|ui| {
-        ui.label("Start from");
+        ui.label(tr("Start from"));
         let mut start_from = o.start_from;
         egui::ComboBox::from_id_salt("start_from")
             .selected_text(match start_from {
-                StartFrom::Absolute => "Absolute coordinates",
-                StartFrom::UserOrigin => "User origin",
-                StartFrom::CurrentPosition => "Current position",
+                StartFrom::Absolute => tr("Absolute coordinates"),
+                StartFrom::UserOrigin => tr("User origin"),
+                StartFrom::CurrentPosition => tr("Current position"),
             })
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut start_from, StartFrom::Absolute, "Absolute coordinates");
-                ui.selectable_value(&mut start_from, StartFrom::UserOrigin, "User origin");
-                ui.selectable_value(&mut start_from, StartFrom::CurrentPosition, "Current position");
+                ui.selectable_value(&mut start_from, StartFrom::Absolute, tr("Absolute coordinates"));
+                ui.selectable_value(&mut start_from, StartFrom::UserOrigin, tr("User origin"));
+                ui.selectable_value(&mut start_from, StartFrom::CurrentPosition, tr("Current position"));
             });
         if start_from != o.start_from {
             app.run("job.set_origin", json!({ "start_from": start_from }));
@@ -514,11 +516,11 @@ fn job_origin(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         return;
     }
     ui.horizontal(|ui| {
-        ui.label("Job origin");
+        ui.label(tr("Job origin"));
         egui::Grid::new("anchor_grid").spacing([2.0, 2.0]).show(ui, |ui| {
             for row in Anchor::ALL.chunks(3) {
                 for a in row {
-                    if anchor_button(ui, o.anchor == *a, a.label()).clicked() {
+                    if anchor_button(ui, o.anchor == *a, &tr(a.label())).clicked() {
                         app.run("job.set_origin", json!({ "anchor": a }));
                     }
                 }
@@ -527,8 +529,8 @@ fn job_origin(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         });
     });
     ui.weak(match o.start_from {
-        StartFrom::UserOrigin => "Jog to the spot, then Set origin; that spot is the job origin.",
-        _ => "The head's position when the job starts becomes the job origin.",
+        StartFrom::UserOrigin => tr("Jog to the spot, then Set origin; that spot is the job origin."),
+        _ => tr("The head's position when the job starts becomes the job origin."),
     });
 }
 
@@ -540,18 +542,18 @@ fn interrupted_job(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         let same = app.session.last_gcode.as_deref().is_some_and(|g| crate::job_position::fingerprint(g) == pos.hash);
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(same, egui::Button::new("Use this line"))
-                .on_hover_text("Sets Run from line below; set the origin the way the first run had it, then Start here")
+                .add_enabled(same, egui::Button::new(tr("Use this line")))
+                .on_hover_text(tr("Sets Run from line below; set the origin the way the first run had it, then Start here"))
                 .clicked()
             {
                 app.resume_line = pos.line;
             }
-            if ui.button("Forget").clicked() {
+            if ui.button(tr("Forget")).clicked() {
                 app.forget_interrupted();
             }
         });
         if !same {
-            ui.weak("Open the same design and generate its G-code to use this position.");
+            ui.weak(tr("Open the same design and generate its G-code to use this position."));
         }
     });
 }
@@ -560,12 +562,12 @@ fn interrupted_job(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 fn resume_controls(app: &mut LightFoundryApp, ui: &mut egui::Ui, gcode: &str, lines: usize) {
     app.resume_line = app.resume_line.clamp(1, lines.max(1));
     ui.horizontal(|ui| {
-        ui.label("Run from line");
+        ui.label(tr("Run from line"));
         ui.add(egui::DragValue::new(&mut app.resume_line).range(1..=lines.max(1)).speed(1.0));
         let enabled = app.link.is_some() && !app.job_active() && app.resume_line > 1;
         if ui
-            .add_enabled(enabled, egui::Button::new("Start here"))
-            .on_hover_text("Moves the laser to where it would be at that line with the beam off, then carries on. The origin must already be set the way the first run had it.")
+            .add_enabled(enabled, egui::Button::new(tr("Start here")))
+            .on_hover_text(tr("Moves the laser to where it would be at that line with the beam off, then carries on. The origin must already be set the way the first run had it."))
             .clicked()
             && let Some(v) = app.run("job.resume", json!({ "line": app.resume_line, "include": true }))
             && let Some(text) = v["gcode"].as_str()
@@ -580,38 +582,39 @@ fn resume_controls(app: &mut LightFoundryApp, ui: &mut egui::Ui, gcode: &str, li
 
 fn connection(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     if !app.platform.machine_available() {
-        ui.weak("Machine connections are not available in this build; generate G-code and run it with the desktop app or another sender.");
+        ui.weak(tr("Machine connections are not available in this build; generate G-code and run it with the desktop app or another sender."));
         return;
     }
     let connected = app.link.is_some();
     ui.horizontal(|ui| {
-        ui.label("Machine");
+        ui.label(tr("Machine"));
         let current = match &app.target {
             Target::Simulator => "Simulator".to_string(),
             Target::Serial(p) => p.clone(),
         };
         ui.add_enabled_ui(!connected, |ui| {
             egui::ComboBox::from_id_salt("target").selected_text(current).show_ui(ui, |ui| {
-                ui.selectable_value(&mut app.target, Target::Simulator, "Simulator");
+                ui.selectable_value(&mut app.target, Target::Simulator, tr("Simulator"));
                 for p in app.ports.clone() {
                     ui.selectable_value(&mut app.target, Target::Serial(p.clone()), p);
                 }
             });
-            if ui.small_button("↻").on_hover_text("Rescan serial ports").clicked() {
+            if ui.small_button("↻").on_hover_text(tr("Rescan serial ports")).clicked() {
                 app.ports = app.platform.serial_ports();
             }
         });
         if connected {
-            if ui.button("Disconnect").clicked() {
+            if ui.button(tr("Disconnect")).clicked() {
                 app.disconnect();
             }
-        } else if ui.button("Connect").clicked() {
+        } else if ui.button(tr("Connect")).clicked() {
             app.connect();
         }
     });
-    ui.checkbox(&mut app.auto_reconnect, "Reconnect automatically").on_hover_text("Retry a lost USB connection; a job is never resumed by itself");
+    ui.checkbox(&mut app.auto_reconnect, tr("Reconnect automatically"))
+        .on_hover_text(tr("Retry a lost USB connection; a job is never resumed by itself"));
     if app.reconnect.is_some() {
-        ui.colored_label(app.tokens.error, "Connection lost, reconnecting…");
+        ui.colored_label(app.tokens.error, tr("Connection lost, reconnecting…"));
     }
     if let Some(s) = &app.snap {
         let state = s.status.as_ref().map_or("…".to_string(), |st| format!("{:?}", st.state));
@@ -625,16 +628,16 @@ fn job_controls(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let active = app.job_active();
     let paused = app.snap.as_ref().is_some_and(|s| s.job == JobState::Paused);
     ui.horizontal(|ui| {
-        if ui.button("Generate").clicked() {
+        if ui.button(tr("Generate")).clicked() {
             generate(app);
         }
-        if ui.add_enabled(connected && !active, egui::Button::new("Frame")).clicked()
+        if ui.add_enabled(connected && !active, egui::Button::new(tr("Frame"))).clicked()
             && let Some(v) = app.run("job.frame", json!({ "power": app.frame_power }))
             && let Some(g) = v["gcode"].as_str()
         {
             app.start_job(g.to_string());
         }
-        if ui.add_enabled(connected && !active, egui::Button::new("Start")).clicked()
+        if ui.add_enabled(connected && !active, egui::Button::new(tr("Start"))).clicked()
             && let Some(v) = app.run("job.gcode", json!({ "include": true }))
             && let Some(g) = v["gcode"].as_str()
         {
@@ -643,16 +646,16 @@ fn job_controls(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     });
     ui.horizontal(|ui| {
         if paused {
-            if ui.button("Resume").clicked() {
+            if ui.button(tr("Resume")).clicked() {
                 app.link_do(Link::resume);
             }
-        } else if ui.add_enabled(active, egui::Button::new("Pause")).clicked() {
+        } else if ui.add_enabled(active, egui::Button::new(tr("Pause"))).clicked() {
             app.link_do(Link::pause);
         }
-        if ui.add_enabled(connected, egui::Button::new("Stop")).on_hover_text("Soft reset: stops motion and turns the laser off").clicked() {
+        if ui.add_enabled(connected, egui::Button::new(tr("Stop"))).on_hover_text(tr("Soft reset: stops motion and turns the laser off")).clicked() {
             app.link_do(Link::stop);
         }
-        ui.label("Frame power");
+        ui.label(tr("Frame power"));
         ui.add(egui::DragValue::new(&mut app.frame_power).range(0.0..=100.0).suffix(" %"));
     });
     if let Some(p) = app.snap.as_ref().and_then(|s| s.progress)
@@ -668,17 +671,17 @@ fn jog_pad(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let origin = app.session.doc.machine.origin;
     ui.add_enabled_ui(enabled, |ui| {
         ui.horizontal(|ui| {
-            ui.label("Step");
+            ui.label(tr("Step"));
             egui::ComboBox::from_id_salt("jog_step").selected_text(format!("{} mm", app.jog_step)).show_ui(ui, |ui| {
                 for s in [0.1, 1.0, 10.0, 50.0] {
                     ui.selectable_value(&mut app.jog_step, s, format!("{s} mm"));
                 }
             });
-            ui.label("Speed");
+            ui.label(tr("Speed"));
             ui.add(egui::DragValue::new(&mut app.jog_feed).range(10.0..=30_000.0).suffix(" mm/min"));
         });
         let mut here = app.move_head_mode;
-        if ui.checkbox(&mut here, "Click the canvas to move the laser there").changed() {
+        if ui.checkbox(&mut here, tr("Click the canvas to move the laser there")).changed() {
             app.move_head_mode = here;
         }
         let step = app.jog_step;
@@ -705,16 +708,16 @@ fn jog_pad(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             }
         });
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Home").on_hover_text("Run the homing cycle ($H)").clicked() {
+            if ui.button(tr("Home")).on_hover_text(tr("Run the homing cycle ($H)")).clicked() {
                 app.link_do(Link::home);
             }
-            if ui.button("Unlock").on_hover_text("Clear an alarm ($X)").clicked() {
+            if ui.button(tr("Unlock")).on_hover_text(tr("Clear an alarm ($X)")).clicked() {
                 app.link_do(Link::unlock);
             }
-            if ui.button("Set origin here").on_hover_text("Make the head's position the work origin (G92)").clicked() {
+            if ui.button(tr("Set origin here")).on_hover_text(tr("Make the head's position the work origin (G92)")).clicked() {
                 app.link_do(Link::set_zero);
             }
-            if ui.button("Go to origin").clicked() {
+            if ui.button(tr("Go to origin")).clicked() {
                 app.link_do(Link::go_to_zero);
             }
         });
@@ -722,7 +725,7 @@ fn jog_pad(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 }
 
 fn console(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
-    ui.collapsing("Console", |ui| {
+    ui.collapsing(tr("Console"), |ui| {
         let lines = app.snap.as_ref().map(|s| s.console.clone()).unwrap_or_default();
         egui::ScrollArea::vertical().max_height(140.0).stick_to_bottom(true).show(ui, |ui| {
             for l in lines.iter().rev().take(100).rev() {
@@ -750,7 +753,8 @@ fn arrow_button(ui: &mut egui::Ui, dx: f64, dy: f64) -> egui::Response {
         _ => "Jog down",
     };
     let enabled = ui.is_enabled();
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
+    let name = tr(name);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name.clone()));
     let resp = resp.on_hover_text(name);
     let visuals = ui.style().interact(&resp);
     ui.painter().rect_filled(rect, 3.0, visuals.weak_bg_fill);
@@ -798,7 +802,7 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         app.text_buffer = Some((id, content.clone()));
     }
     ui.separator();
-    ui.label(egui::RichText::new("Text").strong());
+    ui.label(egui::RichText::new(tr("Text")).strong());
     let mut commit = None;
     if let Some((_, buffer)) = app.text_buffer.as_mut() {
         let r = ui.add(egui::TextEdit::multiline(buffer).desired_rows(2).desired_width(f32::INFINITY).hint_text("Type text; click away to apply"));
@@ -812,32 +816,32 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ("Letter gap", "letter_spacing", style.letter_spacing, 0.0..=10.0),
             ("Line gap", "line_spacing", style.line_spacing, 0.0..=10.0),
         ] {
-            ui.label(label);
+            ui.label(tr(label));
             if let Some(v) = number(ui, value, range, if key == "height" { " mm" } else { "×" }) {
                 commit = Some(json!({ "id": id, key: v }));
             }
             ui.end_row();
         }
-        ui.label("Align");
+        ui.label(tr("Align"));
         let mut align = style.align;
         egui::ComboBox::from_id_salt("text_align")
             .selected_text(match align {
-                TextAlign::Left => "Left",
-                TextAlign::Center => "Center",
-                TextAlign::Right => "Right",
+                TextAlign::Left => tr("Left"),
+                TextAlign::Center => tr("Center"),
+                TextAlign::Right => tr("Right"),
             })
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut align, TextAlign::Left, "Left");
-                ui.selectable_value(&mut align, TextAlign::Center, "Center");
-                ui.selectable_value(&mut align, TextAlign::Right, "Right");
+                ui.selectable_value(&mut align, TextAlign::Left, tr("Left"));
+                ui.selectable_value(&mut align, TextAlign::Center, tr("Center"));
+                ui.selectable_value(&mut align, TextAlign::Right, tr("Right"));
             });
         if align != style.align {
             commit = Some(json!({ "id": id, "align": align }));
         }
         ui.end_row();
-        ui.label("Direction");
+        ui.label(tr("Direction"));
         let mut vertical = style.vertical;
-        if ui.checkbox(&mut vertical, "Vertical").on_hover_text("Letters stacked top to bottom, one column per line").changed() {
+        if ui.checkbox(&mut vertical, tr("Vertical")).on_hover_text(tr("Letters stacked top to bottom, one column per line")).changed() {
             commit = Some(json!({ "id": id, "vertical": vertical }));
         }
         ui.end_row();
@@ -856,14 +860,14 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             std::path::Path::new(p).file_name().map_or_else(|| p.to_string(), |n| n.to_string_lossy().into_owned())
         });
         ui.label(format!("Font: {name}"));
-        if ui.button("Choose font…").on_hover_text("A .ttf or .otf file of yours: draws filled outlines (use a Fill layer)").clicked()
+        if ui.button(tr("Choose font…")).on_hover_text(tr("A .ttf or .otf file of yours: draws filled outlines (use a Fill layer)")).clicked()
             && let Some(path) = app.pick_open("Choose a font", &["ttf", "otf"])
             && let Some(v) = app.run("text.edit", json!({ "id": id, "font": path }))
         {
             app.note_unsupported(&v);
             app.text_buffer = None;
         }
-        if style.font.is_some() && ui.button("Built-in").clicked() {
+        if style.font.is_some() && ui.button(tr("Built-in")).clicked() {
             app.run("text.edit", json!({ "id": id, "font": "" }));
             app.text_buffer = None;
         }
@@ -874,23 +878,23 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 std::path::Path::new(p).file_name().map_or_else(|| p.to_string(), |n| n.to_string_lossy().into_owned())
             });
             ui.label(format!("Fallback font: {name}"));
-            if ui.button("Choose…").on_hover_text("Draws characters the font above has no glyph for").clicked()
+            if ui.button(tr("Choose…")).on_hover_text(tr("Draws characters the font above has no glyph for")).clicked()
                 && let Some(path) = app.pick_open("Choose a fallback font", &["ttf", "otf"])
                 && let Some(v) = app.run("text.edit", json!({ "id": id, "fallback_font": path }))
             {
                 app.note_unsupported(&v);
                 app.text_buffer = None;
             }
-            if style.fallback_font.is_some() && ui.button("None").clicked() {
+            if style.fallback_font.is_some() && ui.button(tr("None")).clicked() {
                 app.run("text.edit", json!({ "id": id, "fallback_font": "" }));
                 app.text_buffer = None;
             }
         });
-        ui.weak(
+        ui.weak(tr(
             "Outline text: set its layer to Fill to engrave it solid. The shapes are saved in the project; the font is only needed to edit the text.",
-        );
+        ));
     } else {
-        ui.weak("Single-line stroke font: engraves each stroke in one pass (Line mode).");
+        ui.weak(tr("Single-line stroke font: engraves each stroke in one pass (Line mode)."));
     }
 }
 
@@ -901,7 +905,7 @@ fn shape_operations(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         return;
     }
     ui.separator();
-    ui.label(egui::RichText::new("Shape operations").strong());
+    ui.label(egui::RichText::new(tr("Shape operations")).strong());
     ui.add_enabled_ui(count >= 2, |ui| {
         ui.horizontal_wrapped(|ui| {
             for (label, op, hint) in [
@@ -910,17 +914,17 @@ fn shape_operations(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 ("Intersect", "intersect", "Keep only the overlap"),
                 ("XOR", "xor", "Keep everything except the overlap"),
             ] {
-                if ui.button(label).on_hover_text(hint).clicked() {
+                if ui.button(tr(label)).on_hover_text(tr(hint)).clicked() {
                     app.run("path.boolean", json!({ "op": op }));
                 }
             }
         });
     });
-    if ui.button("Join paths").on_hover_text("Chain open lines whose ends meet into paths, closing loops").clicked() {
+    if ui.button(tr("Join paths")).on_hover_text(tr("Chain open lines whose ends meet into paths, closing loops")).clicked() {
         app.run("path.join", json!({}));
     }
     ui.horizontal(|ui| {
-        ui.label("Offset");
+        ui.label(tr("Offset"));
         ui.add(egui::DragValue::new(&mut app.offset_distance).range(-1000.0..=1000.0).speed(0.1).suffix(" mm"));
         egui::ComboBox::from_id_salt("offset_join").selected_text(app.offset_join).width(70.0).show_ui(ui, |ui| {
             for j in ["round", "miter", "bevel"] {
@@ -929,11 +933,15 @@ fn shape_operations(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         });
     });
     ui.horizontal(|ui| {
-        if ui.button("Apply offset").on_hover_text("Negative values shrink closed shapes; open lines become an outline around the line").clicked() {
+        if ui
+            .button(tr("Apply offset"))
+            .on_hover_text(tr("Negative values shrink closed shapes; open lines become an outline around the line"))
+            .clicked()
+        {
             let params = json!({ "distance": app.offset_distance, "join": app.offset_join, "keep_originals": app.offset_keep });
             app.run("path.offset", params);
         }
-        ui.checkbox(&mut app.offset_keep, "Keep original");
+        ui.checkbox(&mut app.offset_keep, tr("Keep original"));
     });
 }
 
@@ -948,7 +956,7 @@ fn image_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         return;
     };
     ui.separator();
-    ui.label(egui::RichText::new("Image").strong());
+    ui.label(egui::RichText::new(tr("Image")).strong());
     let mut commit = None;
     egui::Grid::new("image_adjust").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
         for (label, key, value, range, speed) in [
@@ -956,7 +964,7 @@ fn image_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ("Contrast", "contrast", adjust.contrast, -1.0..=1.0, 0.01),
             ("Gamma", "gamma", adjust.gamma, 0.1..=5.0, 0.02),
         ] {
-            ui.label(label);
+            ui.label(tr(label));
             let mut v = value;
             let r = ui.add(egui::DragValue::new(&mut v).range(range).speed(speed).max_decimals(2));
             if committed(&r) && (v - value).abs() > 1e-9 {
@@ -967,10 +975,10 @@ fn image_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     });
     ui.horizontal(|ui| {
         let mut negative = adjust.negative;
-        if ui.checkbox(&mut negative, "Negative").changed() {
+        if ui.checkbox(&mut negative, tr("Negative")).changed() {
             commit = Some(json!({ "id": id, "negative": negative }));
         }
-        if ui.add_enabled(!adjust.is_identity(), egui::Button::new("Reset")).clicked() {
+        if ui.add_enabled(!adjust.is_identity(), egui::Button::new(tr("Reset"))).clicked() {
             commit = Some(json!({ "id": id, "reset": true }));
         }
     });
@@ -978,22 +986,22 @@ fn image_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         app.run("image.adjust", params);
     }
     crop_and_sharpen(app, ui, id);
-    ui.weak("The dither mode for engraving is set on the layer (Cuts / Layers).");
+    ui.weak(tr("The dither mode for engraving is set on the layer (Cuts / Layers)."));
 }
 
 fn crop_and_sharpen(app: &mut LightFoundryApp, ui: &mut egui::Ui, id: u64) {
-    ui.collapsing("Crop and sharpen", |ui| {
-        ui.checkbox(&mut app.crop_mode, "Drag the edges on the canvas").on_hover_text("Escape leaves this mode");
+    ui.collapsing(tr("Crop and sharpen"), |ui| {
+        ui.checkbox(&mut app.crop_mode, tr("Drag the edges on the canvas")).on_hover_text(tr("Escape leaves this mode"));
         egui::Grid::new("image_crop").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
             for (label, slot) in ["Cut off left", "Cut off top", "Cut off right", "Cut off bottom"].into_iter().zip(app.crop_pct.iter_mut()) {
-                ui.label(label);
+                ui.label(tr(label));
                 ui.add(egui::DragValue::new(slot).range(0.0..=95.0).speed(0.5).suffix(" %").max_decimals(1));
                 ui.end_row();
             }
         });
         let [left, top, right, bottom] = app.crop_pct.map(|p| p / 100.0);
         let fits = left + right < 1.0 && top + bottom < 1.0;
-        if ui.add_enabled(fits && app.crop_pct.iter().any(|p| *p > 0.0), egui::Button::new("Crop")).clicked()
+        if ui.add_enabled(fits && app.crop_pct.iter().any(|p| *p > 0.0), egui::Button::new(tr("Crop"))).clicked()
             && app.run("image.crop", json!({ "id": id, "left": left, "top": top, "right": right, "bottom": bottom })).is_some()
         {
             app.crop_pct = [0.0; 4];
@@ -1001,29 +1009,29 @@ fn crop_and_sharpen(app: &mut LightFoundryApp, ui: &mut egui::Ui, id: u64) {
         }
         ui.horizontal(|ui| {
             ui.add(egui::DragValue::new(&mut app.sharpen_amount).range(0.0..=5.0).speed(0.05).max_decimals(2));
-            if ui.button("Sharpen").clicked() {
+            if ui.button(tr("Sharpen")).clicked() {
                 app.run("image.sharpen", json!({ "id": id, "amount": app.sharpen_amount }));
             }
         });
         ui.horizontal(|ui| {
             ui.add(egui::DragValue::new(&mut app.resample_scale).range(0.05..=4.0).speed(0.01).max_decimals(2).suffix("×"));
-            if ui.button("Resample").on_hover_text("Change the number of pixels (not the size in mm)").clicked() {
+            if ui.button(tr("Resample")).on_hover_text(tr("Change the number of pixels (not the size in mm)")).clicked() {
                 app.run("image.resample", json!({ "id": id, "scale": app.resample_scale }));
             }
         });
-        ui.weak("These change the stored picture (Undo brings it back).");
+        ui.weak(tr("These change the stored picture (Undo brings it back)."));
     });
-    ui.collapsing("Trace to vectors", |ui| {
+    ui.collapsing(tr("Trace to vectors"), |ui| {
         ui.horizontal(|ui| {
-            ui.label("Threshold");
+            ui.label(tr("Threshold"));
             ui.add(egui::DragValue::new(&mut app.trace_threshold).range(1.0..=254.0).speed(1.0));
         });
-        ui.checkbox(&mut app.trace_smooth, "Smooth curves").on_hover_text("Turn gentle bends into curves; sharp corners stay sharp");
+        ui.checkbox(&mut app.trace_smooth, tr("Smooth curves")).on_hover_text(tr("Turn gentle bends into curves; sharp corners stay sharp"));
         ui.horizontal(|ui| {
-            if ui.button("Trace").on_hover_text("Add outlines that follow the dark areas, on top of the picture").clicked() {
+            if ui.button(tr("Trace")).on_hover_text(tr("Add outlines that follow the dark areas, on top of the picture")).clicked() {
                 app.run("image.trace", json!({ "id": id, "threshold": app.trace_threshold, "smooth": app.trace_smooth }));
             }
-            if ui.button("Trace and remove picture").clicked() {
+            if ui.button(tr("Trace and remove picture")).clicked() {
                 app.run("image.trace", json!({ "id": id, "threshold": app.trace_threshold, "keep_image": false, "smooth": app.trace_smooth }));
             }
         });
@@ -1036,13 +1044,13 @@ fn array_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         return;
     }
     ui.separator();
-    ui.label(egui::RichText::new("Array").strong());
+    ui.label(egui::RichText::new(tr("Array")).strong());
     ui.horizontal(|ui| {
         ui.add(egui::DragValue::new(&mut app.array_columns).range(1..=200).prefix("cols "));
         ui.add(egui::DragValue::new(&mut app.array_rows).range(1..=200).prefix("rows "));
         ui.add(egui::DragValue::new(&mut app.array_gap).range(-1000.0..=1000.0).speed(0.1).prefix("gap ").suffix(" mm"));
     });
-    if ui.button("Grid array").on_hover_text("Copy the selection into a grid; the original stays top-left").clicked() {
+    if ui.button(tr("Grid array")).on_hover_text(tr("Copy the selection into a grid; the original stays top-left")).clicked() {
         let params = json!({ "columns": app.array_columns, "rows": app.array_rows, "gap_x": app.array_gap, "gap_y": app.array_gap });
         app.run("arrange.grid", params);
     }
@@ -1050,7 +1058,7 @@ fn array_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         ui.add(egui::DragValue::new(&mut app.array_count).range(1..=1000).prefix("copies "));
         ui.add(egui::DragValue::new(&mut app.array_radius).range(0.0..=1000.0).speed(0.5).prefix("radius ").suffix(" mm"));
     });
-    if ui.button("Circular array").on_hover_text("Rotate copies about a centre this far below the selection").clicked() {
+    if ui.button(tr("Circular array")).on_hover_text(tr("Rotate copies about a centre this far below the selection")).clicked() {
         let params = json!({ "count": app.array_count, "radius": app.array_radius });
         app.run("arrange.circular", params);
     }
@@ -1065,17 +1073,22 @@ fn override_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let order = first.order;
     ui.separator();
     ui.horizontal(|ui| {
-        ui.label("Cut order");
+        ui.label(tr("Cut order"));
         let mut n = order;
-        let r =
-            ui.add(egui::DragValue::new(&mut n).range(-1000..=1000)).on_hover_text("Lower numbers are cut first within the layer; 0 is the default");
+        let r = ui
+            .add(egui::DragValue::new(&mut n).range(-1000..=1000))
+            .on_hover_text(tr("Lower numbers are cut first within the layer; 0 is the default"));
         if committed(&r) && n != order {
             app.run("shape.set_order", json!({ "order": n }));
         }
     });
     ui.horizontal(|ui| {
         let mut on = current.is_some();
-        if ui.checkbox(&mut on, "Own cut settings").on_hover_text("Use these settings for the selected shapes instead of their layer's").changed() {
+        if ui
+            .checkbox(&mut on, tr("Own cut settings"))
+            .on_hover_text(tr("Use these settings for the selected shapes instead of their layer's"))
+            .changed()
+        {
             if on {
                 // Start from the layer's values so switching it on changes nothing until edited.
                 let (speed, power) = layer.as_ref().map_or((1000.0, 50.0), |l| (l.speed, l.max_power));
@@ -1088,17 +1101,17 @@ fn override_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let Some(c) = current else { return };
     let (speed, power, passes) = (c.speed.unwrap_or(0.0), c.max_power.unwrap_or(0.0), c.passes.unwrap_or(1));
     egui::Grid::new("override_grid").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-        ui.label("Speed");
+        ui.label(tr("Speed"));
         if let Some(v) = number(ui, speed, 1.0..=100_000.0, " mm/min") {
             app.run("shape.cut_override", json!({ "speed": v }));
         }
         ui.end_row();
-        ui.label("Power");
+        ui.label(tr("Power"));
         if let Some(v) = number(ui, power, 0.0..=100.0, " %") {
             app.run("shape.cut_override", json!({ "max_power": v }));
         }
         ui.end_row();
-        ui.label("Passes");
+        ui.label(tr("Passes"));
         let mut n = passes;
         let r = ui.add(egui::DragValue::new(&mut n).range(1..=1000));
         if committed(&r) && n != passes {
@@ -1110,25 +1123,26 @@ fn override_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 
 /// A speed × power matrix of squares for finding settings on a new material.
 fn test_grid_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
-    ui.collapsing("Material test grid", |ui| {
+    ui.collapsing(tr("Material test grid"), |ui| {
         ui.horizontal(|ui| {
             ui.add(egui::DragValue::new(&mut app.grid_cols).range(1..=20).prefix("speeds "));
             ui.add(egui::DragValue::new(&mut app.grid_rows).range(1..=20).prefix("powers "));
             ui.add(egui::DragValue::new(&mut app.grid_size).range(1.0..=100.0).suffix(" mm"));
         });
         ui.horizontal(|ui| {
-            ui.label("Speed");
+            ui.label(tr("Speed"));
             ui.add(egui::DragValue::new(&mut app.grid_speed.0).range(1.0..=100_000.0));
-            ui.label("to");
+            ui.label(tr("to"));
             ui.add(egui::DragValue::new(&mut app.grid_speed.1).range(1.0..=100_000.0).suffix(" mm/min"));
         });
         ui.horizontal(|ui| {
-            ui.label("Power");
+            ui.label(tr("Power"));
             ui.add(egui::DragValue::new(&mut app.grid_power.0).range(0.0..=100.0));
-            ui.label("to");
+            ui.label(tr("to"));
             ui.add(egui::DragValue::new(&mut app.grid_power.1).range(0.0..=100.0).suffix(" %"));
         });
-        if ui.button("Create on the active layer").on_hover_text("Squares use the active layer's mode; labels go on the next layer").clicked() {
+        if ui.button(tr("Create on the active layer")).on_hover_text(tr("Squares use the active layer's mode; labels go on the next layer")).clicked()
+        {
             let params = json!({
                 "cols": app.grid_cols, "rows": app.grid_rows, "size": app.grid_size, "layer": app.active_layer,
                 "speed_min": app.grid_speed.0, "speed_max": app.grid_speed.1, "power_min": app.grid_power.0, "power_max": app.grid_power.1,
@@ -1149,10 +1163,10 @@ fn layer_header(app: &mut LightFoundryApp, ui: &mut egui::Ui, layer: &lightfound
             app.run("layer.set", json!({ "id": layer.id, "name": name }));
         }
         ui.label(format!("#{} of {}", position + 1, last + 1));
-        if ui.add_enabled(position > 0, egui::Button::new("Earlier")).on_hover_text("Cut this layer sooner").clicked() {
+        if ui.add_enabled(position > 0, egui::Button::new(tr("Earlier"))).on_hover_text(tr("Cut this layer sooner")).clicked() {
             app.run("layer.move", json!({ "id": layer.id, "index": position - 1 }));
         }
-        if ui.add_enabled(position < last, egui::Button::new("Later")).on_hover_text("Cut this layer later").clicked() {
+        if ui.add_enabled(position < last, egui::Button::new(tr("Later"))).on_hover_text(tr("Cut this layer later")).clicked() {
             app.run("layer.move", json!({ "id": layer.id, "index": position + 1 }));
         }
     });
@@ -1164,21 +1178,21 @@ fn node_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         return;
     }
     ui.separator();
-    ui.label(egui::RichText::new("Nodes").strong());
+    ui.label(egui::RichText::new(tr("Nodes")).strong());
     let Some((shape, np)) = crate::nodes_ui::world_nodes(app) else {
         let text_selected = app.session.selection.len() == 1
             && app.session.selection.first().and_then(|id| app.session.doc.shape(*id)).is_some_and(|s| matches!(s.kind, ShapeKind::Text { .. }));
         if text_selected {
-            ui.weak("Text must be converted to a path before its nodes can be edited.");
-            if ui.button("Convert text to path").clicked() {
+            ui.weak(tr("Text must be converted to a path before its nodes can be edited."));
+            if ui.button(tr("Convert text to path")).clicked() {
                 app.run("edit.convert_to_path", json!({}));
             }
         } else {
-            ui.weak("Select one path to edit its nodes.");
+            ui.weak(tr("Select one path to edit its nodes."));
         }
         return;
     };
-    ui.weak("Drag nodes and handles. Double-click a line to add a node. Delete removes the selected node.");
+    ui.weak(tr("Drag nodes and handles. Double-click a line to add a node. Delete removes the selected node."));
     let Some(sel) = app.node_sel.filter(|s| s.shape == shape) else {
         ui.weak(format!("{} nodes. Click a node to select it.", np.node_count()));
         return;
@@ -1200,16 +1214,16 @@ fn node_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             }
             v
         };
-        if ui.button("Delete node").clicked() {
+        if ui.button(tr("Delete node")).clicked() {
             crate::nodes_ui::delete_selected(app);
         }
-        if ui.button(if node.smooth { "Make corner" } else { "Make smooth" }).clicked() {
+        if ui.button(if node.smooth { tr("Make corner") } else { tr("Make smooth") }).clicked() {
             app.run("node.set_smooth", with(json!({ "index": sel.index, "smooth": !node.smooth })));
         }
-        if ui.button(if segment_is_curve { "Next segment: line" } else { "Next segment: curve" }).clicked() {
+        if ui.button(if segment_is_curve { tr("Next segment: line") } else { tr("Next segment: curve") }).clicked() {
             app.run("node.set_segment", with(json!({ "segment": sel.index, "curve": !segment_is_curve })));
         }
-        if ui.button(if closed { "Open path" } else { "Close path" }).clicked() {
+        if ui.button(if closed { tr("Open path") } else { tr("Close path") }).clicked() {
             app.run("node.set_closed", with(json!({ "closed": !closed })));
         }
     });
