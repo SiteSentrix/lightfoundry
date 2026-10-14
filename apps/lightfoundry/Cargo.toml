@@ -18,7 +18,7 @@ serial = ["lightfoundry-device/serial"]
 lightfoundry-engine = { workspace = true }
 lightfoundry-ui-egui = { workspace = true }
 lightfoundry-device = { workspace = true }
-eframe = { workspace = true, features = ["default_fonts", "glow", "wayland", "x11"] }
+eframe = { workspace = true, features = ["accesskit", "default_fonts", "glow", "wayland", "x11"] }
 egui = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }

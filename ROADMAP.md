@@ -275,3 +275,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   (or an F-key); clashes are refused with the name of the other action; bindings persist in
   `shortcuts.json` (`Platform::shortcuts_file`) and menus show the current keys. Arrows, Delete,
   Enter and Escape stay fixed.
+- **2026-10-14 — screen-reader support.** The desktop app now builds eframe with AccessKit, and the
+  controls drawn in code (canvas, layer chips, jog arrows, job-origin cells) carry names, roles and
+  selected state so assistive technology can read and operate them; a headless test reads the
+  accessibility tree. Not yet tried with a real screen reader.

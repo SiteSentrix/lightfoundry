@@ -72,7 +72,9 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 if used.contains(&layer.id) {
                     ui.painter().circle_filled(rect.right_top() + egui::vec2(-5.0, 5.0), 2.5, egui::Color32::BLACK);
                 }
-                if resp.on_hover_text(format!("{}{}", layer.name, if layer.output { "" } else { " (output off)" })).clicked() {
+                let name = format!("Layer {}{}", layer.name, if layer.output { "" } else { " (output off)" });
+                resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, app.active_layer == layer.id, name.clone()));
+                if resp.on_hover_text(&name).clicked() {
                     app.active_layer = layer.id;
                 }
             }
@@ -509,7 +511,7 @@ fn job_origin(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         egui::Grid::new("anchor_grid").spacing([2.0, 2.0]).show(ui, |ui| {
             for row in Anchor::ALL.chunks(3) {
                 for a in row {
-                    if anchor_button(ui, o.anchor == *a).clicked() {
+                    if anchor_button(ui, o.anchor == *a, a.label()).clicked() {
                         app.run("job.set_origin", json!({ "anchor": a }));
                     }
                 }
@@ -710,6 +712,15 @@ fn console(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 /// no arrow glyphs, and we ship no icon assets).
 fn arrow_button(ui: &mut egui::Ui, dx: f64, dy: f64) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(34.0, 28.0), egui::Sense::click());
+    let name = match (dx.partial_cmp(&0.0), dy.partial_cmp(&0.0)) {
+        (Some(std::cmp::Ordering::Less), _) => "Jog left",
+        (Some(std::cmp::Ordering::Greater), _) => "Jog right",
+        (_, Some(std::cmp::Ordering::Less)) => "Jog up",
+        _ => "Jog down",
+    };
+    let enabled = ui.is_enabled();
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
+    let resp = resp.on_hover_text(name);
     let visuals = ui.style().interact(&resp);
     ui.painter().rect_filled(rect, 3.0, visuals.weak_bg_fill);
     let (fx, fy) = (dx as f32, dy as f32);
@@ -722,8 +733,11 @@ fn arrow_button(ui: &mut egui::Ui, dx: f64, dy: f64) -> egui::Response {
 }
 
 /// One cell of the 3×3 job-origin picker: a ring, filled when selected (drawn in code).
-fn anchor_button(ui: &mut egui::Ui, selected: bool) -> egui::Response {
+fn anchor_button(ui: &mut egui::Ui, selected: bool, name: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
+    let enabled = ui.is_enabled();
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, format!("Job origin {name}")));
+    let resp = resp.on_hover_text(name);
     let visuals = ui.style().interact(&resp);
     ui.painter().rect_filled(rect, 3.0, visuals.weak_bg_fill);
     let color = if selected { ui.visuals().selection.stroke.color } else { visuals.fg_stroke.color };
