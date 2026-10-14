@@ -810,6 +810,12 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             commit = Some(json!({ "id": id, "align": align }));
         }
         ui.end_row();
+        ui.label("Direction");
+        let mut vertical = style.vertical;
+        if ui.checkbox(&mut vertical, "Vertical").on_hover_text("Letters stacked top to bottom, one column per line").changed() {
+            commit = Some(json!({ "id": id, "vertical": vertical }));
+        }
+        ui.end_row();
     });
     if let Some(params) = commit {
         if let Some(v) = app.run("text.edit", params) {
