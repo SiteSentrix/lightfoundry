@@ -37,6 +37,17 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 ui.separator();
                 ui.checkbox(&mut app.show_preview, "Toolpath preview");
                 ui.checkbox(&mut app.show_travel, "Show travel moves");
+                ui.menu_button("Preview colours", |ui| {
+                    for (mode, label) in [
+                        (crate::timeline_ui::PreviewColors::Layer, "By layer"),
+                        (crate::timeline_ui::PreviewColors::Power, "By power"),
+                        (crate::timeline_ui::PreviewColors::Speed, "By speed"),
+                    ] {
+                        if ui.radio_value(&mut app.preview_colors, mode, label).clicked() {
+                            ui.close();
+                        }
+                    }
+                });
             });
         });
     });

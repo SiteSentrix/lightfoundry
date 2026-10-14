@@ -1299,6 +1299,39 @@ mod timeline_ui_tests {
     use crate::timeline_ui::{Reveal, head_position, reveal};
 
     #[test]
+    fn the_heat_ramp_runs_cold_to_hot_and_survives_bad_values() {
+        use crate::timeline_ui::{fraction, heat};
+        let (cold, hot) = (heat(0.0), heat(1.0));
+        assert!(cold.b() > cold.r() && hot.r() > hot.b(), "{cold:?} {hot:?}");
+        assert_eq!(heat(-5.0), cold);
+        assert_eq!(heat(7.0), hot);
+        assert_eq!(heat(f32::NAN), cold);
+        let mid = heat(0.5);
+        assert!(mid != cold && mid != hot);
+        assert_eq!(fraction(5.0, 0.0, 10.0), 0.5);
+        assert_eq!(fraction(20.0, 0.0, 10.0), 1.0);
+        assert_eq!(fraction(5.0, 3.0, 3.0), 0.5, "an empty range is the middle");
+        assert_eq!(fraction(f32::NAN, 0.0, 1.0), 0.5);
+    }
+
+    #[test]
+    fn every_colour_mode_draws_a_preview_with_several_powers_and_speeds() {
+        use crate::timeline_ui::PreviewColors;
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 40, "height": 20}));
+        h.app.run("shape.ellipse", json!({"cx": 100, "cy": 40, "rx": 15, "ry": 10, "layer": 2}));
+        h.app.run("layer.set", json!({"id": 2, "speed": 300, "max_power": 90}));
+        h.app.show_preview = true;
+        for mode in [PreviewColors::Layer, PreviewColors::Power, PreviewColors::Speed] {
+            h.app.preview_colors = mode;
+            h.frame(vec![]);
+        }
+        let (lo, hi) = h.app.preview.speed_range;
+        assert!(lo < hi, "two different feeds were seen: {lo} {hi}");
+        assert!(h.app.preview.power_range.0 < h.app.preview.power_range.1);
+    }
+
+    #[test]
     fn segments_are_revealed_by_operation_pass_and_time() {
         let seg = segment(1, 2.0, 4.0);
         assert_eq!(reveal(&seg, None), Reveal::Full, "no playhead shows the whole job");
@@ -1370,7 +1403,16 @@ mod timeline_ui_tests {
 
     fn segment(op: u32, t0: f32, t1: f32) -> PreviewSegment {
         let layer: LayerId = 0;
-        PreviewSegment { a: Point::new(f64::from(t0) * 2.5, 0.0), b: Point::new(f64::from(t1) * 2.5, 0.0), layer, power: 50.0, op, t0, t1 }
+        PreviewSegment {
+            a: Point::new(f64::from(t0) * 2.5, 0.0),
+            b: Point::new(f64::from(t1) * 2.5, 0.0),
+            layer,
+            power: 50.0,
+            speed: 1000.0,
+            op,
+            t0,
+            t1,
+        }
     }
 
     fn moment(op: usize, pass: u32, into_pass: f64) -> Moment {

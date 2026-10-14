@@ -69,6 +69,8 @@ pub struct PreviewSegment {
     pub layer: LayerId,
     /// 0 for travel and zero-power moves.
     pub power: f32,
+    /// Feed rate the move runs at, mm/min.
+    pub speed: f32,
     /// Index of the planned operation, and when in a pass of it the move starts and ends (seconds).
     pub op: u32,
     pub t0: f32,
@@ -83,6 +85,9 @@ pub struct PreviewCache {
     pub error: Option<String>,
     pub truncated: bool,
     pub timeline: Timeline,
+    /// Lowest and highest power and feed among the burning moves (for colouring).
+    pub power_range: (f32, f32),
+    pub speed_range: (f32, f32),
 }
 
 impl PreviewCache {
@@ -96,6 +101,8 @@ impl PreviewCache {
         self.error = None;
         self.truncated = false;
         self.timeline = Timeline::default();
+        self.power_range = (0.0, 1.0);
+        self.speed_range = (0.0, 1.0);
         let job_doc = s.job_doc();
         match plan(&job_doc) {
             Err(e) => self.error = Some(e.to_string()),
@@ -120,7 +127,16 @@ impl PreviewCache {
                         let dt = move_seconds(timed, m, op.speed, rapid, job_doc.machine.acceleration);
                         if let Some(a) = at {
                             let (t0, t1) = (local as f32, (local + dt) as f32);
-                            self.segments.push(PreviewSegment { a, b: m.target(), layer: op.layer, power, op: index as u32, t0, t1 });
+                            self.segments.push(PreviewSegment {
+                                a,
+                                b: m.target(),
+                                layer: op.layer,
+                                power,
+                                speed: op.speed as f32,
+                                op: index as u32,
+                                t0,
+                                t1,
+                            });
                         }
                         local += dt;
                         timed = m.target();
@@ -128,6 +144,16 @@ impl PreviewCache {
                     }
                 }
             }
+        }
+        let mut power = (f32::INFINITY, f32::NEG_INFINITY);
+        let mut speed = (f32::INFINITY, f32::NEG_INFINITY);
+        for seg in self.segments.iter().filter(|s| s.power > 0.0) {
+            power = (power.0.min(seg.power), power.1.max(seg.power));
+            speed = (speed.0.min(seg.speed), speed.1.max(seg.speed));
+        }
+        if power.0.is_finite() {
+            self.power_range = power;
+            self.speed_range = speed;
         }
     }
 }
