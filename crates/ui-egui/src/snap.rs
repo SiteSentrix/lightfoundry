@@ -13,11 +13,50 @@ pub struct SnapSettings {
     pub grid: Option<f64>,
     /// Snap to the edges, centres and mid-lines of other shapes, the bed, and guides.
     pub objects: bool,
+    /// Which angled lines tracking offers through an acquired point, besides its row and column.
+    pub angles: TrackAngles,
 }
 
 impl Default for SnapSettings {
     fn default() -> Self {
-        Self { grid: None, objects: true }
+        Self { grid: None, objects: true, angles: TrackAngles::default() }
+    }
+}
+
+/// The set of angled tracking lines (see [`TRACK_ANGLES`] for the full set).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TrackAngles {
+    /// Only the row and column through the point.
+    RowColumn,
+    /// 45 and 135 degrees.
+    Diagonals,
+    /// 30, 45 and 60 degrees and their mirror images.
+    #[default]
+    ThirtySixty,
+    /// Every 15 degrees.
+    Fifteen,
+}
+
+impl TrackAngles {
+    pub const ALL: [TrackAngles; 4] = [Self::RowColumn, Self::Diagonals, Self::ThirtySixty, Self::Fifteen];
+
+    /// Angles in degrees, measured from +x with y down; the row and column are not listed.
+    pub fn degrees(self) -> &'static [f64] {
+        match self {
+            Self::RowColumn => &[],
+            Self::Diagonals => &[45.0, 135.0],
+            Self::ThirtySixty => &TRACK_ANGLES,
+            Self::Fifteen => &[15.0, 30.0, 45.0, 60.0, 75.0, 105.0, 120.0, 135.0, 150.0, 165.0],
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::RowColumn => "Row and column only",
+            Self::Diagonals => "45\u{b0} diagonals",
+            Self::ThirtySixty => "30\u{b0}, 45\u{b0}, 60\u{b0}",
+            Self::Fifteen => "Every 15\u{b0}",
+        }
     }
 }
 
@@ -258,7 +297,7 @@ pub fn snap_point_tracked(p: Point, settings: &SnapSettings, targets: &SnapTarge
             s.point.y = y;
             s.y_line = Some(target);
         }
-        pull_diagonal(&mut s, p, tracked, threshold);
+        pull_diagonal(&mut s, p, tracked, settings.angles.degrees(), threshold);
     }
     s
 }
@@ -266,10 +305,10 @@ pub fn snap_point_tracked(p: Point, settings: &SnapSettings, targets: &SnapTarge
 /// Pulls the point onto the nearest angled line through an acquired point: free in both axes
 /// where nothing else caught, else along the one line that an axis lock already fixed (so it lands
 /// on the crossing of a tracking or object line with the angled line).
-fn pull_diagonal(s: &mut Snapped, raw: Point, tracked: &[Point], threshold: f64) {
+fn pull_diagonal(s: &mut Snapped, raw: Point, tracked: &[Point], angles: &[f64], threshold: f64) {
     let mut best: Option<(f64, Point, Diagonal)> = None;
     for t in tracked.iter().filter(|t| t.x.is_finite() && t.y.is_finite()) {
-        for degrees in TRACK_ANGLES {
+        for &degrees in angles {
             let diagonal = Diagonal { origin: *t, degrees };
             let (c, sn) = diagonal.direction();
             let q = match (s.x_line.is_some(), s.y_line.is_some()) {
@@ -299,11 +338,11 @@ fn pull_diagonal(s: &mut Snapped, raw: Point, tracked: &[Point], threshold: f64)
 /// midpoints, centre) at the current offset; the key that needs the smallest nudge to sit on a
 /// tracking line decides. Axes in `locked` (already caught by an object) are left alone, and angled
 /// lines are only used when neither is locked. Returns the nudge and what to draw.
-pub fn track_translation(keys: &[Point], tracked: &[Point], locked: (bool, bool), threshold: f64) -> Option<TrackNudge> {
+pub fn track_translation(keys: &[Point], tracked: &[Point], angles: TrackAngles, locked: (bool, bool), threshold: f64) -> Option<TrackNudge> {
     if tracked.is_empty() || (locked.0 && locked.1) {
         return None;
     }
-    let settings = SnapSettings { grid: None, objects: true };
+    let settings = SnapSettings { grid: None, objects: true, angles };
     let none = SnapTargets::default();
     let mut best: Option<(f64, TrackNudge)> = None;
     for k in keys {
@@ -682,10 +721,10 @@ mod tests {
         fn tracking_overrides_the_grid_and_is_off_with_object_snapping() {
             let tracked = [Point::new(43.0, 33.0)];
             let none = SnapTargets::default();
-            let grid = SnapSettings { grid: Some(5.0), objects: true };
+            let grid = SnapSettings { grid: Some(5.0), objects: true, ..Default::default() };
             let s = snap_point_tracked(Point::new(100.0, 33.4), &grid, &none, &tracked, 2.0);
             assert_eq!(s.point.y, 33.0);
-            let off = SnapSettings { grid: None, objects: false };
+            let off = SnapSettings { grid: None, objects: false, ..Default::default() };
             let s = snap_point_tracked(Point::new(100.0, 33.4), &off, &none, &tracked, 2.0);
             assert_eq!(s.point.y, 33.4);
         }
@@ -737,11 +776,11 @@ mod tests {
             // A 20 x 20 box whose top-left is at (150, 151.3): its corner is 1.3 mm off the 45-degree line.
             let keys =
                 [Point::new(150.0, 151.3), Point::new(170.0, 151.3), Point::new(160.0, 161.3), Point::new(150.0, 171.3), Point::new(170.0, 171.3)];
-            let n = track_translation(&keys, &tracked, (false, false), 3.0).unwrap();
+            let n = track_translation(&keys, &tracked, TrackAngles::default(), (false, false), 3.0).unwrap();
             assert!(n.diagonal.is_some_and(|d| d.degrees == 45.0), "{n:?}");
             assert!((n.by.0 + n.by.1).abs() < 1.5 && n.by.1 < 0.0, "moves up/left onto the line: {n:?}");
             // Row tracking: the box's top edge 1 mm below the row through the point.
-            let n = track_translation(&[Point::new(300.0, 101.0)], &tracked, (false, false), 3.0).unwrap();
+            let n = track_translation(&[Point::new(300.0, 101.0)], &tracked, TrackAngles::default(), (false, false), 3.0).unwrap();
             assert_eq!((n.by, n.y.map(|t| t.at)), ((0.0, -1.0), Some(100.0)));
         }
 
@@ -749,16 +788,42 @@ mod tests {
         fn a_locked_axis_is_left_alone_and_angles_wait_for_both_to_be_free() {
             let tracked = [Point::new(100.0, 100.0)];
             let near_diagonal = [Point::new(150.0, 151.3)];
-            assert_eq!(track_translation(&near_diagonal, &tracked, (true, false), 3.0), None, "no angled line with x locked");
-            assert_eq!(track_translation(&near_diagonal, &tracked, (true, true), 3.0), None);
+            assert_eq!(track_translation(&near_diagonal, &tracked, TrackAngles::default(), (true, false), 3.0), None, "no angled line with x locked");
+            assert_eq!(track_translation(&near_diagonal, &tracked, TrackAngles::default(), (true, true), 3.0), None);
             // A key on the row through the point, y locked: it would move y, so nothing happens.
-            assert_eq!(track_translation(&[Point::new(300.0, 101.0)], &tracked, (false, true), 3.0), None);
+            assert_eq!(track_translation(&[Point::new(300.0, 101.0)], &tracked, TrackAngles::default(), (false, true), 3.0), None);
             // A key near the column: x is free and gets pulled.
-            let n = track_translation(&[Point::new(101.5, 300.0)], &tracked, (false, true), 3.0).unwrap();
+            let n = track_translation(&[Point::new(101.5, 300.0)], &tracked, TrackAngles::default(), (false, true), 3.0).unwrap();
             assert_eq!(n.by, (-1.5, 0.0));
-            assert_eq!(track_translation(&[], &tracked, (false, false), 3.0), None);
-            assert_eq!(track_translation(&near_diagonal, &[], (false, false), 3.0), None);
-            assert_eq!(track_translation(&[Point::new(f64::NAN, 1.0)], &tracked, (false, false), 3.0), None);
+            assert_eq!(track_translation(&[], &tracked, TrackAngles::default(), (false, false), 3.0), None);
+            assert_eq!(track_translation(&near_diagonal, &[], TrackAngles::default(), (false, false), 3.0), None);
+            assert_eq!(track_translation(&[Point::new(f64::NAN, 1.0)], &tracked, TrackAngles::default(), (false, false), 3.0), None);
+        }
+
+        #[test]
+        fn the_angle_preset_decides_which_angled_lines_pull() {
+            let none = SnapTargets::default();
+            let tracked = [Point::new(100.0, 100.0)];
+            let with = |angles| SnapSettings { grid: None, objects: true, angles };
+            let near = |deg: f64| {
+                let r = deg.to_radians();
+                Point::new(100.0 + 200.0 * r.cos(), 100.0 + 200.0 * r.sin() + 1.0)
+            };
+            for (angles, deg, hit) in [
+                (TrackAngles::RowColumn, 45.0, false),
+                (TrackAngles::Diagonals, 45.0, true),
+                (TrackAngles::Diagonals, 30.0, false),
+                (TrackAngles::ThirtySixty, 30.0, true),
+                (TrackAngles::ThirtySixty, 15.0, false),
+                (TrackAngles::Fifteen, 15.0, true),
+                (TrackAngles::Fifteen, 165.0, true),
+            ] {
+                let s = snap_point_tracked(near(deg), &with(angles), &none, &tracked, 3.0);
+                assert_eq!(s.diagonal.is_some(), hit, "{angles:?} at {deg}");
+            }
+            for a in TrackAngles::ALL {
+                assert!(a.degrees().iter().all(|d| d.is_finite() && *d > 0.0 && *d < 180.0) && !a.label().is_empty());
+            }
         }
 
         #[test]
@@ -780,7 +845,13 @@ mod tests {
         fn right_on_the_acquired_point_there_is_no_diagonal_to_follow() {
             let tracked = [Point::new(100.0, 100.0)];
             let none = SnapTargets::default();
-            let s = snap_point_tracked(Point::new(101.0, 100.5), &SnapSettings { grid: None, objects: true }, &none, &tracked, 3.0);
+            let s = snap_point_tracked(
+                Point::new(101.0, 100.5),
+                &SnapSettings { grid: None, objects: true, angles: TrackAngles::default() },
+                &none,
+                &tracked,
+                3.0,
+            );
             assert_eq!(s.diagonal, None);
         }
 
@@ -850,22 +921,27 @@ mod tests {
 
         #[test]
         fn the_grid_applies_when_no_object_is_close_and_objects_win_when_one_is() {
-            let on = SnapSettings { grid: Some(5.0), objects: true };
+            let on = SnapSettings { grid: Some(5.0), objects: true, ..Default::default() };
             assert_eq!(snap_point(Point::new(12.4, 17.6), &on, &targets(), 2.0).point, Point::new(10.0, 20.0));
             assert_eq!(snap_point(Point::new(101.0, 17.6), &on, &targets(), 2.0).point, Point::new(100.0, 20.0), "object beats grid on x");
-            let grid_only = SnapSettings { grid: Some(5.0), objects: false };
+            let grid_only = SnapSettings { grid: Some(5.0), objects: false, ..Default::default() };
             assert_eq!(snap_point(Point::new(101.0, 70.4), &grid_only, &targets(), 2.0).point, Point::new(100.0, 70.0));
-            let off = SnapSettings { grid: None, objects: false };
+            let off = SnapSettings { grid: None, objects: false, ..Default::default() };
             assert_eq!(snap_point(Point::new(101.0, 70.4), &off, &targets(), 2.0).point, Point::new(101.0, 70.4));
         }
 
         #[test]
         fn hostile_values_pass_through_or_are_ignored() {
-            let s = snap_point(Point::new(f64::NAN, f64::INFINITY), &SnapSettings { grid: Some(5.0), objects: true }, &targets(), 2.0);
+            let s = snap_point(
+                Point::new(f64::NAN, f64::INFINITY),
+                &SnapSettings { grid: Some(5.0), objects: true, ..Default::default() },
+                &targets(),
+                2.0,
+            );
             assert!(s.point.x.is_nan() && s.point.y.is_infinite());
-            let bad_grid = SnapSettings { grid: Some(0.0), objects: false };
+            let bad_grid = SnapSettings { grid: Some(0.0), objects: false, ..Default::default() };
             assert_eq!(snap_point(Point::new(3.3, 4.4), &bad_grid, &targets(), 2.0).point, Point::new(3.3, 4.4));
-            let nan_grid = SnapSettings { grid: Some(f64::NAN), objects: false };
+            let nan_grid = SnapSettings { grid: Some(f64::NAN), objects: false, ..Default::default() };
             assert_eq!(snap_point(Point::new(3.3, 4.4), &nan_grid, &targets(), 2.0).point, Point::new(3.3, 4.4));
             let mut t = SnapTargets::default();
             t.xs.push(Target { at: f64::NAN, kind: TargetKind::Edge, span: None });
@@ -902,7 +978,7 @@ mod tests {
         #[test]
         fn grid_snapping_moves_the_selections_corner_onto_the_grid() {
             let k = keys(Rect::new(3.0, 3.0, 13.0, 13.0));
-            let grid = SnapSettings { grid: Some(5.0), objects: false };
+            let grid = SnapSettings { grid: Some(5.0), objects: false, ..Default::default() };
             let ((dx, dy), _, _) = snap_translation((9.0, 4.0), &k, &grid, &targets(), 2.0);
             assert!((3.0 + dx - 10.0).abs() < 1e-9 && (3.0 + dy - 5.0).abs() < 1e-9, "{dx} {dy}");
         }
@@ -914,7 +990,14 @@ mod tests {
             let ((dx, _), _, _) = snap_translation((f64::NAN, 0.0), &k, &SnapSettings::default(), &targets(), 2.0);
             assert!(dx.is_nan());
             assert_eq!(
-                snap_translation((1.0, 1.0), &SnapTargets::default(), &SnapSettings { grid: Some(5.0), objects: true }, &targets(), 2.0).0,
+                snap_translation(
+                    (1.0, 1.0),
+                    &SnapTargets::default(),
+                    &SnapSettings { grid: Some(5.0), objects: true, ..Default::default() },
+                    &targets(),
+                    2.0
+                )
+                .0,
                 (1.0, 1.0),
                 "no keys, nothing to snap"
             );

@@ -641,7 +641,7 @@ mod image_tests {
     #[test]
     fn dragging_a_picture_edge_in_crop_mode_sets_the_percentage_and_applying_crops() {
         let mut h = Harness::new();
-        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: false };
+        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: false, ..Default::default() };
         let id = add_gradient(&mut h, Affine::translate((20.0, 20.0))); // 40 x 40 mm at (20, 20)
         h.app.run("edit.select", json!({"ids": [id]}));
         h.app.crop_mode = true;
@@ -725,7 +725,7 @@ mod node_tool_tests {
 
     fn with_rect() -> (Harness, u64) {
         let mut h = Harness::new();
-        h.app.snapping = snap::SnapSettings { grid: None, objects: false };
+        h.app.snapping = snap::SnapSettings { grid: None, objects: false, ..Default::default() };
         let id = h.app.run("shape.rectangle", json!({"x": 100, "y": 100, "width": 60, "height": 40})).unwrap()["id"].as_u64().unwrap();
         h.app.tool = Tool::Nodes;
         h.frame(vec![]);
@@ -802,7 +802,7 @@ mod node_tool_tests {
     #[test]
     fn node_drags_snap_to_the_grid() {
         let (mut h, id) = with_rect();
-        h.app.snapping = snap::SnapSettings { grid: Some(5.0), objects: false };
+        h.app.snapping = snap::SnapSettings { grid: Some(5.0), objects: false, ..Default::default() };
         h.drag(h.at(100.0, 100.0), h.at(87.0, 83.0));
         assert!(nodes_of(&h, id).subpaths[0].nodes[0].p.distance(Point::new(85.0, 85.0)) < 1e-9);
     }
@@ -825,7 +825,7 @@ mod pen_tool_tests {
 
     fn pen() -> Harness {
         let mut h = Harness::new();
-        h.app.snapping = snap::SnapSettings { grid: None, objects: false };
+        h.app.snapping = snap::SnapSettings { grid: None, objects: false, ..Default::default() };
         h.app.tool = Tool::Pen;
         h.frame(vec![]);
         h
@@ -906,7 +906,7 @@ mod pen_tool_tests {
     #[test]
     fn pen_paths_snap_and_pen_clicks_on_rulers_make_guides_not_nodes() {
         let mut h = pen();
-        h.app.snapping = snap::SnapSettings { grid: Some(10.0), objects: false };
+        h.app.snapping = snap::SnapSettings { grid: Some(10.0), objects: false, ..Default::default() };
         h.click(h.at(103.0, 98.0));
         h.click(h.at(147.0, 121.0));
         h.frame(vec![key(egui::Key::Enter)]);
@@ -939,7 +939,7 @@ mod snapping_tests {
     #[test]
     fn grid_snapping_puts_a_created_rectangle_exactly_on_the_grid() {
         let mut h = Harness::new();
-        h.app.snapping = snap::SnapSettings { grid: Some(5.0), objects: false };
+        h.app.snapping = snap::SnapSettings { grid: Some(5.0), objects: false, ..Default::default() };
         h.app.tool = Tool::Rectangle;
         h.drag(h.at(52.0, 51.0), h.at(88.0, 96.5));
         let b = last_bounds(&h);
@@ -949,7 +949,7 @@ mod snapping_tests {
     #[test]
     fn without_snapping_the_drag_is_taken_literally() {
         let mut h = Harness::new();
-        h.app.snapping = snap::SnapSettings { grid: None, objects: false };
+        h.app.snapping = snap::SnapSettings { grid: None, objects: false, ..Default::default() };
         h.app.tool = Tool::Rectangle;
         h.drag(h.at(52.0, 51.0), h.at(88.0, 96.5));
         let b = last_bounds(&h);
@@ -1069,7 +1069,7 @@ mod snapping_tests {
         let mut h = Harness::new();
         triangle(&mut h);
         h.app.tracked.push(Point::new(100.0, 100.0));
-        h.app.snapping = snap::SnapSettings { grid: None, objects: true };
+        h.app.snapping = snap::SnapSettings { grid: None, objects: true, ..Default::default() };
         h.frame(vec![]);
         // 1.3 mm off the 45-degree line through (100, 100); no object line is near x = 250 or y = 251.3.
         let (from, to) = (h.at(250.0, 251.3), h.at(300.0, 330.0));
@@ -1122,7 +1122,7 @@ mod snapping_tests {
         h.app.run("shape.rectangle", json!({"x": 210, "y": 210, "width": 20, "height": 20}));
         h.app.run("edit.select", json!({"ids": []}));
         h.app.tool = Tool::Select;
-        h.app.snapping = snap::SnapSettings { grid: None, objects: true };
+        h.app.snapping = snap::SnapSettings { grid: None, objects: true, ..Default::default() };
         h.app.tracked.push(Point::new(100.0, 100.0));
         h.frame(vec![]);
         // Drag it so its top-left corner ends 1.3 mm below the 45-degree line through (100, 100) at (150, 150).
@@ -1144,7 +1144,7 @@ mod snapping_tests {
         h.app.run("shape.rectangle", json!({"x": 210, "y": 210, "width": 20, "height": 20}));
         h.app.run("edit.select", json!({"ids": []}));
         h.app.tool = Tool::Select;
-        h.app.snapping = snap::SnapSettings { grid: None, objects: true };
+        h.app.snapping = snap::SnapSettings { grid: None, objects: true, ..Default::default() };
         h.app.tracked.push(Point::new(100.0, 77.0));
         h.frame(vec![]);
         let (from, to) = (h.at(220.0, 220.0), h.at(300.0, 77.0 + 10.0 + 1.2));
@@ -1155,7 +1155,7 @@ mod snapping_tests {
     #[test]
     fn shift_makes_squares_and_circles() {
         let mut h = Harness::new();
-        h.app.snapping = snap::SnapSettings { grid: None, objects: false };
+        h.app.snapping = snap::SnapSettings { grid: None, objects: false, ..Default::default() };
         h.app.tool = Tool::Rectangle;
         h.modifiers = Modifiers::SHIFT;
         h.drag(h.at(50.0, 50.0), h.at(110.0, 70.0));
@@ -1183,7 +1183,7 @@ mod snapping_tests {
     #[test]
     fn shift_locks_a_move_to_one_axis() {
         let mut h = Harness::new();
-        h.app.snapping = snap::SnapSettings { grid: None, objects: false };
+        h.app.snapping = snap::SnapSettings { grid: None, objects: false, ..Default::default() };
         h.app.run("shape.rectangle", json!({"x": 100, "y": 100, "width": 30, "height": 30}));
         h.app.run("edit.select", json!({"ids": []}));
         h.frame(vec![]);
@@ -1935,7 +1935,7 @@ mod create_by_numbers_tests {
         let mut h = Harness::new();
         h.app.run("path.create", json!({"nodes": [{"x": 100.0, "y": 100.0}, {"x": 180.0, "y": 100.0}, {"x": 120.0, "y": 140.0}], "closed": true}));
         h.app.run("edit.select", json!({"ids": []}));
-        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: true };
+        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: true, ..Default::default() };
         h.app.tool = Tool::Rectangle;
         h.frame(vec![]);
         // x = 120 is only the triangle's lower vertex: its box edges are 100, 140 and 180.
@@ -2088,7 +2088,7 @@ mod register_ui_tests {
     #[test]
     fn marks_are_clicked_on_the_canvas_and_applying_them_moves_the_design() {
         let mut h = Harness::new();
-        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: false };
+        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: false, ..Default::default() };
         h.app.run("shape.rectangle", json!({"x": 20, "y": 20, "width": 10, "height": 10}));
         for (actual, index, x, y) in [(false, 0, 20.0, 20.0), (false, 1, 120.0, 20.0), (true, 0, 25.0, 22.0), (true, 1, 125.0, 22.0)] {
             h.app.marks.pick = Some(Pick { actual, index });

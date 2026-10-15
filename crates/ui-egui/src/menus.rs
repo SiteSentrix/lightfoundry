@@ -17,6 +17,17 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 }
                 ui.checkbox(&mut app.show_rulers, tr("Rulers"));
                 ui.checkbox(&mut app.snapping.objects, tr("Snap to objects and guides"));
+                ui.add_enabled_ui(app.snapping.objects, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(tr("Tracking lines"));
+                        let angles = &mut app.snapping.angles;
+                        egui::ComboBox::from_id_salt("track_angles").selected_text(tr(angles.label())).show_ui(ui, |ui| {
+                            for a in crate::snap::TrackAngles::ALL {
+                                ui.selectable_value(angles, a, tr(a.label()));
+                            }
+                        });
+                    });
+                });
                 let mut grid_on = app.snapping.grid.is_some();
                 if ui.checkbox(&mut grid_on, tr("Snap to grid")).changed() {
                     app.snapping.grid = grid_on.then_some(app.snapping.grid.unwrap_or(5.0));

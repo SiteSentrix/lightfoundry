@@ -325,7 +325,7 @@ fn move_offset(app: &mut LightFoundryApp, snapper: &Snapper, start: Point, p: Po
         let r = at(delta);
         let (mx, my) = ((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0);
         let keys: Vec<Point> = [r.x0, mx, r.x1].iter().flat_map(|x| [r.y0, my, r.y1].map(|y| Point::new(*x, y))).collect();
-        if let Some(n) = snap::track_translation(&keys, &snapper.tracked, (locked_x, locked_y), snapper.threshold) {
+        if let Some(n) = snap::track_translation(&keys, &snapper.tracked, snapper.settings.angles, (locked_x, locked_y), snapper.threshold) {
             delta = (delta.0 + n.by.0, delta.1 + n.by.1);
             app.snap_lines = (xl.or(n.x), yl.or(n.y), n.diagonal);
             locked_x |= n.x.is_some() || n.diagonal.is_some();
