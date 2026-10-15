@@ -54,5 +54,4 @@ the values are picked out of the message and put where your text says.
 
 Menus, buttons, labels, tooltips, headings, drop-downs, the status-bar messages the desktop app
 writes itself, and engine errors. Not covered yet: successful command results shown in the status
-bar, a few small texts such as layer descriptions built from layer names and durations like
-"1m 05s", the CLI, and the browser build (which has no way to pick a file).
+bar, a few small texts such as layer descriptions built from layer names, the CLI, and the browser build (which has no way to pick a file).

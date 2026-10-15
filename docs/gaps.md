@@ -12,4 +12,4 @@ Every known shortfall, ranked. This is the work list; pick from the top. Scores 
 | 16 | Live camera capture and lens calibration (two-point print-and-cut alignment is done; a photo of the bed can serve as a backdrop on a non-output layer) | Placing work on printed or irregular material                       |
 | 18 | Browser build: try Web Serial on real hardware; installing as a PWA needs a service worker (JavaScript, which the Rust-only rule forbids unless generated from Rust) and an icon drawn in code; remember recent files |  Web users can design and generate G-code today |
 | 20 | Galvo/fibre/CO2-RF controllers (proprietary protocols); a tilted or 3D Z map; chuck rotary with steps-per-rotation |  Hardware variants |
-| 21 | Translations: the CLI, durations and a few composed labels are still English; the browser build cannot load a catalog; no translation ships (see `translations.md`) | Users outside English-speaking markets |
+| 21 | Translations: the CLI and a few composed labels are still English; the browser build cannot load a catalog; no translation ships (see `translations.md`) | Users outside English-speaking markets |

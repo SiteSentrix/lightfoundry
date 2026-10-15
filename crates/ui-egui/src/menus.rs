@@ -390,15 +390,25 @@ pub fn format_duration(seconds: f64) -> String {
     }
     let s = seconds.round() as u64;
     match (s / 3600, (s % 3600) / 60, s % 60) {
-        (0, 0, s) => format!("{s}s"),
-        (0, m, s) => format!("{m}m {s:02}s"),
-        (h, m, s) => format!("{h}h {m:02}m {s:02}s"),
+        (0, 0, s) => trf!("{s}s", s = s),
+        (0, m, s) => trf!("{m}m {s}s", m = m, s = format!("{s:02}")),
+        (h, m, s) => trf!("{h}h {m}m {s}s", h = h, m = format!("{m:02}"), s = format!("{s:02}")),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::format_duration;
+
+    #[test]
+    fn durations_follow_the_active_catalog() {
+        let t = crate::i18n::parse(r#"{"strings":{"{m}m {s}s":"{m} Min. {s} Sek."}}"#).unwrap();
+        crate::i18n::set_active(Some(t));
+        assert_eq!(format_duration(125.0), "2 Min. 05 Sek.");
+        assert_eq!(format_duration(5.0), "5s", "entries the catalog lacks stay English");
+        crate::i18n::set_active(None);
+        assert_eq!(format_duration(125.0), "2m 05s");
+    }
 
     #[test]
     fn durations_read_naturally() {
