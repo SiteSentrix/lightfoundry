@@ -1931,6 +1931,28 @@ mod create_by_numbers_tests {
     }
 
     #[test]
+    fn a_new_rectangle_stops_a_gap_short_of_a_neighbour_that_repeats_an_existing_gap() {
+        let mut h = Harness::new();
+        for x in [10.0, 40.0, 150.0] {
+            h.app.run("shape.rectangle", json!({"x": x, "y": 10, "width": 20, "height": 20}));
+        }
+        h.app.run("edit.select", json!({"ids": []}));
+        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: true, ..Default::default() };
+        h.app.tool = Tool::Rectangle;
+        h.frame(vec![]);
+        // The first two are 10 mm apart; dragging to 141 leaves 9 mm before the one at 150, so it snaps to 140.
+        h.drag(h.at(100.0, 10.0), h.at(141.0, 30.0));
+        let b = h.app.session.doc.shapes[3].world_bounds().unwrap();
+        assert!((b.x1 - 140.0).abs() < 1e-6, "{b:?}");
+        // With object snapping off the drag is taken as is.
+        h.app.snapping.objects = false;
+        h.app.tool = Tool::Rectangle;
+        h.drag(h.at(100.0, 50.0), h.at(141.0, 70.0));
+        let b = h.app.session.doc.shapes[4].world_bounds().unwrap();
+        assert!((b.x1 - 141.0).abs() < 0.5, "{b:?}");
+    }
+
+    #[test]
     fn snapping_reaches_path_vertices_that_are_not_on_the_bounding_box() {
         let mut h = Harness::new();
         h.app.run("path.create", json!({"nodes": [{"x": 100.0, "y": 100.0}, {"x": 180.0, "y": 100.0}, {"x": 120.0, "y": 140.0}], "closed": true}));

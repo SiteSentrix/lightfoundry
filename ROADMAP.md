@@ -393,3 +393,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   where resting the cursor is how things are picked, pressing T over a vertex, midpoint or centre
   acquires it and pressing T again removes it (any tool). Points persist across Select and the
   drawing tools; Escape, finishing a shape or move, or the Nodes tool forgets them.
+- **2026-10-15 — tracking angle choice; spacing while creating and resizing.** View > "Tracking lines"
+  picks which angled lines tracking offers: row and column only, 45° diagonals, 30/45/60° (default),
+  or every 15° (`snap::TrackAngles`, part of `SnapSettings`). Sizing a new shape or resizing the
+  selection now also snaps the dragged edge to repeat a gap already in the row (between two shapes,
+  or between the fixed edge and the shape behind it), with the gaps drawn as when moving
+  (`spacing::edge_spacing`, both axes and both directions, hostile-input tests, plus a frame test).
+  Checked by the headless frame tests only; not yet looked at on screen.

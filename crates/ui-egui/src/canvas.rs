@@ -61,6 +61,8 @@ pub(crate) struct Snapper {
     others: SnapTargets,
     /// Bounding boxes of the shapes that stay put while the selection moves (for equal spacing).
     still: Vec<Rect>,
+    /// Bounding boxes of every shape (for sizing a new one).
+    every: Vec<Rect>,
     /// Points acquired by hovering, whose rows and columns attract the cursor.
     tracked: Vec<Point>,
     /// Snap distance in mm.
@@ -79,8 +81,12 @@ impl Snapper {
         }
         let mut vertices = 0;
         let mut still = Vec::new();
+        let mut every = Vec::new();
         for item in &app.geometry.items {
             all.add_rect(item.bounds);
+            if every.len() < crate::spacing::MAX_NEIGHBOURS {
+                every.push(item.bounds);
+            }
             let moving = app.session.selection.contains(&item.id);
             if !moving {
                 others.add_rect(item.bounds);
@@ -102,11 +108,42 @@ impl Snapper {
                 }
             }
         }
-        Snapper { settings: app.snapping, all, others, still, tracked: app.tracked.clone(), threshold: snap::SNAP_RADIUS_PX / f64::from(view.zoom) }
+        Snapper {
+            settings: app.snapping,
+            all,
+            others,
+            still,
+            every,
+            tracked: app.tracked.clone(),
+            threshold: snap::SNAP_RADIUS_PX / f64::from(view.zoom),
+        }
     }
 
     pub(crate) fn point(&self, p: Point) -> snap::Snapped {
         snap::snap_point_tracked(p, &self.settings, &self.all, &self.tracked, self.threshold)
+    }
+
+    /// Sizing a box from `fixed` to `s.point`: where nothing else caught an axis, the dragged edge may
+    /// stop at a gap that repeats one already in the row. `among` are the shapes that stay put.
+    fn sized(&self, fixed: Point, s: snap::Snapped, among: &[Rect]) -> (Point, Vec<spacing::Gap>) {
+        let mut end = s.point;
+        let mut gaps = Vec::new();
+        if !self.settings.objects || s.diagonal.is_some() {
+            return (end, gaps);
+        }
+        if s.x_line.is_none()
+            && let Some(g) = spacing::edge_spacing(fixed, end, among, self.threshold, false)
+        {
+            end.x += g.adjust;
+            gaps.extend(g.gaps);
+        }
+        if s.y_line.is_none()
+            && let Some(g) = spacing::edge_spacing(fixed, end, among, self.threshold, true)
+        {
+            end.y += g.adjust;
+            gaps.extend(g.gaps);
+        }
+        (end, gaps)
     }
 
     /// The vertex, midpoint or centre the cursor is on, which hovering would acquire for tracking.
@@ -122,17 +159,18 @@ const TRACK_DWELL_SECS: f64 = 0.5;
 pub(crate) type SnapLines = (Option<snap::Target>, Option<snap::Target>, Option<snap::Diagonal>);
 
 /// The far end of a drag as it will be applied: constrained by Shift, otherwise snapped.
-fn drag_end(app: &LightFoundryApp, snapper: &Snapper, start: Point, raw: Point, shift: bool) -> (Point, SnapLines) {
+fn drag_end(app: &LightFoundryApp, snapper: &Snapper, start: Point, raw: Point, shift: bool) -> (Point, SnapLines, Vec<spacing::Gap>) {
     if shift {
         let p = match app.tool {
             Tool::Line => snap::constrain_angle(start, raw, 15.0),
             Tool::Rectangle | Tool::Ellipse => snap::constrain_square(start, raw),
             _ => raw,
         };
-        return (p, (None, None, None));
+        return (p, (None, None, None), Vec::new());
     }
     let s = snapper.point(raw);
-    (s.point, (s.x_line, s.y_line, s.diagonal))
+    let (end, gaps) = snapper.sized(start, s, &snapper.every);
+    (end, (s.x_line, s.y_line, s.diagonal), gaps)
 }
 
 pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
@@ -384,7 +422,7 @@ fn finish_drag(app: &mut LightFoundryApp, end: Point, offset: (f64, f64), shift:
     match app.drag {
         Drag::None => {}
         Drag::Create { start } => {
-            let (end, _) = drag_end(app, snapper, start, end, shift);
+            let (end, _, _) = drag_end(app, snapper, start, end, shift);
             create(app, start, end);
             app.tracked.clear(); // tracking belongs to the shape being placed
             app.track_candidate = None;
@@ -408,7 +446,7 @@ fn finish_drag(app: &mut LightFoundryApp, end: Point, offset: (f64, f64), shift:
             app.run("edit.select", json!({ "ids": ids }));
         }
         Drag::Resize { anchor } => {
-            let end = snapper.point(end).point;
+            let end = snapper.sized(anchor, snapper.point(end), &snapper.still).0;
             let (w, h) = ((end.x - anchor.x).abs(), (end.y - anchor.y).abs());
             if w > MIN_CREATE_MM && h > MIN_CREATE_MM {
                 let (x, y) = (anchor.x.min(end.x), anchor.y.min(end.y));
@@ -667,11 +705,13 @@ fn draw_overlays(
     let ghost = Stroke::new(1.0, t.selection);
     let at_point = |p: Point| Rect::new(p.x, p.y, p.x, p.y);
     let mut lines = app.snap_lines;
+    let mut sized_gaps = Vec::new();
     let mut mover = moved;
     match app.drag {
         Drag::Create { start } => {
-            let (end, hit) = drag_end(app, snapper, start, p, shift);
+            let (end, hit, gaps) = drag_end(app, snapper, start, p, shift);
             lines = hit;
+            sized_gaps = gaps;
             mover = Some(at_point(end));
             draw_create_ghost(app, painter, view, start, end, ghost);
         }
@@ -683,8 +723,10 @@ fn draw_overlays(
         Drag::Resize { anchor } => {
             let s = snapper.point(p);
             lines = (s.x_line, s.y_line, s.diagonal);
-            mover = Some(at_point(s.point));
-            let r = egui::Rect::from_two_pos(view.to_screen(anchor), view.to_screen(s.point));
+            let (end, gaps) = snapper.sized(anchor, s, &snapper.still);
+            sized_gaps = gaps;
+            mover = Some(at_point(end));
+            let r = egui::Rect::from_two_pos(view.to_screen(anchor), view.to_screen(end));
             painter.rect_stroke(r, 0.0, ghost, egui::StrokeKind::Inside);
         }
         Drag::NewGuide { vertical } => {
@@ -701,6 +743,7 @@ fn draw_overlays(
         draw_alignment(painter, view, &lines, mover, t.guide, view.to_screen(p));
     }
     draw_spacing(painter, view, &app.snap_spacing, t.spacing);
+    draw_spacing(painter, view, &sized_gaps, t.spacing);
     draw_tracked(app, painter, view);
 }
 
