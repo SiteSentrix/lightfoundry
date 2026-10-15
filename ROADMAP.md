@@ -416,3 +416,5 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   `localStorage` and tolerates it being blocked or full). Unit tests cover ordering, budget, round trip and
   hostile stored text; a frame test covers save, restart, reopen and a damaged entry. The wasm build compiles; not
   yet tried in a real browser.
+- **2026-10-15 — browser favicon.** `apps/lightfoundry-web/index.html` carries an inline SVG icon (a beam
+  hitting a cut line on a dark tile), drawn here, so there is no asset file and no ATTRIBUTION row.
