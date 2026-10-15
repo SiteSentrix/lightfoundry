@@ -856,8 +856,9 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         ui.colored_label(app.tokens.error, w);
     }
     ui.horizontal_wrapped(|ui| {
-        let name = style.font.as_deref().map_or("Built-in stroke font".to_string(), |p| {
-            std::path::Path::new(p).file_name().map_or_else(|| p.to_string(), |n| n.to_string_lossy().into_owned())
+        let name = style.font.as_deref().map_or("Built-in stroke font".to_string(), |p| match p.strip_prefix("library:") {
+            Some(folder) => folder.to_string(),
+            None => std::path::Path::new(p).file_name().map_or_else(|| p.to_string(), |n| n.to_string_lossy().into_owned()),
         });
         ui.label(trf!("Font: {name}", name = name));
         if ui.button(tr("Choose font…")).on_hover_text(tr("A .ttf or .otf file of yours: draws filled outlines (use a Fill layer)")).clicked()
@@ -871,13 +872,13 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             app.run("text.edit", json!({ "id": id, "font": "" }));
             app.text_buffer = None;
         }
-        if let Some(dir) = app.platform_font_library_dir() {
+        if app.platform_font_library_available() {
             let mut chosen = None;
             egui::ComboBox::from_id_salt("library_font").selected_text(tr("Library fonts")).show_ui(ui, |ui| {
-                let fonts = library_fonts(&dir);
-                for (name, path) in &fonts {
+                let fonts = app.platform_library_fonts();
+                for (name, value) in &fonts {
                     if ui.button(name).clicked() {
-                        chosen = Some(path.clone());
+                        chosen = Some(value.clone());
                         ui.close();
                     }
                 }
@@ -885,8 +886,8 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                     ui.weak(tr("None downloaded yet: View > Font library"));
                 }
             });
-            if let Some(path) = chosen
-                && let Some(v) = app.run("text.edit", json!({ "id": id, "font": path }))
+            if let Some(font) = chosen
+                && let Some(v) = app.run("text.edit", json!({ "id": id, "font": font }))
             {
                 app.note_unsupported(&v);
                 app.text_buffer = None;

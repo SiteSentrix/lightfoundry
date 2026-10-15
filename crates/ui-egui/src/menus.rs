@@ -80,16 +80,17 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                         ui.add_enabled_ui(!app.font_download_running, |ui| {
                             if ui
                                 .button(tr("Download the Foundry fonts"))
-                                .on_hover_text(tr("About a megabyte, from the stitchfoundry-fonts repository on GitHub"))
+                                .on_hover_text(tr("About a megabyte: Block, Script, Sans, Slab and Varsity"))
                                 .clicked()
                             {
                                 app.download_font_library(false);
                                 ui.close();
                             }
-                            if ui
-                                .button(tr("Download everything (large)…"))
-                                .on_hover_text(tr("Adds the Ink/Stitch collection: hundreds of megabytes"))
-                                .clicked()
+                            if app.platform.font_library_everything_available()
+                                && ui
+                                    .button(tr("Download everything (large)…"))
+                                    .on_hover_text(tr("Adds the Ink/Stitch collection: hundreds of megabytes"))
+                                    .clicked()
                             {
                                 app.download_font_library(true);
                                 ui.close();

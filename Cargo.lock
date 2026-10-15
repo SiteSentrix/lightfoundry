@@ -2025,6 +2025,7 @@ dependencies = [
  "lightfoundry-engine",
  "lightfoundry-ui-egui",
  "log",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",

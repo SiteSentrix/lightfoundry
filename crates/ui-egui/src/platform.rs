@@ -73,6 +73,20 @@ pub trait Platform {
         None
     }
 
+    /// Whether the large Ink/Stitch collection can be offered too (the hosted browser build carries
+    /// only the Foundry fonts).
+    fn font_library_everything_available(&self) -> bool {
+        true
+    }
+
+    /// The fonts ready to use for text as (display name, value for the text command's `font`), sorted.
+    /// By default, the library folders found in [`font_library_dir`](Platform::font_library_dir).
+    fn library_fonts(&self) -> Vec<(String, String)> {
+        self.font_library_dir()
+            .map(|dir| crate::panels::library_fonts(&dir).into_iter().map(|(name, path)| (name, path.display().to_string())).collect())
+            .unwrap_or_default()
+    }
+
     /// Where the font library is kept, if this host has such a folder.
     fn font_library_dir(&self) -> Option<PathBuf> {
         None

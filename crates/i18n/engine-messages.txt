@@ -8,6 +8,7 @@ a coordinate is not a finite number
 a font library folder cannot be used as a fallback font
 a group needs at least two shapes
 a job is running; stop it first
+a library font folder name is plain letters, digits, - _ . or space
 a move lies far outside the job's declared extent
 a path needs at least {0} nodes
 a path needs between {minimum} and {MAX_NODES} nodes
@@ -64,6 +65,7 @@ line {line} is {len} bytes; GRBL accepts at most {3} per line
 machine {0} must be a positive finite number
 marks must be finite numbers
 max_s must be between 1 and 100000
+more than {MAX_FONTS} library fonts
 no folder is available to keep the fonts in
 no path given and the document has never been saved
 no preset called {name}
@@ -110,8 +112,10 @@ the file has no ENTITIES section
 the font file is too large
 the font library is larger than this program will download; refusing
 the font library listing is not what was expected: {0}
+the font registry is unavailable
 the image file is too large
 the job is {w}×{h} mm, larger than the {bw}×{bh} mm work area
+the library font {path} is not loaded; download the font library first
 the machine entered an alarm state; clear it (unlock/home) before running again
 the marks imply a change of size of {0}x, which is not believable
 the offset leaves nothing (the shapes collapse at that distance)

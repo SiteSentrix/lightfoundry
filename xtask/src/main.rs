@@ -4,6 +4,7 @@ mod assets;
 mod cleanroom;
 mod layers;
 mod messages;
+mod site_fonts;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -16,6 +17,7 @@ commands:
   cleanroom  fail on LightBurn-authored files, text or fixtures
   assets     check that every file under assets/ has a row in ATTRIBUTION.md
   messages   rewrite the list of engine messages for translators (--check: fail if out of date)
+  site-fonts <fonts-repo> <site-dir>  copy the drawable library fonts into the hosted site with an index
   ci         fmt --check, clippy -D warnings, test, layers, cleanroom, assets (stops at the first failure)
 ";
 
@@ -25,6 +27,7 @@ fn main() -> ExitCode {
         Some("cleanroom") => cleanroom::run(&root()),
         Some("assets") => assets::run(&root()),
         Some("messages") => messages::run(&root(), std::env::args().nth(2).as_deref() == Some("--check")),
+        Some("site-fonts") => site_fonts::run(&std::env::args().skip(2).collect::<Vec<_>>()),
         Some("ci") => ci(),
         _ => Err(USAGE.to_string()),
     };

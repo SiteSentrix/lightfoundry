@@ -19,6 +19,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: The font library (public, OFL/CC fonts): served from this site, never fetched from elsewhere at run time
+        uses: actions/checkout@v4
+        with:
+          repository: Stitchwright/stitchfoundry-fonts
+          path: stitchfoundry-fonts
+          sparse-checkout: fonts
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
@@ -34,6 +40,7 @@ jobs:
           mkdir site
           cp apps/lightfoundry-web/index.html site/
           cp -r apps/lightfoundry-web/pkg site/pkg
+          cargo run --locked -q -p xtask -- site-fonts stitchfoundry-fonts site
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

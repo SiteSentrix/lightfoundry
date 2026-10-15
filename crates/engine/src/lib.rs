@@ -4,6 +4,7 @@
 
 mod cmd;
 mod error;
+pub mod fontlib;
 mod guard;
 mod session;
 

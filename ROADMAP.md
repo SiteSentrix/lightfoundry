@@ -440,3 +440,15 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   down listing the downloaded folders by name. Looked at with the real fonts (all five, including holes in
   A/B/O and Script's swashes) and in the running app. Not covered: the 131 Ink/Stitch fonts, which are SVG
   glyph fonts (`ltr.svg`, up to 14 MB each) in a different format; the web build has no font folder.
+- **2026-10-15 — font library in the hosted browser build.** The site serves the Foundry fonts itself: the
+  Pages workflow checks out `stitchfoundry-fonts` (sparse, `fonts/` only) and `cargo xtask site-fonts` copies
+  each complete folder's `font.json`, `glyphs.stitchfoundry` and licence into `site/fonts/` with an
+  `index.json`; nothing is committed here and nothing is fetched from a third party at run time. View >
+  Font library > "Download the Foundry fonts" fetches them from the site into the engine's new in-memory
+  font registry (`engine::fontlib`, fonts named `library:<folder>`, accepted wherever a font path was), the
+  browser remembers which are installed (`lightfoundry.fonts` in local storage) and re-fetches them on later
+  visits (the HTTP cache makes that cheap), and the text inspector's Library fonts list shows them.
+  The index and the remembered list are parsed with bounds (`fontindex.rs`, native tests); the registry is
+  capped. The large Ink/Stitch set is not offered on the web. Tried in headless Chromium against a local copy
+  of the site: download, list, switch font, reload and restore. Note: a project that uses a library font
+  keeps its drawn letters, but editing the text needs the font loaded again.

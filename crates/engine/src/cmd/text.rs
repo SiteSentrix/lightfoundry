@@ -13,7 +13,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Text",
         menu: "Create",
         shortcut: Some("T"),
-        params_doc: "{text, x, y, height? (cap height mm, default 10), letter_spacing?, line_spacing?, align?: left|center|right, layer?}  (single-line stroke font), font? (path to a .ttf/.otf file, or a font library folder: draws filled outlines; use a Fill layer to engrave them), vertical? (stack letters top to bottom, one column per line, first line rightmost), fallback_font? (path to a second .ttf/.otf for characters the font lacks)",
+        params_doc: "{text, x, y, height? (cap height mm, default 10), letter_spacing?, line_spacing?, align?: left|center|right, layer?}  (single-line stroke font), font? (path to a .ttf/.otf file, a font library folder, or library:<folder> for a font a browser host loaded: draws filled outlines; use a Fill layer to engrave them), vertical? (stack letters top to bottom, one column per line, first line rightmost), fallback_font? (path to a second .ttf/.otf for characters the font lacks)",
         mutates: true,
         run: create,
     },
@@ -167,7 +167,7 @@ pub(super) fn generate(text: &str, s: &TextSettings) -> Result<(lightfoundry_geo
 /// A font as loaded: a TrueType/OpenType file's bytes, or a font library folder's ready-drawn glyphs.
 enum LoadedFont {
     File(Vec<u8>),
-    Glyphs(Box<lightfoundry_text::GlyphFont>),
+    Glyphs(std::sync::Arc<lightfoundry_text::GlyphFont>),
 }
 
 /// The font library's files: a folder with `font.json` and `glyphs.stitchfoundry`, named by the folder
@@ -176,6 +176,12 @@ const GLYPH_FONT_FILES: [&str; 2] = ["font.json", "glyphs.stitchfoundry"];
 
 /// Reads a font, refusing anything unreasonably large before it is loaded.
 fn read_font(path: &str) -> Result<LoadedFont, EngineError> {
+    // A name the host loaded into memory (the browser has no folders to point at).
+    if path.starts_with(crate::fontlib::PREFIX) {
+        return crate::fontlib::get(path)
+            .map(LoadedFont::Glyphs)
+            .ok_or_else(|| EngineError::BadParams(format!("the library font {path} is not loaded; download the font library first")));
+    }
     let p = std::path::Path::new(path);
     let folder =
         if p.is_dir() { Some(p) } else { p.file_name().and_then(|n| n.to_str()).filter(|n| GLYPH_FONT_FILES.contains(n)).and_then(|_| p.parent()) };
@@ -194,7 +200,7 @@ fn read_glyph_font(folder: &std::path::Path) -> Result<LoadedFont, EngineError> 
     let info = read("font.json", lightfoundry_text::MAX_FONT_JSON_BYTES)?;
     let glyphs = read("glyphs.stitchfoundry", lightfoundry_text::MAX_GLYPH_FILE_BYTES)?;
     let font = lightfoundry_text::GlyphFont::parse(&info, &glyphs).map_err(|e| EngineError::BadParams(e.to_string()))?;
-    Ok(LoadedFont::Glyphs(Box::new(font)))
+    Ok(LoadedFont::Glyphs(std::sync::Arc::new(font)))
 }
 
 fn read_font_file(path: &str) -> Result<Vec<u8>, EngineError> {

@@ -1281,6 +1281,43 @@ mod import_tests {
         assert!(s.execute("text.create", &json!({"text": "A", "font": junk})).is_err());
     }
 
+    /// The only test that touches the process-wide font registry, so nothing else can race it.
+    #[test]
+    fn library_fonts_loaded_by_the_host_work_by_name_and_bad_ones_are_refused() {
+        use crate::fontlib as registry;
+        let info = r#"{"name":"Loaded Face","horiz_adv_x":{"H":50},"horiz_adv_x_space":30,"leading":98}"#;
+        let glyphs = r#"{"document":{"layers":[{"kind":{"type":"layer","children":[{"name":"H","kind":{"type":"path","path":{"subpaths":[{"anchors":[{"p":[0,0]},{"p":[0,-70]},{"p":[50,-70]},{"p":[50,0]}],"closed":true}]}}}]}}]}}"#;
+        registry::clear();
+        assert!(registry::list().is_empty());
+        let mut s = Session::new();
+        let err = s.execute("text.create", &json!({"text": "H", "font": "library:loaded"})).unwrap_err().to_string();
+        assert!(err.contains("not loaded"), "{err}");
+
+        registry::register("loaded", info, glyphs).unwrap();
+        assert_eq!(registry::list(), vec![("library:loaded".to_string(), "Loaded Face".to_string())]);
+        let v = s.execute("text.create", &json!({"text": "HH", "x": 5, "y": 5, "height": 10, "font": "library:loaded"})).unwrap();
+        let b = s.doc.shape(v["id"].as_u64().unwrap()).unwrap().world_bounds().unwrap();
+        assert!((b.y1 - b.y0 - 10.0).abs() < 0.1, "{b:?}");
+        // The name is kept with the text, so it can be edited again while the font is loaded.
+        assert!(s.execute("text.edit", &json!({"id": v["id"], "text": "H"})).is_ok());
+
+        for bad in ["", ".hidden", "a/b", "a\\b", &"x".repeat(200), "tab\t"] {
+            assert!(registry::register(bad, info, glyphs).is_err(), "{bad:?}");
+        }
+        assert!(registry::register("junk", "{}", "not json").is_err());
+        assert!(registry::register("junk", info, "{}").is_err());
+        assert_eq!(registry::list().len(), 1, "failed loads leave nothing behind");
+
+        for i in 0..registry::MAX_FONTS {
+            let _ = registry::register(&format!("f{i}"), info, glyphs);
+        }
+        assert_eq!(registry::list().len(), registry::MAX_FONTS);
+        assert!(registry::register("one-too-many", info, glyphs).is_err());
+        assert!(registry::register("f1", info, glyphs).is_ok(), "replacing a loaded font is always allowed");
+        registry::clear();
+        assert!(s.execute("text.edit", &json!({"id": v["id"], "text": "H"})).is_err(), "editing needs the font loaded again");
+    }
+
     #[test]
     fn text_can_use_a_font_library_folder_by_folder_or_by_either_file() {
         let dir = std::env::temp_dir().join(format!("lf-engine-glyphfont-{}", std::process::id()));

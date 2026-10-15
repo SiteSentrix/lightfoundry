@@ -6,6 +6,8 @@
 //! The wasm-bindgen glue is generated code, so the workspace's `unsafe_code` lint is relaxed here.
 #![allow(unsafe_code)]
 
+pub mod fontindex;
+
 #[cfg(target_arch = "wasm32")]
 mod web {
     use eframe::wasm_bindgen::JsCast;
@@ -27,6 +29,7 @@ mod web {
             .ok_or_else(|| JsValue::from_str("no canvas with that id"))?
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .map_err(|_| JsValue::from_str("that element is not a canvas"))?;
+        restore_fonts();
         eframe::WebRunner::new()
             .start(
                 canvas,
@@ -35,7 +38,11 @@ mod web {
                     Ok(Box::new(Host {
                         app: LightFoundryApp::new(
                             Session::new(),
-                            Box::new(WebPlatform { inbox: Rc::new(RefCell::new(None)), serial: Rc::new(RefCell::new(None)) }),
+                            Box::new(WebPlatform {
+                                inbox: Rc::new(RefCell::new(None)),
+                                serial: Rc::new(RefCell::new(None)),
+                                font_job: Rc::new(RefCell::new(FontJob::default())),
+                            }),
                         ),
                     }))
                 }),
@@ -50,6 +57,7 @@ mod web {
         inbox: Rc<RefCell<Option<Upload>>>,
         /// The serial device once the person has chosen it and it is open (or why not).
         serial: Rc<RefCell<Option<Result<Box<dyn Transport + Send>, String>>>>,
+        font_job: Rc<RefCell<FontJob>>,
     }
 
     impl Platform for WebPlatform {
@@ -91,6 +99,46 @@ mod web {
             if !matches!(stored, Some(Ok(()))) {
                 log::warn!("could not remember the recent projects (browser storage is unavailable or full)");
             }
+        }
+
+        fn font_library_available(&self) -> bool {
+            true
+        }
+
+        fn font_library_everything_available(&self) -> bool {
+            false
+        }
+
+        fn library_fonts(&self) -> Vec<(String, String)> {
+            lightfoundry_engine::fontlib::list().into_iter().map(|(name, display)| (display, name)).collect()
+        }
+
+        fn start_font_library_download(&self, _everything: bool) -> bool {
+            {
+                let mut job = self.font_job.borrow_mut();
+                if job.running {
+                    return false;
+                }
+                job.running = true;
+                job.result = None;
+            }
+            let job = Rc::clone(&self.font_job);
+            spawn_local(async move {
+                let result = load_fonts(None).await.map(|folders| {
+                    if let (Some(storage), Ok(text)) = (local_storage(), serde_json::to_string(&folders)) {
+                        let _ = storage.set_item(FONTS_KEY, &text);
+                    }
+                    format!("Font library: {} fonts ready under Library fonts in the text inspector.", folders.len())
+                });
+                let mut job = job.borrow_mut();
+                job.running = false;
+                job.result = Some(result);
+            });
+            true
+        }
+
+        fn take_font_library_result(&self) -> Option<Result<String, String>> {
+            self.font_job.borrow_mut().result.take()
         }
 
         fn inline_link(&self) -> bool {
@@ -310,6 +358,75 @@ mod web {
             }
             Ok(None)
         }
+    }
+
+    /// Where the installed font folders are remembered between visits.
+    const FONTS_KEY: &str = "lightfoundry.fonts";
+
+    /// The font library download in progress (or its result, not yet taken).
+    #[derive(Default)]
+    struct FontJob {
+        running: bool,
+        result: Option<Result<String, String>>,
+    }
+
+    fn local_storage() -> Option<web_sys::Storage> {
+        web_sys::window()?.local_storage().ok()?
+    }
+
+    /// Fetches a text file from this site (same origin: the fonts are copied onto the site when it is
+    /// built, so nothing here talks to a third party). `cap` bounds what is accepted.
+    async fn fetch_text(url: &str, cap: usize) -> Result<String, String> {
+        let window = web_sys::window().ok_or("no window")?;
+        let response: web_sys::Response =
+            JsFuture::from(window.fetch_with_str(url)).await.map_err(describe)?.dyn_into().map_err(|_| "the browser gave no response".to_string())?;
+        if !response.ok() {
+            return Err(format!("{} for {url}", response.status()));
+        }
+        let text = JsFuture::from(response.text().map_err(describe)?).await.map_err(describe)?.as_string().ok_or("the file is not text")?;
+        if text.len() > cap {
+            return Err(format!("{url} is larger than expected"));
+        }
+        Ok(text)
+    }
+
+    /// Downloads the fonts the site carries (only `only`, when given) into the engine's font registry.
+    /// Returns the folders that loaded.
+    async fn load_fonts(only: Option<Vec<String>>) -> Result<Vec<String>, String> {
+        let index = fetch_text("fonts/index.json", crate::fontindex::MAX_INDEX_BYTES)
+            .await
+            .map_err(|e| format!("The font library is not available from this site ({e})"))?;
+        let mut loaded = Vec::new();
+        for entry in crate::fontindex::parse_index(&index)? {
+            if only.as_ref().is_some_and(|names| !names.contains(&entry.folder)) {
+                continue;
+            }
+            let base = format!("fonts/{}/", entry.folder);
+            let info = fetch_text(&format!("{base}font.json"), entry.font_json_bytes as usize + 1024).await?;
+            let glyphs = fetch_text(&format!("{base}glyphs.stitchfoundry"), entry.glyphs_bytes as usize + 1024).await?;
+            match lightfoundry_engine::fontlib::register(&entry.folder, &info, &glyphs) {
+                Ok(()) => loaded.push(entry.folder),
+                Err(e) => log::warn!("skipping the font {}: {e}", entry.folder),
+            }
+        }
+        if loaded.is_empty() && only.is_none() {
+            return Err("The font library on this site has no usable fonts".into());
+        }
+        Ok(loaded)
+    }
+
+    /// Re-fetches the fonts installed on an earlier visit (the browser's cache makes this cheap).
+    fn restore_fonts() {
+        let remembered =
+            local_storage().and_then(|s| s.get_item(FONTS_KEY).ok().flatten()).map(|t| crate::fontindex::parse_remembered(&t)).unwrap_or_default();
+        if remembered.is_empty() {
+            return;
+        }
+        spawn_local(async move {
+            if let Err(e) = load_fonts(Some(remembered)).await {
+                log::warn!("could not restore the installed fonts: {e}");
+            }
+        });
     }
 
     struct Host {
