@@ -22,6 +22,7 @@ mod settings_ui;
 mod shortcuts;
 pub(crate) mod snap;
 mod spacing;
+mod tablet;
 mod theme;
 mod timeline_ui;
 mod view;
@@ -56,6 +57,8 @@ pub enum Tool {
     Nodes,
     /// Draw Bézier paths node by node.
     Pen,
+    /// Drag the view (for fingers, which have no middle button).
+    Hand,
 }
 
 /// Where Start sends the program.
@@ -83,6 +86,19 @@ pub struct LightFoundryApp {
     theme: theme::ThemeChoice,
     /// The theme last handed to egui, so it is only changed when the choice changes.
     applied_theme: Option<theme::ThemeChoice>,
+    /// Tablet mode: the setting, whether a touch has been seen, what was last applied, and its helpers.
+    tablet: tablet::TabletMode,
+    touch_seen: bool,
+    applied_tablet: Option<bool>,
+    /// A tap-able stand-in for holding Shift.
+    sticky_shift: bool,
+    show_inspector: bool,
+    inspector_decided: bool,
+    /// Frames left in which the view is refitted after the interface scale changed.
+    refit_frames: u8,
+    /// Where the tablet action bar drew its buttons (the frame tests click them).
+    #[cfg(test)]
+    button_rects: std::collections::HashMap<&'static str, egui::Rect>,
     view: Option<View>,
     tool: Tool,
     drag: canvas::Drag,
@@ -255,6 +271,15 @@ impl LightFoundryApp {
             tokens: Tokens::DARK,
             theme: theme::ThemeChoice::Auto,
             applied_theme: None,
+            tablet: tablet::TabletMode::default(),
+            touch_seen: false,
+            applied_tablet: None,
+            sticky_shift: false,
+            show_inspector: true,
+            inspector_decided: false,
+            refit_frames: 0,
+            #[cfg(test)]
+            button_rects: std::collections::HashMap::new(),
             view: None,
             tool: Tool::Select,
             drag: canvas::Drag::None,
@@ -352,6 +377,7 @@ impl LightFoundryApp {
     /// Draws one frame. Called from the host's `eframe::App::ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         self.apply_theme(ui.ctx());
+        tablet::begin_frame(self, ui.ctx());
         self.apply_translation_font(ui.ctx());
         self.poll_link(ui.ctx());
         self.autosave_tick(ui.ctx());
@@ -365,9 +391,15 @@ impl LightFoundryApp {
             self.handle_shortcuts(ui.ctx());
         }
         menus::menu_bar(self, ui);
+        if self.tablet_active() {
+            tablet::action_bar(self, ui);
+        }
         egui::Panel::bottom("status").show(ui, |ui| self.status_bar(ui));
-        egui::Panel::left("tools").resizable(false).exact_size(84.0).show(ui, |ui| panels::toolbar(self, ui));
-        egui::Panel::right("inspector").default_size(300.0).show(ui, |ui| panels::inspector(self, ui));
+        let tools_width = if self.tablet_active() { 112.0 } else { 84.0 };
+        egui::Panel::left("tools").resizable(false).exact_size(tools_width).show(ui, |ui| panels::toolbar(self, ui));
+        if self.show_inspector {
+            egui::Panel::right("inspector").default_size(300.0).show(ui, |ui| panels::inspector(self, ui));
+        }
         if self.show_preview {
             egui::Panel::bottom("timeline").show(ui, |ui| timeline_ui::bar(self, ui));
         }

@@ -18,8 +18,10 @@ pub fn toolbar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         (Tool::Text, "Text"),
         (Tool::Nodes, "Nodes"),
         (Tool::Pen, "Pen"),
+        (Tool::Hand, "Pan"),
     ] {
-        if ui.add_sized([72.0, 28.0], egui::Button::new(label).selected(app.tool == tool)).clicked() {
+        let size = [(ui.available_width() - 4.0).max(72.0), if app.tablet_active() { 40.0 } else { 28.0 }];
+        if ui.add_sized(size, egui::Button::new(tr(label)).selected(app.tool == tool)).clicked() {
             if app.tool == Tool::Pen && tool != Tool::Pen {
                 // Switching away completes the path being drawn rather than losing it.
                 crate::nodes_ui::finish(app, false);

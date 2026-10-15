@@ -62,6 +62,13 @@ impl Harness {
     fn click(&mut self, at: egui::Pos2) {
         self.drag(at, at);
     }
+
+    /// Runs frames until the view has stopped being refitted after a layout change.
+    fn settle(&mut self) {
+        for _ in 0..8 {
+            self.frame(vec![]);
+        }
+    }
 }
 
 /// A platform with a private recovery folder, and canned answers for dialogs.
@@ -1964,6 +1971,174 @@ mod create_by_numbers_tests {
         h.drag(h.at(121.0, 60.0), h.at(200.0, 80.0));
         let b = h.app.session.doc.shapes[1].world_bounds().unwrap();
         assert!((b.x0 - 120.0).abs() < 1e-6, "{b:?}");
+    }
+}
+
+mod tablet_tests {
+    use egui::{TouchDeviceId, TouchId, TouchPhase};
+
+    use super::*;
+    use crate::tablet::TabletMode;
+
+    fn touch(id: u64, phase: TouchPhase, pos: egui::Pos2) -> Event {
+        Event::Touch { device_id: TouchDeviceId(0), id: TouchId(id), phase, pos, force: None }
+    }
+
+    /// Two fingers start at `a` and `b`, move together by `by`, and stay down.
+    fn two_fingers(h: &mut Harness, a: egui::Pos2, b: egui::Pos2, a2: egui::Pos2, b2: egui::Pos2) {
+        // Real integrations send a pointer position along with touches; egui starts a gesture from it.
+        h.frame(vec![Event::PointerMoved(a), touch(1, TouchPhase::Start, a), touch(2, TouchPhase::Start, b)]);
+        h.frame(vec![]);
+        for step in 1..=4 {
+            let t = step as f32 / 4.0;
+            h.frame(vec![touch(1, TouchPhase::Move, a + (a2 - a) * t), touch(2, TouchPhase::Move, b + (b2 - b) * t)]);
+        }
+    }
+
+    #[test]
+    fn the_first_touch_turns_automatic_tablet_mode_on_and_the_setting_can_force_it() {
+        let mut h = Harness::new();
+        assert!(!h.app.tablet_active());
+        assert_eq!(h.app.hit_px(), crate::tablet::HIT_PX_MOUSE);
+        h.frame(vec![touch(1, TouchPhase::Start, pos2(500.0, 400.0))]);
+        h.frame(vec![touch(1, TouchPhase::End, pos2(500.0, 400.0))]);
+        assert!(h.app.tablet_active());
+        assert_eq!(h.app.hit_px(), crate::tablet::HIT_PX_TOUCH);
+        assert_eq!(h.ctx.zoom_factor(), crate::tablet::UI_ZOOM);
+        h.app.tablet = TabletMode::Off;
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert!(!h.app.tablet_active());
+        assert_eq!(h.ctx.zoom_factor(), 1.0, "turning it off restores the normal size");
+        h.app.sticky_shift = true;
+        h.frame(vec![]);
+        assert!(!h.app.sticky_shift, "the sticky Shift goes with the mode");
+
+        let mut forced = Harness::new();
+        forced.app.tablet = TabletMode::On;
+        forced.frame(vec![]);
+        assert!(forced.app.tablet_active() && !forced.app.touch_seen);
+        assert!(crate::tablet::starts_folded(820.0) && !crate::tablet::starts_folded(1366.0));
+    }
+
+    #[test]
+    fn two_fingers_pan_and_zoom_the_view_and_edit_nothing() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 50, "y": 50, "width": 20, "height": 20}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.app.tablet = TabletMode::On;
+        h.settle();
+        let before = h.app.view.unwrap();
+        // Both fingers slide right and down by (40, 20).
+        two_fingers(&mut h, pos2(500.0, 300.0), pos2(600.0, 300.0), pos2(540.0, 320.0), pos2(640.0, 320.0));
+        let after = h.app.view.unwrap();
+        assert!(
+            (after.origin.x - before.origin.x - 40.0).abs() < 1.0 && (after.origin.y - before.origin.y - 20.0).abs() < 1.0,
+            "{before:?} {after:?}"
+        );
+        assert!((after.zoom - before.zoom).abs() < 0.01, "no pinch, no zoom");
+        h.frame(vec![touch(1, TouchPhase::End, pos2(540.0, 320.0)), touch(2, TouchPhase::End, pos2(640.0, 320.0))]);
+
+        // Spreading the fingers zooms in.
+        let before = h.app.view.unwrap();
+        two_fingers(&mut h, pos2(500.0, 300.0), pos2(600.0, 300.0), pos2(450.0, 300.0), pos2(650.0, 300.0));
+        assert!(h.app.view.unwrap().zoom > before.zoom * 1.2, "{before:?} {:?}", h.app.view);
+        h.frame(vec![touch(1, TouchPhase::End, pos2(450.0, 300.0)), touch(2, TouchPhase::End, pos2(650.0, 300.0))]);
+        assert_eq!(h.app.session.doc.shapes.len(), 1, "no shape was made or lost");
+        assert!(h.app.session.selection.is_empty());
+    }
+
+    #[test]
+    fn a_pointer_drag_that_two_fingers_join_is_dropped_not_applied() {
+        let mut h = Harness::new();
+        h.app.tool = Tool::Rectangle;
+        h.frame(vec![]);
+        let start = pos2(400.0, 300.0);
+        h.frame(vec![Event::PointerMoved(start)]);
+        h.frame(vec![Event::PointerButton { pos: start, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }]);
+        h.frame(vec![Event::PointerMoved(pos2(450.0, 340.0))]);
+        two_fingers(&mut h, pos2(500.0, 300.0), pos2(600.0, 300.0), pos2(510.0, 300.0), pos2(610.0, 300.0));
+        assert!(matches!(h.app.drag, crate::canvas::Drag::None), "{:?}", h.app.drag);
+        h.frame(vec![Event::PointerButton { pos: pos2(450.0, 340.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]);
+        h.frame(vec![]);
+        assert_eq!(h.app.session.doc.shapes.len(), 0, "the half-made rectangle was not created");
+    }
+
+    #[test]
+    fn the_pan_tool_drags_the_view_with_one_finger() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 50, "y": 50, "width": 20, "height": 20}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.app.tool = Tool::Hand;
+        h.frame(vec![]);
+        h.frame(vec![]);
+        let before = h.app.view.unwrap();
+        // Dragging across the rectangle moves the view, not the rectangle, and selects nothing.
+        let from = h.at(60.0, 60.0);
+        h.drag(from, from + vec2(60.0, 35.0));
+        let after = h.app.view.unwrap();
+        assert!(
+            (after.origin.x - before.origin.x - 60.0).abs() < 2.0 && (after.origin.y - before.origin.y - 35.0).abs() < 2.0,
+            "{before:?} {after:?}"
+        );
+        let b = h.app.session.doc.shapes[0].world_bounds().unwrap();
+        assert!((b.x0 - 50.0).abs() < 1e-9 && (b.y0 - 50.0).abs() < 1e-9, "{b:?}");
+        assert!(h.app.session.selection.is_empty());
+    }
+
+    #[test]
+    fn the_sticky_shift_keeps_a_move_on_one_axis() {
+        let mut h = Harness::new();
+        h.app.tablet = TabletMode::On;
+        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: false, ..Default::default() };
+        let id = h.app.run("shape.rectangle", json!({"x": 50, "y": 50, "width": 20, "height": 20})).unwrap()["id"].as_u64().unwrap();
+        h.app.run("edit.select", json!({"ids": [id]}));
+        h.settle();
+        h.app.sticky_shift = true;
+        h.frame(vec![]);
+        // Drag diagonally: mostly right, a little down.
+        h.drag(h.at(60.0, 60.0), h.at(90.0, 66.0));
+        let b = h.app.session.doc.shape(id).unwrap().world_bounds().unwrap();
+        assert!((b.x0 - 80.0).abs() < 1.0, "moved right: {b:?}");
+        assert!((b.y0 - 50.0).abs() < 1e-6, "but not down: {b:?}");
+    }
+
+    #[test]
+    fn a_fingertip_grabs_what_a_mouse_pointer_misses() {
+        let click_near_edge = |mode: TabletMode| {
+            let mut h = Harness::new();
+            h.app.tablet = mode;
+            h.app.snapping = crate::snap::SnapSettings { grid: None, objects: false, ..Default::default() };
+            h.app.run("shape.rectangle", json!({"x": 40, "y": 40, "width": 40, "height": 40}));
+            h.app.run("edit.select", json!({"ids": []}));
+            h.settle();
+            // Eleven screen points outside the right edge, level with its middle.
+            let edge = h.at(80.0, 60.0);
+            h.click(edge + vec2(11.0, 0.0));
+            h.app.session.selection.len()
+        };
+        assert_eq!(click_near_edge(TabletMode::Off), 0, "outside the 6 point reach of a pointer");
+        assert_eq!(click_near_edge(TabletMode::On), 1, "inside the 16 point reach of a finger");
+    }
+
+    #[test]
+    fn the_action_bar_buttons_work_and_the_inspector_folds_away() {
+        let mut h = Harness::new();
+        h.app.tablet = TabletMode::On;
+        let id = h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 10, "height": 10})).unwrap()["id"].as_u64().unwrap();
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert!(h.app.show_inspector);
+        // The bar is real: its Undo button undoes the rectangle.
+        let undo = h.app.button_rects["Undo"].center();
+        h.click(undo);
+        assert!(h.app.session.doc.shape(id).is_none(), "undone from the action bar");
+        let panel = h.app.button_rects["Panel"].center();
+        h.click(panel);
+        assert!(!h.app.show_inspector, "the Panel button folds the inspector away");
+        let panel = h.app.button_rects["Panel"].center();
+        h.click(panel);
+        assert!(h.app.show_inspector);
     }
 }
 

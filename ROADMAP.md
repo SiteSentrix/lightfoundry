@@ -452,3 +452,18 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   capped. The large Ink/Stitch set is not offered on the web. Tried in headless Chromium against a local copy
   of the site: download, list, switch font, reload and restore. Note: a project that uses a library font
   keeps its drawn letters, but editing the text needs the font loaded again.
+- **2026-10-15 — tablet mode.** View > Tablet mode (Automatic by default: on at the first touch; or On/Off).
+  When on: the interface is drawn at 1.3x with roomier controls and a wider tool column; grab reach for
+  shapes and nodes grows from 6 to 16 points (corner handles keep a smaller reach and never swallow the
+  middle of a small shape); two fingers pan and zoom the canvas together and drop any half-made one-finger
+  edit; a **Pan** tool drags the view with one finger; an action bar carries Undo, Redo, Delete,
+  Duplicate, Fit, Pan, a sticky **Shift** (holds the modifier for axis-locked moves, square shapes and
+  add-to-selection) and a **Panel** toggle that folds the inspector away (it starts folded below 1100
+  points of width). The page (`index.html`) now stops the browser taking touches (no page scroll, pinch
+  zoom, text selection or long-press menu). Code in `tablet.rs`; frame tests cover auto-detection and the
+  override, two-finger pan/zoom, dropping a drag when a second finger lands, the Pan tool, the sticky
+  Shift, fingertip reach and the action bar. Tried in headless Chromium at 1024x768 with real touch
+  events (CDP): first touch switches the mode on, finger-drawn rectangle, two-finger pan and spread zoom,
+  Shift and Undo. Not done: long-press as right-click, hover-based features (object tracking) have no
+  touch equivalent yet, the on-screen keyboard for text editing is the browser's, and nothing has been
+  tried on a physical iPad or Android tablet.

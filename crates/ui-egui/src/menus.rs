@@ -15,6 +15,14 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                     app.view = None;
                     ui.close();
                 }
+                ui.horizontal(|ui| {
+                    ui.label(tr("Tablet mode"));
+                    egui::ComboBox::from_id_salt("tablet_mode").selected_text(tr(app.tablet.label())).show_ui(ui, |ui| {
+                        for mode in crate::tablet::TabletMode::ALL {
+                            ui.selectable_value(&mut app.tablet, mode, tr(mode.label()));
+                        }
+                    });
+                });
                 ui.checkbox(&mut app.show_rulers, tr("Rulers"));
                 ui.checkbox(&mut app.snapping.objects, tr("Snap to objects and guides"));
                 ui.add_enabled_ui(app.snapping.objects, |ui| {

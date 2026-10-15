@@ -10,7 +10,7 @@ use lightfoundry_geom::{Point, Vec2};
 use serde_json::json;
 
 use crate::LightFoundryApp;
-use crate::canvas::{HIT_PX, Snapper};
+use crate::canvas::Snapper;
 use crate::view::View;
 
 /// Which node of which shape is selected.
@@ -61,7 +61,7 @@ pub fn interact(app: &mut LightFoundryApp, ui: &egui::Ui, resp: &egui::Response,
     if app.tool == crate::Tool::Pen {
         return pen_interact(app, ui, resp, view, pointer, snapper);
     }
-    let tol = f64::from(HIT_PX / view.zoom) * 1.2;
+    let tol = f64::from(app.hit_px() / view.zoom) * 1.2;
     let pressed = ui.input(|i| i.pointer.press_origin()).map(|p| view.to_world(p));
 
     if resp.drag_started_by(PointerButton::Primary)

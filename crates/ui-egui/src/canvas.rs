@@ -11,7 +11,6 @@ use crate::{LightFoundryApp, Tool};
 use crate::{crop_ui, head_ui, nodes_ui, register_ui, timeline_ui};
 
 /// Pointer-distance (screen points) within which handles and edges are hit.
-pub(crate) const HIT_PX: f32 = 6.0;
 /// Smallest shape a drag may create, in mm.
 const MIN_CREATE_MM: f64 = 0.05;
 
@@ -188,7 +187,7 @@ pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let (bed_w, bed_h) = (app.session.doc.machine.bed_width, app.session.doc.machine.bed_height);
     let mut view = app.view.unwrap_or_else(|| View::fit(canvas_rect, bed_w, bed_h));
 
-    navigate(ui, &resp, &mut view);
+    navigate(ui, &resp, &mut view, app.tool == Tool::Hand);
     let hover = resp.hover_pos().map(|p| view.to_world(p));
     app.hover_world = hover;
     let pointer = resp.interact_pointer_pos().map(|p| view.to_world(p));
@@ -227,9 +226,15 @@ pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     app.view = Some(view);
 }
 
-fn navigate(ui: &egui::Ui, resp: &egui::Response, view: &mut View) {
-    if resp.dragged_by(PointerButton::Middle) || resp.dragged_by(PointerButton::Secondary) {
+fn navigate(ui: &egui::Ui, resp: &egui::Response, view: &mut View, hand: bool) {
+    if resp.dragged_by(PointerButton::Middle) || resp.dragged_by(PointerButton::Secondary) || (hand && resp.dragged_by(PointerButton::Primary)) {
         view.pan(resp.drag_delta());
+    }
+    // Two fingers pan and zoom together (egui folds the pinch into `zoom_delta`, so it is not applied twice).
+    if let Some(touch) = ui.input(|i| i.multi_touch()) {
+        view.pan(touch.translation_delta);
+        view.zoom_at(touch.center_pos, touch.zoom_delta);
+        return;
     }
     if let Some(anchor) = resp.hover_pos() {
         let (scroll, pinch) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
@@ -253,8 +258,18 @@ fn interact(
     canvas: egui::Rect,
 ) -> (f64, f64) {
     let shift = ui.input(|i| i.modifiers.shift);
-    let tol = f64::from(HIT_PX / view.zoom);
+    let tol = f64::from(app.hit_px() / view.zoom);
     let mut offset = (0.0, 0.0);
+
+    // Two fingers down are a pan or zoom, never an edit: drop whatever one finger had started. The Pan
+    // tool only moves the view.
+    if ui.input(|i| i.multi_touch()).is_some() {
+        app.drag = Drag::None;
+        return offset;
+    }
+    if app.tool == Tool::Hand {
+        return offset;
+    }
 
     if app.crop_mode && crop_ui::interact(app, resp, view, pointer) {
         return offset;
@@ -395,7 +410,9 @@ fn begin_drag(app: &mut LightFoundryApp, p: Point, screen: Option<Pos2>, canvas:
     if app.tool != Tool::Select {
         return Drag::Create { start: snapper.point(p).point };
     }
-    if let Some(anchor) = handle_at(app, p, tol * 1.5) {
+    // A fingertip is already wide: take its reach as is, and (in handle_at) never let corner handles swallow the middle of a small shape.
+    let handle_reach = if app.tablet_active() { tol } else { tol * 1.5 };
+    if let Some(anchor) = handle_at(app, p, handle_reach) {
         return Drag::Resize { anchor };
     }
     match app.geometry.pick(p, tol) {
@@ -477,7 +494,7 @@ fn create(app: &mut LightFoundryApp, a: Point, b: Point) {
     let (w, h) = ((b.x - a.x).abs(), (b.y - a.y).abs());
     let layer = app.active_layer;
     match app.tool {
-        Tool::Select | Tool::Text | Tool::Nodes | Tool::Pen => {}
+        Tool::Select | Tool::Text | Tool::Nodes | Tool::Pen | Tool::Hand => {}
         Tool::Rectangle if w > MIN_CREATE_MM && h > MIN_CREATE_MM => {
             app.run(
                 "shape.rectangle",
@@ -513,6 +530,7 @@ fn click_select(app: &mut LightFoundryApp, p: Point, tol: f64, shift: bool) {
 /// The corner opposite to a selection-bounds corner under `p`, if any.
 fn handle_at(app: &LightFoundryApp, p: Point, tol: f64) -> Option<Point> {
     let b = app.session.doc.bounds_of(&app.session.selection)?;
+    let tol = if app.tablet_active() { tol.min(0.3 * (b.x1 - b.x0).min(b.y1 - b.y0)) } else { tol };
     let corners = [(b.x0, b.y0, b.x1, b.y1), (b.x1, b.y0, b.x0, b.y1), (b.x1, b.y1, b.x0, b.y0), (b.x0, b.y1, b.x1, b.y0)];
     corners.iter().find(|(cx, cy, _, _)| p.distance(Point::new(*cx, *cy)) <= tol).map(|(_, _, ax, ay)| Point::new(*ax, *ay))
 }
@@ -1003,6 +1021,6 @@ fn draw_create_ghost(app: &LightFoundryApp, painter: &egui::Painter, view: &View
                 .collect();
             painter.add(Shape::closed_line(pts, stroke));
         }
-        Tool::Select | Tool::Text | Tool::Nodes | Tool::Pen => {}
+        Tool::Select | Tool::Text | Tool::Nodes | Tool::Pen | Tool::Hand => {}
     }
 }
