@@ -173,15 +173,27 @@ pub struct Snapped {
     pub point: Point,
     pub x_line: Option<Target>,
     pub y_line: Option<Target>,
-    /// A 45-degree tracking line the point was pulled onto.
+    /// An angled tracking line the point was pulled onto.
     pub diagonal: Option<Diagonal>,
 }
 
-/// A 45-degree line through an acquired point: `sign` is +1 for down-right (y grows with x) and -1 for up-right.
+/// Angles (degrees, y down) of the tracking lines through an acquired point, besides the row and
+/// column: 30, 45 and 60 degrees and their mirror images.
+pub const TRACK_ANGLES: [f64; 6] = [30.0, 45.0, 60.0, 120.0, 135.0, 150.0];
+
+/// A line through an acquired point at `degrees` (measured from the +x axis, y pointing down).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Diagonal {
     pub origin: Point,
-    pub sign: f64,
+    pub degrees: f64,
+}
+
+impl Diagonal {
+    /// Unit direction along the line.
+    pub fn direction(&self) -> (f64, f64) {
+        let r = self.degrees.to_radians();
+        (r.cos(), r.sin())
+    }
 }
 
 /// Snaps a single point. `threshold` is in mm.
@@ -251,27 +263,29 @@ pub fn snap_point_tracked(p: Point, settings: &SnapSettings, targets: &SnapTarge
     s
 }
 
-/// Pulls the point onto the nearest 45-degree line through an acquired point: free in both axes
+/// Pulls the point onto the nearest angled line through an acquired point: free in both axes
 /// where nothing else caught, else along the one line that an axis lock already fixed (so it lands
-/// on the crossing of a tracking or object line with the diagonal).
+/// on the crossing of a tracking or object line with the angled line).
 fn pull_diagonal(s: &mut Snapped, raw: Point, tracked: &[Point], threshold: f64) {
     let mut best: Option<(f64, Point, Diagonal)> = None;
     for t in tracked.iter().filter(|t| t.x.is_finite() && t.y.is_finite()) {
-        for sign in [1.0, -1.0] {
+        for degrees in TRACK_ANGLES {
+            let diagonal = Diagonal { origin: *t, degrees };
+            let (c, sn) = diagonal.direction();
             let q = match (s.x_line.is_some(), s.y_line.is_some()) {
                 (false, false) => {
                     // Foot of the perpendicular from the cursor onto the line.
-                    let along = ((raw.x - t.x) + sign * (raw.y - t.y)) / 2.0;
-                    Point::new(t.x + along, t.y + sign * along)
+                    let along = (raw.x - t.x) * c + (raw.y - t.y) * sn;
+                    Point::new(t.x + along * c, t.y + along * sn)
                 }
-                (true, false) => Point::new(s.point.x, t.y + sign * (s.point.x - t.x)),
-                (false, true) => Point::new(t.x + sign * (s.point.y - t.y), s.point.y),
-                (true, true) => continue,
+                (true, false) if c.abs() > 1e-9 => Point::new(s.point.x, t.y + sn / c * (s.point.x - t.x)),
+                (false, true) if sn.abs() > 1e-9 => Point::new(t.x + c / sn * (s.point.y - t.y), s.point.y),
+                _ => continue,
             };
             let d = q.distance(raw);
             // Right on the acquired point itself every angle fits, which is no guidance.
-            if d <= threshold && q.distance(*t) > threshold && best.is_none_or(|(bd, _, _)| d < bd) {
-                best = Some((d, q, Diagonal { origin: *t, sign }));
+            if d.is_finite() && d <= threshold && q.distance(*t) > threshold && best.is_none_or(|(bd, _, _)| d < bd) {
+                best = Some((d, q, diagonal));
             }
         }
     }
@@ -279,6 +293,51 @@ fn pull_diagonal(s: &mut Snapped, raw: Point, tracked: &[Point], threshold: f64)
         s.point = q;
         s.diagonal = Some(diagonal);
     }
+}
+
+/// What tracking does to a moving selection: `keys` are the points of its box (corners, edge
+/// midpoints, centre) at the current offset; the key that needs the smallest nudge to sit on a
+/// tracking line decides. Axes in `locked` (already caught by an object) are left alone, and angled
+/// lines are only used when neither is locked. Returns the nudge and what to draw.
+pub fn track_translation(keys: &[Point], tracked: &[Point], locked: (bool, bool), threshold: f64) -> Option<TrackNudge> {
+    if tracked.is_empty() || (locked.0 && locked.1) {
+        return None;
+    }
+    let settings = SnapSettings { grid: None, objects: true };
+    let none = SnapTargets::default();
+    let mut best: Option<(f64, TrackNudge)> = None;
+    for k in keys {
+        let s = snap_point_tracked(*k, &settings, &none, tracked, threshold);
+        let take_x = !locked.0 && s.x_line.is_some();
+        let take_y = !locked.1 && s.y_line.is_some();
+        let take_diag = !locked.0 && !locked.1 && s.diagonal.is_some();
+        if !(take_x || take_y || take_diag) {
+            continue;
+        }
+        let nudge = ((if take_x || take_diag { s.point.x - k.x } else { 0.0 }), (if take_y || take_diag { s.point.y - k.y } else { 0.0 }));
+        let cost = nudge.0.abs() + nudge.1.abs();
+        if best.as_ref().is_none_or(|(c, _)| cost < *c) {
+            best = Some((
+                cost,
+                TrackNudge {
+                    by: nudge,
+                    x: s.x_line.filter(|_| take_x || take_diag),
+                    y: s.y_line.filter(|_| take_y || take_diag),
+                    diagonal: s.diagonal.filter(|_| take_diag),
+                },
+            ));
+        }
+    }
+    best.map(|(_, n)| n)
+}
+
+/// A nudge to a moving selection from tracking, and the lines to show for it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TrackNudge {
+    pub by: (f64, f64),
+    pub x: Option<Target>,
+    pub y: Option<Target>,
+    pub diagonal: Option<Diagonal>,
 }
 
 fn snap_axis(v: f64, settings: &SnapSettings, targets: &[Target], threshold: f64) -> (f64, Option<Target>) {
@@ -647,13 +706,59 @@ mod tests {
             let none = SnapTargets::default();
             let s = snap_point_tracked(Point::new(250.0, 251.4), &SnapSettings::default(), &none, &tracked, 3.0);
             assert!((s.point.x - 250.7).abs() < 1e-9 && (s.point.y - 250.7).abs() < 1e-9, "{:?}", s.point);
-            assert_eq!(s.diagonal.map(|d| d.sign), Some(1.0));
+            assert_eq!(s.diagonal.map(|d| d.degrees), Some(45.0));
             let s = snap_point_tracked(Point::new(250.0, -49.0), &SnapSettings::default(), &none, &tracked, 3.0);
-            assert_eq!(s.diagonal.map(|d| d.sign), Some(-1.0), "up and to the right");
+            assert_eq!(s.diagonal.map(|d| d.degrees), Some(135.0), "up and to the right");
             assert!(s.point.distance(Point::new(250.0, -50.0)) < 1.5, "{:?}", s.point);
             // Off every angle: untouched.
             let s = snap_point_tracked(Point::new(250.0, 180.0), &SnapSettings::default(), &none, &tracked, 3.0);
             assert_eq!((s.point, s.diagonal), (Point::new(250.0, 180.0), None));
+        }
+
+        #[test]
+        fn thirty_and_sixty_degree_lines_are_offered_too() {
+            let tracked = [Point::new(100.0, 100.0)];
+            let none = SnapTargets::default();
+            let at = |deg: f64, len: f64, nudge: f64| {
+                let r = deg.to_radians();
+                Point::new(100.0 + len * r.cos(), 100.0 + len * r.sin() + nudge)
+            };
+            for deg in [30.0, 60.0, 120.0, 150.0] {
+                let s = snap_point_tracked(at(deg, 200.0, 1.0), &SnapSettings::default(), &none, &tracked, 3.0);
+                assert_eq!(s.diagonal.map(|d| d.degrees), Some(deg), "{deg}");
+                let want = at(deg, 200.0, 0.0);
+                assert!(s.point.distance(want) < 1.5, "{deg}: {:?} vs {want:?}", s.point);
+            }
+        }
+
+        #[test]
+        fn a_moving_box_is_nudged_by_whichever_corner_is_nearest_a_tracking_line() {
+            let tracked = [Point::new(100.0, 100.0)];
+            // A 20 x 20 box whose top-left is at (150, 151.3): its corner is 1.3 mm off the 45-degree line.
+            let keys =
+                [Point::new(150.0, 151.3), Point::new(170.0, 151.3), Point::new(160.0, 161.3), Point::new(150.0, 171.3), Point::new(170.0, 171.3)];
+            let n = track_translation(&keys, &tracked, (false, false), 3.0).unwrap();
+            assert!(n.diagonal.is_some_and(|d| d.degrees == 45.0), "{n:?}");
+            assert!((n.by.0 + n.by.1).abs() < 1.5 && n.by.1 < 0.0, "moves up/left onto the line: {n:?}");
+            // Row tracking: the box's top edge 1 mm below the row through the point.
+            let n = track_translation(&[Point::new(300.0, 101.0)], &tracked, (false, false), 3.0).unwrap();
+            assert_eq!((n.by, n.y.map(|t| t.at)), ((0.0, -1.0), Some(100.0)));
+        }
+
+        #[test]
+        fn a_locked_axis_is_left_alone_and_angles_wait_for_both_to_be_free() {
+            let tracked = [Point::new(100.0, 100.0)];
+            let near_diagonal = [Point::new(150.0, 151.3)];
+            assert_eq!(track_translation(&near_diagonal, &tracked, (true, false), 3.0), None, "no angled line with x locked");
+            assert_eq!(track_translation(&near_diagonal, &tracked, (true, true), 3.0), None);
+            // A key on the row through the point, y locked: it would move y, so nothing happens.
+            assert_eq!(track_translation(&[Point::new(300.0, 101.0)], &tracked, (false, true), 3.0), None);
+            // A key near the column: x is free and gets pulled.
+            let n = track_translation(&[Point::new(101.5, 300.0)], &tracked, (false, true), 3.0).unwrap();
+            assert_eq!(n.by, (-1.5, 0.0));
+            assert_eq!(track_translation(&[], &tracked, (false, false), 3.0), None);
+            assert_eq!(track_translation(&near_diagonal, &[], (false, false), 3.0), None);
+            assert_eq!(track_translation(&[Point::new(f64::NAN, 1.0)], &tracked, (false, false), 3.0), None);
         }
 
         #[test]
@@ -662,7 +767,8 @@ mod tests {
             let mut t = SnapTargets::default();
             t.add_guide(true, 250.0);
             let s = snap_point_tracked(Point::new(249.0, 252.0), &SnapSettings::default(), &t, &tracked, 3.0);
-            assert_eq!(s.point, Point::new(250.0, 250.0), "the guide's column and the diagonal cross there");
+            assert!(s.point.distance(Point::new(250.0, 250.0)) < 1e-9, "the guide's column and the diagonal cross there: {:?}", s.point);
+            assert_eq!(s.point.x, 250.0, "the column stays exact");
             assert!(s.x_line.is_some() && s.diagonal.is_some());
             // Both axes already locked: nothing left for a diagonal to do.
             t.add_guide(false, 252.0);

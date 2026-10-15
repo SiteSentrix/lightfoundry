@@ -1079,14 +1079,77 @@ mod snapping_tests {
         assert!(h.app.tracked.is_empty(), "tracking belongs to the shape that was being placed");
     }
 
+    fn press_t(h: &mut Harness) {
+        let key = |pressed| Event::Key { key: egui::Key::T, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+        h.frame(vec![key(true)]);
+        h.frame(vec![key(false)]);
+    }
+
     #[test]
-    fn leaving_the_drawing_tools_forgets_tracked_points() {
+    fn the_nodes_tool_forgets_tracked_points_but_select_keeps_them() {
         let mut h = Harness::new();
         triangle(&mut h);
         h.app.tracked.push(Point::new(100.0, 100.0));
         h.app.tool = Tool::Select;
         h.frame(vec![]);
+        assert_eq!(h.app.tracked.len(), 1, "Select can use them to move things");
+        h.app.tool = Tool::Nodes;
+        h.frame(vec![]);
         assert!(h.app.tracked.is_empty());
+    }
+
+    #[test]
+    fn pressing_t_over_a_vertex_acquires_it_in_any_tool_and_again_removes_it() {
+        let mut h = Harness::new();
+        triangle(&mut h);
+        h.app.tool = Tool::Select;
+        let on = h.at(120.0, 140.0);
+        h.frame(vec![Event::PointerMoved(on)]);
+        press_t(&mut h);
+        assert_eq!(h.app.tracked, vec![Point::new(120.0, 140.0)]);
+        press_t(&mut h);
+        assert!(h.app.tracked.is_empty(), "T toggles");
+        // Over empty canvas there is nothing to acquire.
+        let off = h.at(300.0, 300.0);
+        h.frame(vec![Event::PointerMoved(off)]);
+        press_t(&mut h);
+        assert!(h.app.tracked.is_empty());
+    }
+
+    #[test]
+    fn a_moving_shape_is_pulled_onto_a_tracked_angle_and_the_point_is_forgotten_after() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 210, "y": 210, "width": 20, "height": 20}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.app.tool = Tool::Select;
+        h.app.snapping = snap::SnapSettings { grid: None, objects: true };
+        h.app.tracked.push(Point::new(100.0, 100.0));
+        h.frame(vec![]);
+        // Drag it so its top-left corner ends 1.3 mm below the 45-degree line through (100, 100) at (150, 150).
+        let (from, to) = (h.at(220.0, 220.0), h.at(160.0, 161.3));
+        hold_drag(&mut h, from, to);
+        assert_eq!(h.app.snap_lines.2.map(|d| d.degrees), Some(45.0), "{:?}", h.app.snap_lines);
+        let (from, to) = (h.at(160.0, 161.3), h.at(160.0, 161.3));
+        let _ = (from, to);
+        h.frame(vec![Event::PointerButton { pos: h.at(160.0, 161.3), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]);
+        h.frame(vec![]);
+        let b = last_bounds(&h);
+        assert!(((b.x0 - 100.0) - (b.y0 - 100.0)).abs() < 1e-6, "its corner is exactly on the line: {b:?}");
+        assert!(h.app.tracked.is_empty());
+    }
+
+    #[test]
+    fn a_moving_shape_follows_a_tracked_row() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 210, "y": 210, "width": 20, "height": 20}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.app.tool = Tool::Select;
+        h.app.snapping = snap::SnapSettings { grid: None, objects: true };
+        h.app.tracked.push(Point::new(100.0, 77.0));
+        h.frame(vec![]);
+        let (from, to) = (h.at(220.0, 220.0), h.at(300.0, 77.0 + 10.0 + 1.2));
+        hold_drag(&mut h, from, to);
+        assert_eq!(h.app.snap_lines.1.map(|t| (t.kind, t.at)), Some((snap::TargetKind::Tracked, 77.0)), "{:?}", h.app.snap_lines);
     }
 
     #[test]
