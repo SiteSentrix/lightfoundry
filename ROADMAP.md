@@ -467,3 +467,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   Shift and Undo. Not done: long-press as right-click, hover-based features (object tracking) have no
   touch equivalent yet, the on-screen keyboard for text editing is the browser's, and nothing has been
   tried on a physical iPad or Android tablet.
+- **2026-10-15 — fuzzing the font code.** Three new fuzz entry points in `fuzzkit` (`glyph_font`: parse, lay
+  out in four styles, register with the engine and use through `text.create`; `font_index`: the hosted
+  site's index and the remembered list; `font_listing`: the repository tree listing and path checks), each
+  with stable mutation tests (run by `cargo xtask ci`) and a cargo-fuzz target. Coverage-guided runs of 90 s
+  each (nightly): 1.2 M, 2.3 M and 2.1 M executions, nothing found. `fuzzkit` may depend on the downloader
+  (the layering rule that keeps the network out of the browser build exempts it, as it ships nowhere).

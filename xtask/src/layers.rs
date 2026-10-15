@@ -13,7 +13,7 @@ const UI_TOOLKITS: &[&str] = &["egui", "eframe", "winit", "rfd", "wgpu", "glow"]
 /// Packages that fetch from the network at run time. Only the desktop app and the command line may
 /// use them: the hosted browser build (and the UI and engine it shares) must never download anything.
 const NETWORK_CRATES: &[&str] = &["lightfoundry-fontlib", "ureq"];
-const MAY_USE_NETWORK: &[&str] = &["lightfoundry", "lightfoundry-cli", "lightfoundry-fontlib"];
+const MAY_USE_NETWORK: &[&str] = &["lightfoundry", "lightfoundry-cli", "lightfoundry-fontlib", "lightfoundry-fuzzkit"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {

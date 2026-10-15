@@ -1910,10 +1910,12 @@ dependencies = [
  "lightfoundry-device",
  "lightfoundry-dxf",
  "lightfoundry-engine",
+ "lightfoundry-fontlib",
  "lightfoundry-format",
  "lightfoundry-mcp",
  "lightfoundry-svg",
  "lightfoundry-text",
+ "lightfoundry-web",
  "serde_json",
 ]
 

@@ -69,3 +69,24 @@ path = "fuzz_targets/command.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "glyph_font"
+path = "fuzz_targets/glyph_font.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "font_index"
+path = "fuzz_targets/font_index.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "font_listing"
+path = "fuzz_targets/font_listing.rs"
+test = false
+doc = false
+bench = false

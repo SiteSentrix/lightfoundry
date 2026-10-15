@@ -60,6 +60,45 @@ pub fn text_layout(data: &[u8]) {
     let _ = lightfoundry_text::layout(&text, &lightfoundry_text::TextStyle::default());
 }
 
+/// A font library glyph font: the first two bytes say where `font.json` ends and the glyph file starts.
+/// Parsed, laid out in several styles, and registered with the engine and used through a text command.
+pub fn glyph_font(data: &[u8]) {
+    let Some((head, rest)) = data.split_at_checked(2) else { return };
+    let at = (usize::from(head[0]) << 8 | usize::from(head[1])) % (rest.len() + 1);
+    let (info, glyphs) = rest.split_at(at);
+    let (info, glyphs) = (String::from_utf8_lossy(info), String::from_utf8_lossy(glyphs));
+    if let Ok(font) = lightfoundry_text::GlyphFont::parse(&info, &glyphs) {
+        let styles = [
+            lightfoundry_text::TextStyle::default(),
+            lightfoundry_text::TextStyle { height: 0.1, ..Default::default() },
+            lightfoundry_text::TextStyle { height: 1000.0, letter_spacing: 10.0, line_spacing: 10.0, ..Default::default() },
+            lightfoundry_text::TextStyle { align: lightfoundry_text::Align::Right, ..Default::default() },
+        ];
+        for style in &styles {
+            let _ = lightfoundry_text::layout_glyph_font(&font, "Hello World\nÄ? abc 123", style);
+        }
+    }
+    if lightfoundry_engine::fontlib::register("fuzz", &info, &glyphs).is_ok() {
+        let mut session = Session::new();
+        let _ = session.execute("text.create", &serde_json::json!({"text": "Hi there", "height": 10, "font": "library:fuzz"}));
+    }
+}
+
+/// The hosted site's font index and the list of fonts remembered from an earlier visit.
+pub fn font_index(data: &[u8]) {
+    let text = String::from_utf8_lossy(data);
+    let _ = lightfoundry_web::fontindex::parse_index(&text);
+    let _ = lightfoundry_web::fontindex::parse_remembered(&text);
+}
+
+/// A repository tree listing from the network, and a path taken from it.
+pub fn font_listing(data: &[u8]) {
+    let text = String::from_utf8_lossy(data);
+    let _ = lightfoundry_fontlib::plan(&text, lightfoundry_fontlib::Set::Foundry);
+    let _ = lightfoundry_fontlib::plan(&text, lightfoundry_fontlib::Set::Everything);
+    let _ = lightfoundry_fontlib::safe_path(&text);
+}
+
 /// A command and its parameters: the first byte picks the command, the rest is JSON.
 pub fn command(data: &[u8]) {
     let Some((first, rest)) = data.split_first() else { return };
@@ -179,6 +218,44 @@ mod tests {
     #[test]
     fn mcp_messages_survive_mutation() {
         drive(MCP, mcp_message, 1500);
+    }
+
+    /// Two glyph files in the real shape (anchors with handles, nested layers), behind the 2-byte split.
+    fn glyph_font_seed() -> Vec<u8> {
+        let info = r#"{"name":"Seed","horiz_adv_x":{"H":50,"o":40},"horiz_adv_x_space":30,"leading":98,"kerning_pairs":{}}"#;
+        let glyphs = r#"{"format":"x","document":{"layers":[{"kind":{"type":"layer","children":[
+            {"name":"H","kind":{"type":"path","path":{"subpaths":[{"anchors":[{"p":[0,0]},{"p":[0,-70]},{"p":[50,-70],"in":[40,-70],"out":[60,-70]},{"p":[50,0]}],"closed":true}]}}},
+            {"name":"o","kind":{"type":"path","path":{"subpaths":[{"anchors":[{"p":[0,0]},{"p":[0,-50]},{"p":[40,-50]},{"p":[40,0]}],"closed":true},{"anchors":[{"p":[10,-10]},{"p":[10,-40]},{"p":[30,-40]}],"closed":true}]}}}]}}]}}"#;
+        let mut data = vec![0, info.len() as u8];
+        data.extend_from_slice(info.as_bytes());
+        data.extend_from_slice(glyphs.as_bytes());
+        data
+    }
+
+    #[test]
+    fn glyph_fonts_survive_mutation() {
+        let seed = glyph_font_seed();
+        let mut rng = Rng(0xfeed_f00d);
+        for input in mutations(&seed, &mut rng, 4000) {
+            glyph_font(&input);
+        }
+        // The seed itself is a working font.
+        assert!(
+            lightfoundry_text::GlyphFont::parse(
+                &String::from_utf8_lossy(&seed[2..2 + seed[1] as usize]),
+                &String::from_utf8_lossy(&seed[2 + seed[1] as usize..])
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn font_indexes_and_listings_survive_mutation() {
+        let index = r#"{"fonts":[{"folder":"foundry-block","name":"Foundry Block","files":[{"path":"font.json","size":1917},{"path":"glyphs.stitchfoundry","size":176384}]}]}"#;
+        drive(index, font_index, 2500);
+        drive(r#"["foundry-block","foundry-sans","../x"]"#, font_index, 1500);
+        let tree = r#"{"tree":[{"path":"fonts/a/font.json","type":"blob","size":10},{"path":"fonts/a/preview.png","type":"blob","size":9},{"path":"inkstitch/b/ltr.svg","type":"blob","size":99},{"path":"fonts","type":"tree"}],"truncated":false}"#;
+        drive(tree, font_listing, 3000);
     }
 
     #[test]
