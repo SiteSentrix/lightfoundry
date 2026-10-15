@@ -318,18 +318,27 @@ fn move_offset(app: &mut LightFoundryApp, snapper: &Snapper, start: Point, p: Po
     // `add_rect` lists edges before centres, so the grid lands the selection's top-left corner.
     let (mut delta, xl, yl) = snap::snap_translation(raw, &keys, &snapper.settings, &snapper.others, snapper.threshold);
     app.snap_lines = (xl, yl, None);
+    let at = |d: (f64, f64)| Rect::new(b.x0 + d.0, b.y0 + d.1, b.x1 + d.0, b.y1 + d.1);
+    // Acquired points: a row, column or angled line through one pulls the nearest corner, edge middle or centre onto it.
+    let (mut locked_x, mut locked_y) = (xl.is_some(), yl.is_some());
+    if snapper.settings.objects && !snapper.tracked.is_empty() {
+        let r = at(delta);
+        let (mx, my) = ((r.x0 + r.x1) / 2.0, (r.y0 + r.y1) / 2.0);
+        let keys: Vec<Point> = [r.x0, mx, r.x1].iter().flat_map(|x| [r.y0, my, r.y1].map(|y| Point::new(*x, y))).collect();
+        if let Some(n) = snap::track_translation(&keys, &snapper.tracked, (locked_x, locked_y), snapper.threshold) {
+            delta = (delta.0 + n.by.0, delta.1 + n.by.1);
+            app.snap_lines = (xl.or(n.x), yl.or(n.y), n.diagonal);
+            locked_x |= n.x.is_some() || n.diagonal.is_some();
+            locked_y |= n.y.is_some() || n.diagonal.is_some();
+        }
+    }
     // Where nothing lined up on an axis, an equal gap to the neighbours is worth locking onto.
     if snapper.settings.objects {
-        let at = |d: (f64, f64)| Rect::new(b.x0 + d.0, b.y0 + d.1, b.x1 + d.0, b.y1 + d.1);
-        if xl.is_none()
-            && let Some(s) = crate::spacing::equal_spacing(at(delta), &snapper.still, snapper.threshold, false)
-        {
+        if !locked_x && let Some(s) = crate::spacing::equal_spacing(at(delta), &snapper.still, snapper.threshold, false) {
             delta.0 += s.adjust;
             app.snap_spacing.extend(s.gaps);
         }
-        if yl.is_none()
-            && let Some(s) = crate::spacing::equal_spacing(at(delta), &snapper.still, snapper.threshold, true)
-        {
+        if !locked_y && let Some(s) = crate::spacing::equal_spacing(at(delta), &snapper.still, snapper.threshold, true) {
             delta.1 += s.adjust;
             app.snap_spacing.extend(s.gaps);
         }
@@ -383,6 +392,8 @@ fn finish_drag(app: &mut LightFoundryApp, end: Point, offset: (f64, f64), shift:
         Drag::Move { .. } => {
             if offset.0.hypot(offset.1) > 0.01 {
                 app.run("edit.move", json!({ "dx": offset.0, "dy": offset.1 }));
+                app.tracked.clear(); // tracking belongs to the thing being placed
+                app.track_candidate = None;
             }
         }
         Drag::Rubber { start } => {
@@ -757,42 +768,55 @@ fn draw_alignment(painter: &egui::Painter, view: &View, lines: &SnapLines, mover
     if let Some(d) = lines.2 {
         // Through the acquired point at 45 degrees, far enough to leave any view.
         let far = 100_000.0;
-        let (a, b) = (Point::new(d.origin.x - far, d.origin.y - far * d.sign), Point::new(d.origin.x + far, d.origin.y + far * d.sign));
+        let (dx, dy) = d.direction();
+        let (a, b) = (Point::new(d.origin.x - far * dx, d.origin.y - far * dy), Point::new(d.origin.x + far * dx, d.origin.y + far * dy));
         painter.extend(Shape::dashed_line(&[view.to_screen(a), view.to_screen(b)], stroke, 6.0, 4.0));
         let c = view.to_screen(d.origin);
         painter.line_segment([c + vec2(-6.0, 0.0), c + vec2(6.0, 0.0)], mark_stroke);
         painter.line_segment([c + vec2(0.0, -6.0), c + vec2(0.0, 6.0)], mark_stroke);
     }
-    let text = snap::label(lines.0.as_ref(), lines.1.as_ref()).or(lines.2.map(|_| "Tracking 45°"));
+    let text = snap::label(lines.0.as_ref(), lines.1.as_ref()).map(str::to_string).or(lines.2.map(|d| format!("Tracking {}°", d.degrees)));
     if let Some(text) = text {
-        let galley = painter.layout_no_wrap(crate::i18n::tr(text), egui::FontId::proportional(11.0), Color32::WHITE);
+        let galley = painter.layout_no_wrap(crate::i18n::tr(&text), egui::FontId::proportional(11.0), Color32::WHITE);
         let rect = egui::Rect::from_min_size(label_at + vec2(14.0, 14.0), galley.size() + vec2(8.0, 4.0));
         painter.rect_filled(rect, 3.0, Color32::from_black_alpha(190));
         painter.galley(rect.min + vec2(4.0, 2.0), galley, Color32::WHITE);
     }
 }
 
-/// Acquires a point once the cursor has rested on it with a drawing tool (Escape, finishing a shape or
-/// leaving the drawing tools forgets them). Hovering again does not toggle: it is already acquired.
+/// Acquires points for tracking. With a drawing tool, resting the cursor on a vertex, midpoint or
+/// centre does it; with any tool (Select too, where resting is how things are picked), pressing T
+/// over one acquires it, and again removes it. Escape, finishing a shape or move, or the Nodes tool
+/// forget them all.
 fn update_tracking(app: &mut LightFoundryApp, ui: &egui::Ui, snapper: &Snapper, hover: Option<Point>, idle: bool) {
-    if matches!(app.tool, Tool::Select | Tool::Nodes) {
+    if matches!(app.tool, Tool::Nodes) {
         app.tracked.clear();
         app.track_candidate = None;
         return;
     }
-    let candidate = if idle && matches!(app.drag, Drag::None) { hover.and_then(|p| snapper.acquirable(p)) } else { None };
+    let typing = ui.ctx().egui_wants_keyboard_input();
+    if idle
+        && !typing
+        && ui.input(|i| i.key_pressed(egui::Key::T) && !i.modifiers.any())
+        && let Some(c) = hover.and_then(|p| snapper.acquirable(p))
+    {
+        match app.tracked.iter().position(|t| t.distance(c) < 1e-6) {
+            Some(i) => {
+                app.tracked.remove(i);
+            }
+            None => acquire(app, c),
+        }
+    }
+    let dwell = !matches!(app.tool, Tool::Select) && idle && matches!(app.drag, Drag::None);
     let now = ui.input(|i| i.time);
-    let Some(c) = candidate.filter(|c| !app.tracked.iter().any(|t| t.distance(*c) < 1e-6)) else {
+    let Some(c) = hover.filter(|_| dwell).and_then(|p| snapper.acquirable(p)).filter(|c| !app.tracked.iter().any(|t| t.distance(*c) < 1e-6)) else {
         app.track_candidate = None;
         return;
     };
     match app.track_candidate {
         Some((prev, since)) if prev.distance(c) < 1e-6 => {
             if now - since >= TRACK_DWELL_SECS {
-                app.tracked.push(c);
-                if app.tracked.len() > snap::MAX_TRACKED {
-                    app.tracked.remove(0);
-                }
+                acquire(app, c);
                 app.track_candidate = None;
             } else {
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
@@ -802,6 +826,13 @@ fn update_tracking(app: &mut LightFoundryApp, ui: &egui::Ui, snapper: &Snapper, 
             app.track_candidate = Some((c, now));
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         }
+    }
+}
+
+fn acquire(app: &mut LightFoundryApp, p: Point) {
+    app.tracked.push(p);
+    if app.tracked.len() > snap::MAX_TRACKED {
+        app.tracked.remove(0);
     }
 }
 

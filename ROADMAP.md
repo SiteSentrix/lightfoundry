@@ -385,3 +385,11 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   every vertex's row and column already attract the cursor without acquiring, so the row/column
   part mostly adds the full-length dashed line; the diagonals are the new capability. Tracking
   applies to creating, resizing and pen/click points, not to moving shapes.
+- **2026-10-15 — tracking: more angles, and while moving.** Tracking lines now run at 30, 45 and 60
+  degrees and their mirror images (`snap::TRACK_ANGLES`; `Diagonal` carries its angle). Moving a
+  selection uses acquired points too: whichever of its box's corners, edge middles or centre needs
+  the smallest nudge is pulled onto a row, column or angled line (`snap::track_translation`);
+  objects keep priority, and angles only apply when neither axis is locked. In the Select tool,
+  where resting the cursor is how things are picked, pressing T over a vertex, midpoint or centre
+  acquires it and pressing T again removes it (any tool). Points persist across Select and the
+  drawing tools; Escape, finishing a shape or move, or the Nodes tool forgets them.
