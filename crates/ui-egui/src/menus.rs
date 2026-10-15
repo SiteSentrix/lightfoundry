@@ -10,6 +10,7 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             ui.menu_button(tr("Edit"), |ui| edit_menu(app, ui));
             ui.menu_button(tr("Arrange"), |ui| arrange_menu(app, ui));
             ui.menu_button(tr("Laser"), |ui| laser_menu(app, ui));
+            ui.menu_button(tr("Help"), |ui| help_menu(app, ui));
             ui.menu_button(tr("View"), |ui| {
                 if ui.button(tr("Fit bed to window")).clicked() {
                     app.view = None;
@@ -78,6 +79,17 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             });
         });
     });
+}
+
+/// Help: each entry's command returns a web address, which the system browser opens.
+fn help_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    for (label, id) in [("LightFoundry on GitHub", "help.github"), ("Report a Bug…", "help.report_bug")] {
+        if item(ui, label, "")
+            && let Some(url) = app.run(id, Value::Null).and_then(|v| v["url"].as_str().map(str::to_string))
+        {
+            ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+        }
+    }
 }
 
 fn file_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {

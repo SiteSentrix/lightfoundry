@@ -3,6 +3,7 @@
 mod arrange;
 mod edit;
 mod file;
+mod help;
 mod image;
 mod job;
 mod nodes;
@@ -50,6 +51,7 @@ pub fn commands() -> impl Iterator<Item = &'static CommandSpec> {
         .chain(file::COMMANDS)
         .chain(image::COMMANDS)
         .chain(job::COMMANDS)
+        .chain(help::COMMANDS)
 }
 
 pub fn find_command(id: &str) -> Option<&'static CommandSpec> {
