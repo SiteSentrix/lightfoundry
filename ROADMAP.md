@@ -366,3 +366,11 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   Pure geometry in `snap::alignment`, tested for every mark and both axes; frame tests check a
   moving shape reports an endpoint and the bed centre. Not yet: equal-spacing hints between three
   shapes, and CAD-style tracking (hover a point to acquire it, then align to it).
+- **2026-10-15 — equal-spacing hints.** While a selection moves, if nothing lined up on an axis, it
+  snaps to an equal gap with the neighbours in its row (those overlapping it on the other axis):
+  centred between the two nearest, or repeating the gap of the two nearest on either side. The
+  gaps are drawn as measured lines with end ticks and a size tag in mm (new `Tokens::spacing`
+  colour). Pure maths in `spacing.rs` (both axes, row filtering, touching gaps ignored, bad
+  numbers and 20 000-shape inputs survived) with a frame test; the alignment label now sits below
+  the cursor so the two do not collide. Still not done: CAD-style tracking (hover a point to
+  acquire it, then align to it).

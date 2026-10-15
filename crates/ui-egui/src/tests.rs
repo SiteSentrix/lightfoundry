@@ -1009,6 +1009,21 @@ mod snapping_tests {
     }
 
     #[test]
+    fn a_shape_moved_between_two_others_snaps_to_equal_gaps_and_shows_them() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 20, "y": 20, "width": 20, "height": 20}));
+        h.app.run("shape.rectangle", json!({"x": 120, "y": 20, "width": 20, "height": 20}));
+        h.app.run("shape.rectangle", json!({"x": 200, "y": 24, "width": 20, "height": 12}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.frame(vec![]);
+        // Centred between the others it would span 70..90 (gaps of 30); stop 2 mm short of that.
+        let (from, to) = (h.at(210.0, 30.0), h.at(78.0, 30.0));
+        hold_drag(&mut h, from, to);
+        assert_eq!(h.app.snap_spacing.len(), 2, "{:?}", h.app.snap_spacing);
+        assert!(h.app.snap_spacing.iter().all(|g| (g.size - 30.0).abs() < 1e-6), "{:?}", h.app.snap_spacing);
+    }
+
+    #[test]
     fn shift_makes_squares_and_circles() {
         let mut h = Harness::new();
         h.app.snapping = snap::SnapSettings { grid: None, objects: false };
