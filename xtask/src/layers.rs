@@ -22,6 +22,7 @@ pub enum Class {
 /// Package names without the `lightfoundry-` prefix.
 pub const TABLE: &[(&str, Class)] = &[
     ("geom", Class::Layer(0)),
+    ("i18n", Class::Layer(0)),
     ("doc", Class::Layer(1)),
     ("pathops", Class::Layer(1)),
     ("toolpath", Class::Layer(2)),

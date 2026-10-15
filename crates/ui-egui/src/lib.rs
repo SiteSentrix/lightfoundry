@@ -5,7 +5,10 @@ mod canvas;
 mod crop_ui;
 mod geometry;
 mod head_ui;
-pub(crate) mod i18n;
+/// Translation catalogs live in their own crate so the command line can use them too.
+pub(crate) mod i18n {
+    pub use lightfoundry_i18n::*;
+}
 mod job_position;
 mod menus;
 mod nodes_ui;

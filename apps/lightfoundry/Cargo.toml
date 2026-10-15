@@ -16,6 +16,7 @@ serial = ["lightfoundry-device/serial"]
 
 [dependencies]
 lightfoundry-engine = { workspace = true }
+lightfoundry-i18n = { workspace = true }
 lightfoundry-ui-egui = { workspace = true }
 lightfoundry-mcp = { workspace = true }
 lightfoundry-device = { workspace = true }

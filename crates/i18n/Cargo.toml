@@ -1,0 +1,13 @@
+[package]
+name = "lightfoundry-i18n"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Translation catalogs shared by the interface and the command line"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = { workspace = true }

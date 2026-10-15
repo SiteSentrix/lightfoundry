@@ -46,7 +46,7 @@ the values are picked out of the message and put where your text says.
 - A message that wraps another ("bad parameters: …") translates both: the inner message is
   translated by its own entry.
 - **Save translation template** already includes all of these (about 135, from
-  `crates/ui-egui/engine-messages.txt`, which `cargo xtask messages` keeps in step with the source and
+  `crates/i18n/engine-messages.txt`, which `cargo xtask messages` keeps in step with the source and
   `cargo xtask ci` checks).
 - Where two templates could match, the one with more fixed text wins.
 
@@ -54,4 +54,13 @@ the values are picked out of the message and put where your text says.
 
 Menus, buttons, labels, tooltips, headings, drop-downs, the status-bar messages the desktop app
 writes itself, and engine errors. Not covered yet: successful command results shown in the status
-bar, a few small texts such as layer descriptions built from layer names, the CLI, and the browser build (which has no way to pick a file).
+bar, a few small texts such as layer descriptions built from layer names, and the browser build (which has no way to pick a file).
+
+## The command line
+
+`lightfoundry-cli` prints through the same catalogs: its usage text, `info` labels, option errors and
+engine errors. It uses `--translation FILE` (a file that cannot be read is an error), else
+`$LIGHTFOUNDRY_TRANSLATION`, else the desktop app's own file (`translation.json` in the LightFoundry data
+folder; a broken one is ignored). `lightfoundry-cli translation-template` prints a catalog with every
+text the tool shows plus the engine messages, to start from. The shared code is the `lightfoundry-i18n`
+crate.

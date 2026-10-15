@@ -18,6 +18,7 @@ and that nothing below L7 depends on a UI toolkit. The table lives in `xtask/src
 | Layer | Crates     | Role                                                                                             |
 |-------|------------|--------------------------------------------------------------------------------------------------|
 | L0    | `geom`     | polylines, flattening, bounds and hit-testing on `kurbo`                                         |
+| L0    | `i18n`     | translation catalogs (`tr`, `tr_fill`, engine-message templates), shared by the UI and the CLI    |
 | L1    | `doc`      | the document: cut layers, shapes (paths and rasters), the machine profile; data + serde only     |
 | L2    | `toolpath` | document to `Job`: ordering, scan fill, raster dithering, time estimate                          |
 | L2    | `text`     | an original single-line stroke font (glyph table + corner-cutting smoothing) and text layout    |

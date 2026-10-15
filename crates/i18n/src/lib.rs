@@ -9,7 +9,7 @@
 //! `font` is optional: egui's built-in font covers Latin scripts only, so a language written in
 //! another script needs a font file that has it (the program ships none). "Save translation template"
 //! in the Help menu writes every string seen so far with itself as the value, to start from.
-//! Messages that come from the engine (errors, command results) are not translated.
+//! Engine error messages are translated by template with [`tr_message`].
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -125,8 +125,7 @@ fn message_at(message: &str, depth: usize) -> String {
 
 impl Translation {
     /// [`tr_message`] against this catalog alone.
-    #[cfg(test)]
-    pub(crate) fn translate_message(&self, message: &str) -> String {
+    pub fn translate_message(&self, message: &str) -> String {
         self.message(message, 0)
     }
 
@@ -182,12 +181,12 @@ fn fill(text: &str, args: &[(&str, String)]) -> String {
 }
 
 /// `trf!("Opened {name}", name = file)`: a translated text with values filled in (see [`tr_fill`]).
+#[macro_export]
 macro_rules! trf {
     ($template:literal $(, $key:ident = $value:expr)* $(,)?) => {
-        $crate::i18n::tr_fill($template, &[$((stringify!($key), ($value).to_string())),*])
+        $crate::tr_fill($template, &[$((stringify!($key), ($value).to_string())),*])
     };
 }
-pub(crate) use trf;
 
 /// Makes `translation` the one in use (`None` goes back to English).
 pub fn set_active(translation: Option<Translation>) {
@@ -264,6 +263,21 @@ pub fn load(path: &Path) -> Result<Translation, String> {
         return Err("the translation file is too large".into());
     }
     parse(&text)
+}
+
+/// Where the person's catalog is kept: `translation.json` in the per-user data folder
+/// (`$XDG_DATA_HOME` or `~/.local/share` on Linux, `~/Library/Application Support` on macOS,
+/// `%APPDATA%` on Windows) under `LightFoundry`.
+pub fn default_file() -> Option<PathBuf> {
+    let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let base = if cfg!(target_os = "windows") {
+        var("APPDATA")
+    } else if cfg!(target_os = "macos") {
+        var("HOME").map(|h| h.join("Library").join("Application Support"))
+    } else {
+        var("XDG_DATA_HOME").or_else(|| var("HOME").map(|h| h.join(".local").join("share")))
+    };
+    Some(base?.join("LightFoundry").join("translation.json"))
 }
 
 #[cfg(test)]

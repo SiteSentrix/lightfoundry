@@ -321,7 +321,7 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-14 — translated engine errors.** Messages from the engine are matched by template
   (`"shape {id} does not exist"`), their values picked out and put where the translation says, nested
   messages translated too (`i18n::tr_message`). `cargo xtask messages` scans the sources for
-  `#[error]` texts and `EngineError` constructors into `crates/ui-egui/engine-messages.txt` (about
+  `#[error]` texts and `EngineError` constructors into `crates/i18n/engine-messages.txt` (about
   135 templates), `cargo xtask ci` fails if it is stale, and "Save translation template" includes them.
 - **2026-10-14 — message list verified.** A test runs every command with hostile parameters and checks
   each error against the shipped template list (all covered; serde's own parameter messages are
@@ -399,4 +399,11 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   selection now also snaps the dragged edge to repeat a gap already in the row (between two shapes,
   or between the fixed edge and the shape behind it), with the gaps drawn as when moving
   (`spacing::edge_spacing`, both axes and both directions, hostile-input tests, plus a frame test).
-  Checked by the headless frame tests only; not yet looked at on screen.
+  Checked by the headless frame tests and by eye under Xvfb (gap tags while sizing, the 45° line, the menu).
+- **2026-10-15 — CLI translations.** The catalog code moved out of `ui-egui` into a new layer-0 crate,
+  `lightfoundry-i18n` (the UI re-exports it, so nothing there changed), so the command line can use it.
+  `lightfoundry-cli` now translates its usage text, `info` labels, option errors and engine errors with
+  `--translation FILE`, `$LIGHTFOUNDRY_TRANSLATION` or the desktop app's catalog, and
+  `translation-template` lists every text it shows. Process-level tests cover each way of choosing a
+  catalog, the template, and broken or missing catalogs. Also: a Windows build workflow
+  (`.github/workflows/windows.yml`, exe artifacts, attached to `v*` releases).

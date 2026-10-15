@@ -32,7 +32,7 @@ impl Platform for DesktopPlatform {
     }
 
     fn translation_file(&self) -> Option<PathBuf> {
-        Some(data_dir()?.join("LightFoundry").join("translation.json"))
+        lightfoundry_i18n::default_file()
     }
 
     fn preset_library_file(&self) -> Option<PathBuf> {

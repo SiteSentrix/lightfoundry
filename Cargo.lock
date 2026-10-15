@@ -1783,6 +1783,7 @@ dependencies = [
  "env_logger",
  "lightfoundry-device",
  "lightfoundry-engine",
+ "lightfoundry-i18n",
  "lightfoundry-mcp",
  "lightfoundry-ui-egui",
  "log",
@@ -1795,6 +1796,7 @@ name = "lightfoundry-cli"
 version = "0.1.0"
 dependencies = [
  "lightfoundry-engine",
+ "lightfoundry-i18n",
  "lightfoundry-mcp",
  "serde_json",
 ]
@@ -1896,6 +1898,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lightfoundry-i18n"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "lightfoundry-mcp"
 version = "0.1.0"
 dependencies = [
@@ -1959,6 +1968,7 @@ dependencies = [
  "lightfoundry-engine",
  "lightfoundry-format",
  "lightfoundry-geom",
+ "lightfoundry-i18n",
  "lightfoundry-toolpath",
  "log",
  "serde_json",

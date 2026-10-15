@@ -17,6 +17,7 @@ lightfoundry-toolpath = { workspace = true }
 lightfoundry-format = { workspace = true }
 egui = { workspace = true }
 kurbo = { workspace = true }
+lightfoundry-i18n = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
 web-time = { workspace = true }

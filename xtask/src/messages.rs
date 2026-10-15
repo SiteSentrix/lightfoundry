@@ -1,4 +1,4 @@
-//! Keeps `crates/ui-egui/engine-messages.txt` (every message the program's own errors can show, one
+//! Keeps `crates/i18n/engine-messages.txt` (every message the program's own errors can show, one
 //! template per line) in step with the source, so translators know what to translate.
 //!
 //! Sources of messages: `#[error("...")]` attributes, and the text inside `EngineError::Variant(...)`
@@ -7,7 +7,7 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-const OUTPUT: &str = "crates/ui-egui/engine-messages.txt";
+const OUTPUT: &str = "crates/i18n/engine-messages.txt";
 const VARIANTS: [&str; 4] = ["BadParams", "NotFound", "Import", "Internal"];
 
 pub fn run(root: &Path, check: bool) -> Result<(), String> {

@@ -14,5 +14,9 @@ workspace = true
 
 [dependencies]
 lightfoundry-engine = { workspace = true }
+lightfoundry-i18n = { workspace = true }
 lightfoundry-mcp = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
 serde_json = { workspace = true }
