@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: The font library (public, OFL/CC fonts): served from this site, never fetched from elsewhere at run time
+      - name: "The font library (public OFL fonts, served from this site and never fetched from elsewhere at run time)"
         uses: actions/checkout@v4
         with:
           repository: Stitchwright/stitchfoundry-fonts
