@@ -17,6 +17,7 @@ mod register_ui;
 mod settings_ui;
 mod shortcuts;
 pub(crate) mod snap;
+mod spacing;
 mod theme;
 mod timeline_ui;
 mod view;
@@ -118,6 +119,8 @@ pub struct LightFoundryApp {
     canvas_rect: Option<egui::Rect>,
     /// Alignment lines the last drag locked onto, for drawing: (x, y).
     snap_lines: canvas::SnapLines,
+    /// Equal gaps the last move locked onto, for drawing.
+    snap_spacing: Vec<spacing::Gap>,
     grid_cols: u32,
     grid_rows: u32,
     grid_speed: (f64, f64),
@@ -268,6 +271,7 @@ impl LightFoundryApp {
             hover_world: None,
             canvas_rect: None,
             snap_lines: (None, None),
+            snap_spacing: Vec::new(),
             grid_cols: 5,
             grid_rows: 5,
             grid_speed: (200.0, 1200.0),

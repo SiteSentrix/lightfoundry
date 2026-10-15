@@ -4,6 +4,7 @@ use lightfoundry_geom::{Affine, Point, Rect};
 use serde_json::json;
 
 use crate::snap::{self, SnapSettings, SnapTargets};
+use crate::spacing;
 
 use crate::view::View;
 use crate::{LightFoundryApp, Tool};
@@ -58,6 +59,8 @@ pub(crate) struct Snapper {
     all: SnapTargets,
     /// Targets from everything except the selection: used when moving it.
     others: SnapTargets,
+    /// Bounding boxes of the shapes that stay put while the selection moves (for equal spacing).
+    still: Vec<Rect>,
     /// Snap distance in mm.
     threshold: f64,
 }
@@ -73,11 +76,15 @@ impl Snapper {
             }
         }
         let mut vertices = 0;
+        let mut still = Vec::new();
         for item in &app.geometry.items {
             all.add_rect(item.bounds);
             let moving = app.session.selection.contains(&item.id);
             if !moving {
                 others.add_rect(item.bounds);
+                if still.len() < crate::spacing::MAX_NEIGHBOURS {
+                    still.push(item.bounds);
+                }
             }
             // Corners and edge midpoints of drawn paths (not text, which has too many to be useful).
             if let Some(shape) = app.session.doc.shape(item.id)
@@ -93,7 +100,7 @@ impl Snapper {
                 }
             }
         }
-        Snapper { settings: app.snapping, all, others, threshold: snap::SNAP_RADIUS_PX / f64::from(view.zoom) }
+        Snapper { settings: app.snapping, all, others, still, threshold: snap::SNAP_RADIUS_PX / f64::from(view.zoom) }
     }
 
     pub(crate) fn point(&self, p: Point) -> snap::Snapped {
@@ -140,6 +147,7 @@ pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let snapper = Snapper::new(app, &view);
     let shift = ui.input(|i| i.modifiers.shift);
     app.snap_lines = (None, None);
+    app.snap_spacing.clear();
     let offset = interact(app, ui, &resp, &view, pointer, &snapper, canvas_rect);
 
     painter.rect_filled(canvas_rect, 0.0, app.tokens.workspace);
@@ -297,8 +305,24 @@ fn move_offset(app: &mut LightFoundryApp, snapper: &Snapper, start: Point, p: Po
     let mut keys = SnapTargets::default();
     keys.add_rect(b);
     // `add_rect` lists edges before centres, so the grid lands the selection's top-left corner.
-    let (delta, xl, yl) = snap::snap_translation(raw, &keys, &snapper.settings, &snapper.others, snapper.threshold);
+    let (mut delta, xl, yl) = snap::snap_translation(raw, &keys, &snapper.settings, &snapper.others, snapper.threshold);
     app.snap_lines = (xl, yl);
+    // Where nothing lined up on an axis, an equal gap to the neighbours is worth locking onto.
+    if snapper.settings.objects {
+        let at = |d: (f64, f64)| Rect::new(b.x0 + d.0, b.y0 + d.1, b.x1 + d.0, b.y1 + d.1);
+        if xl.is_none()
+            && let Some(s) = crate::spacing::equal_spacing(at(delta), &snapper.still, snapper.threshold, false)
+        {
+            delta.0 += s.adjust;
+            app.snap_spacing.extend(s.gaps);
+        }
+        if yl.is_none()
+            && let Some(s) = crate::spacing::equal_spacing(at(delta), &snapper.still, snapper.threshold, true)
+        {
+            delta.1 += s.adjust;
+            app.snap_spacing.extend(s.gaps);
+        }
+    }
     delta
 }
 
@@ -652,6 +676,27 @@ fn draw_overlays(
     if let Some(mover) = mover {
         draw_alignment(painter, view, &lines, mover, t.guide, view.to_screen(p));
     }
+    draw_spacing(painter, view, &app.snap_spacing, t.spacing);
+}
+
+/// Measured gaps that are equal: a line across each with ticks at both ends and its size in mm.
+fn draw_spacing(painter: &egui::Painter, view: &View, gaps: &[spacing::Gap], color: Color32) {
+    let stroke = Stroke::new(1.25, color);
+    for gap in gaps {
+        let (a, b) = (view.to_screen(gap.a), view.to_screen(gap.b));
+        painter.line_segment([a, b], stroke);
+        let along = (b - a).normalized();
+        let across = if along.x.is_finite() && along.y.is_finite() { vec2(-along.y, along.x) * 5.0 } else { vec2(0.0, 5.0) };
+        for end in [a, b] {
+            painter.line_segment([end - across, end + across], stroke);
+        }
+        let text = format!("{} mm", format!("{:.2}", gap.size).trim_end_matches('0').trim_end_matches('.'));
+        let galley = painter.layout_no_wrap(text, egui::FontId::proportional(11.0), Color32::WHITE);
+        let mid = a.lerp(b, 0.5);
+        let rect = egui::Rect::from_center_size(mid - vec2(0.0, 10.0), galley.size() + vec2(8.0, 4.0));
+        painter.rect_filled(rect, 3.0, color);
+        painter.galley(rect.min + vec2(4.0, 2.0), galley, Color32::WHITE);
+    }
 }
 
 /// Alignment lines from the moving thing to what it locked onto, with a mark at each end (X on
@@ -693,7 +738,7 @@ fn draw_alignment(painter: &egui::Painter, view: &View, lines: &SnapLines, mover
     }
     if let Some(text) = snap::label(lines.0.as_ref(), lines.1.as_ref()) {
         let galley = painter.layout_no_wrap(crate::i18n::tr(text), egui::FontId::proportional(11.0), Color32::WHITE);
-        let rect = egui::Rect::from_min_size(label_at + vec2(14.0, -26.0), galley.size() + vec2(8.0, 4.0));
+        let rect = egui::Rect::from_min_size(label_at + vec2(14.0, 14.0), galley.size() + vec2(8.0, 4.0));
         painter.rect_filled(rect, 3.0, Color32::from_black_alpha(190));
         painter.galley(rect.min + vec2(4.0, 2.0), galley, Color32::WHITE);
     }
