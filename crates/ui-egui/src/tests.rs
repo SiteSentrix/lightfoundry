@@ -2148,7 +2148,7 @@ mod browser_file_tests {
     use crate::{PendingAction, Upload};
 
     #[derive(Default)]
-    struct Shared {
+    pub(super) struct Shared {
         /// The file the "person" will choose next.
         next: Option<Upload>,
         requested: Vec<Vec<String>>,
@@ -2200,7 +2200,7 @@ mod browser_file_tests {
         }
     }
 
-    fn browser() -> (Harness, Rc<RefCell<Shared>>) {
+    pub(super) fn browser() -> (Harness, Rc<RefCell<Shared>>) {
         let shared = Rc::new(RefCell::new(Shared::default()));
         let mut h = Harness {
             ctx: egui::Context::default(),
@@ -2303,6 +2303,99 @@ mod browser_file_tests {
         h.frame(vec![]);
         assert!(matches!(&h.app.status, Some((_, true))), "{:?}", h.app.status);
         assert_eq!(h.app.session.doc.shapes.len(), 2, "a failed open leaves the document alone");
+    }
+}
+
+mod font_library_tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use lightfoundry_device::Transport;
+
+    use super::*;
+
+    /// A desktop-like host: downloads are allowed and finish when the test says so.
+    struct Desktop(Rc<RefCell<Option<Result<String, String>>>>, Rc<RefCell<Vec<bool>>>);
+
+    impl Platform for Desktop {
+        fn pick_open(&self, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        fn pick_save(&self, _: &str, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+            None
+        }
+
+        fn font_library_available(&self) -> bool {
+            true
+        }
+
+        fn start_font_library_download(&self, everything: bool) -> bool {
+            self.1.borrow_mut().push(everything);
+            self.1.borrow().len() == 1
+        }
+
+        fn take_font_library_result(&self) -> Option<Result<String, String>> {
+            self.0.borrow_mut().take()
+        }
+
+        fn serial_ports(&self) -> Vec<String> {
+            Vec::new()
+        }
+
+        fn open_serial(&self, _: &str) -> Result<Box<dyn Transport + Send>, String> {
+            Err("none".into())
+        }
+    }
+
+    fn app_on(platform: Box<dyn Platform>) -> Harness {
+        let mut h = Harness {
+            ctx: egui::Context::default(),
+            app: LightFoundryApp::new(Session::new(), platform),
+            time: 0.0,
+            modifiers: Modifiers::NONE,
+            sent_modifiers: Modifiers::NONE,
+        };
+        h.frame(vec![]);
+        h
+    }
+
+    #[test]
+    fn a_desktop_host_downloads_in_the_background_and_reports_the_result() {
+        let result = Rc::new(RefCell::new(None));
+        let started = Rc::new(RefCell::new(Vec::new()));
+        let mut h = app_on(Box::new(Desktop(Rc::clone(&result), Rc::clone(&started))));
+        h.app.download_font_library(true);
+        assert_eq!(*started.borrow(), [true]);
+        assert!(h.app.font_download_running);
+        h.frame(vec![]);
+        assert!(h.app.font_download_running, "still waiting for the result");
+        *result.borrow_mut() = Some(Ok("Font library: 3 downloaded".into()));
+        h.frame(vec![]);
+        assert!(!h.app.font_download_running);
+        assert_eq!(h.app.status, Some(("Font library: 3 downloaded".into(), false)));
+
+        // When the host refuses a start (one is already running there), that is said and nothing is waited for.
+        h.app.download_font_library(false);
+        assert!(!h.app.font_download_running);
+        assert!(matches!(&h.app.status, Some((text, false)) if text.contains("already running")), "{:?}", h.app.status);
+
+        h.app.font_download_running = true; // a failed download reports its reason as an error
+        *result.borrow_mut() = Some(Err("could not reach the font library".into()));
+        h.frame(vec![]);
+        assert_eq!(h.app.status, Some(("could not reach the font library".into(), true)));
+    }
+
+    #[test]
+    fn the_hosted_browser_build_never_offers_or_starts_a_download() {
+        // The browser test host does not enable the capability, which is the default for every host.
+        let (mut h, _) = super::browser_file_tests::browser();
+        assert!(!h.app.platform.font_library_available());
+        assert!(h.app.platform.font_library_dir().is_none());
+        h.app.download_font_library(true);
+        h.app.download_font_library(false);
+        assert!(!h.app.font_download_running);
+        assert_eq!(h.app.status, None, "nothing is said, nothing is started");
     }
 }
 

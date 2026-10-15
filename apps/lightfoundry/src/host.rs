@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Mutex, mpsc};
 
 use lightfoundry_device::Transport;
 use lightfoundry_mcp::link::LinkServer;
@@ -20,7 +22,11 @@ impl eframe::App for Host {
 }
 
 /// Native file dialogs and serial ports.
-pub struct DesktopPlatform;
+#[derive(Default)]
+pub struct DesktopPlatform {
+    /// The font library download in progress, if any: its result arrives here.
+    font_job: Mutex<Option<mpsc::Receiver<Result<String, String>>>>,
+}
 
 impl Platform for DesktopPlatform {
     fn recovery_file(&self) -> Option<PathBuf> {
@@ -49,6 +55,54 @@ impl Platform for DesktopPlatform {
 
     fn shortcuts_file(&self) -> Option<PathBuf> {
         Some(data_dir()?.join("LightFoundry").join("shortcuts.json"))
+    }
+
+    fn font_library_available(&self) -> bool {
+        lightfoundry_fontlib::default_dir().is_some()
+    }
+
+    fn font_library_dir(&self) -> Option<PathBuf> {
+        lightfoundry_fontlib::default_dir()
+    }
+
+    fn start_font_library_download(&self, everything: bool) -> bool {
+        let (Some(dest), Ok(mut job)) = (lightfoundry_fontlib::default_dir(), self.font_job.lock()) else { return false };
+        if job.is_some() {
+            return false;
+        }
+        let (sender, receiver) = mpsc::channel();
+        *job = Some(receiver);
+        let set = if everything { lightfoundry_fontlib::Set::Everything } else { lightfoundry_fontlib::Set::Foundry };
+        std::thread::spawn(move || {
+            let cancel = AtomicBool::new(false);
+            let result = lightfoundry_fontlib::download(&dest, &lightfoundry_fontlib::Source::default(), set, &cancel, &mut |_, _| {})
+                .map(|s| {
+                    format!(
+                        "Font library: {} downloaded, {} already there, in {}. These are embroidery fonts; the text tool cannot draw them yet.",
+                        s.fetched,
+                        s.kept,
+                        dest.display()
+                    )
+                })
+                .map_err(|e| e.to_string());
+            let _ = sender.send(result);
+        });
+        true
+    }
+
+    fn take_font_library_result(&self) -> Option<Result<String, String>> {
+        let mut job = self.font_job.lock().ok()?;
+        match job.as_ref()?.try_recv() {
+            Ok(result) => {
+                *job = None;
+                Some(result)
+            }
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                *job = None;
+                Some(Err("the font download stopped unexpectedly".into()))
+            }
+        }
     }
 
     fn clear_recovery(&self) {

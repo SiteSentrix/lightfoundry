@@ -418,3 +418,15 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   yet tried in a real browser.
 - **2026-10-15 — browser favicon.** `apps/lightfoundry-web/index.html` carries an inline SVG icon (a beam
   hitting a cut line on a dark tile), drawn here, so there is no asset file and no ATTRIBUTION row.
+- **2026-10-15 — font library download (desktop and CLI only).** New layer-3 crate `lightfoundry-fontlib`
+  fetches `Stitchwright/stitchfoundry-fonts` into `LightFoundry/fonts` in the data folder: the file list
+  from GitHub's tree API, each file from its raw address, previews skipped (the repository is ~290 MB,
+  almost all of it the Ink/Stitch collection), files kept when already present at the listed size, paths
+  validated, counts/sizes capped, writes atomic, cancellable. `lightfoundry-cli fonts download [--all]
+  [--to DIR]` and `fonts path`; the desktop app's View > Font library offers the Foundry fonts (~1 MB) or
+  everything. Checked against the real raw host (15 files, identical to the repository) and against a
+  local server in tests. **The hosted browser build never downloads:** `Platform::font_library_available`
+  defaults to false (only the desktop host turns it on), the menu is absent there, and `cargo xtask layers`
+  now fails if anything but `lightfoundry` and `lightfoundry-cli` depends on `fontlib` or `ureq`. Caveat:
+  the library holds *embroidery* fonts (stitch glyph data) made for StitchFoundry, not TTF/OTF, so
+  LightFoundry's text tool cannot draw them yet; that needs an importer, or a library of outline fonts.

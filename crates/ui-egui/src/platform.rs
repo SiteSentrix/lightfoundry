@@ -56,6 +56,28 @@ pub trait Platform {
     /// Stores `value` under `key`; failures (a full or blocked storage) are the host's to log.
     fn storage_set(&self, _key: &str, _value: &str) {}
 
+    /// Whether this host may download the font library (the desktop app can; the hosted browser build
+    /// never does: it takes nothing from third-party servers and has no folder to keep fonts in).
+    fn font_library_available(&self) -> bool {
+        false
+    }
+
+    /// Starts downloading the font library in the background (`everything` adds the large
+    /// Ink/Stitch collection). False when this host cannot, or a download is already running.
+    fn start_font_library_download(&self, _everything: bool) -> bool {
+        false
+    }
+
+    /// Once, after a started download has finished: a summary, or the reason it failed.
+    fn take_font_library_result(&self) -> Option<Result<String, String>> {
+        None
+    }
+
+    /// Where the font library is kept, if this host has such a folder.
+    fn font_library_dir(&self) -> Option<PathBuf> {
+        None
+    }
+
     /// Where the keyboard shortcut bindings are kept, if this platform has somewhere to keep them.
     fn shortcuts_file(&self) -> Option<PathBuf> {
         None

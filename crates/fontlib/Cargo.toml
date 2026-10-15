@@ -1,0 +1,16 @@
+[package]
+name = "lightfoundry-fontlib"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Downloads the font library (the stitchfoundry-fonts repository) into the user's data folder"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+ureq = "3"

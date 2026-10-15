@@ -27,7 +27,9 @@ color must look like #rrggbb
 colors must be between 2 and {1}
 could not import: {0}
 could not parse SVG: {0}
+could not reach the font library: {0}
 could not read or write the file: {0}
+could not write {path}: {reason}
 crop fractions must be between 0 and {MAX_CROP}, and opposite sides must leave some picture
 data_base64 is not valid base64
 device error: {0}
@@ -61,6 +63,7 @@ line {line} is {len} bytes; GRBL accepts at most {3} per line
 machine {0} must be a positive finite number
 marks must be finite numbers
 max_s must be between 1 and 100000
+no folder is available to keep the fonts in
 no path given and the document has never been saved
 no preset called {name}
 no response from the controller for {0} s
@@ -101,8 +104,11 @@ that text is too large to bend
 that would make the picture too large
 the controller raised ALARM:{0}; clear it (unlock/home) before running again
 the controller rejected line {line} ({text}) with error:{code}
+the download was cancelled
 the file has no ENTITIES section
 the font file is too large
+the font library is larger than this program will download; refusing
+the font library listing is not what was expected: {0}
 the image file is too large
 the job is {w}×{h} mm, larger than the {bw}×{bh} mm work area
 the machine entered an alarm state; clear it (unlock/home) before running again

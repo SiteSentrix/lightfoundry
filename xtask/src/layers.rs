@@ -10,6 +10,11 @@ const PREFIX: &str = "lightfoundry-";
 const UI_LAYER: u8 = 7;
 const UI_TOOLKITS: &[&str] = &["egui", "eframe", "winit", "rfd", "wgpu", "glow"];
 
+/// Packages that fetch from the network at run time. Only the desktop app and the command line may
+/// use them: the hosted browser build (and the UI and engine it shares) must never download anything.
+const NETWORK_CRATES: &[&str] = &["lightfoundry-fontlib", "ureq"];
+const MAY_USE_NETWORK: &[&str] = &["lightfoundry", "lightfoundry-cli", "lightfoundry-fontlib"];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Class {
     Layer(u8),
@@ -32,6 +37,7 @@ pub const TABLE: &[(&str, Class)] = &[
     ("gcode", Class::Layer(3)),
     ("format", Class::Layer(3)),
     ("device", Class::Layer(3)),
+    ("fontlib", Class::Layer(3)),
     ("engine", Class::Layer(5)),
     ("mcp", Class::Layer(6)),
     ("ui-egui", Class::Layer(UI_LAYER)),
@@ -104,6 +110,11 @@ fn level(c: Class) -> Option<u8> {
 pub fn check(packages: &[Package]) -> Vec<String> {
     let mut v = Vec::new();
     for p in packages {
+        for (dep, _) in &p.deps {
+            if NETWORK_CRATES.contains(&dep.as_str()) && !MAY_USE_NETWORK.contains(&p.name.as_str()) {
+                v.push(format!("{} depends on {dep}: only the desktop app and the CLI may download anything", p.name));
+            }
+        }
         let Some(class) = class_of(&p.name) else {
             v.push(format!("{} is not in the layering table (xtask/src/layers.rs)", p.name));
             continue;
@@ -167,6 +178,16 @@ mod tests {
     #[test]
     fn unknown_crates_must_be_added_to_the_table() {
         assert_eq!(check(&[pkg("lightfoundry-mystery", &[])]).len(), 1);
+    }
+
+    #[test]
+    fn only_the_desktop_app_and_cli_may_download() {
+        assert!(
+            check(&[pkg("lightfoundry", &[("lightfoundry-fontlib", false)]), pkg("lightfoundry-cli", &[("lightfoundry-fontlib", false)])]).is_empty()
+        );
+        assert_eq!(check(&[pkg("lightfoundry-web", &[("lightfoundry-fontlib", false)])]).len(), 1);
+        assert_eq!(check(&[pkg("lightfoundry-ui-egui", &[("ureq", false)])]).len(), 1);
+        assert_eq!(check(&[pkg("lightfoundry-engine", &[("lightfoundry-fontlib", false)])]).len(), 1, "the engine runs in the browser too");
     }
 
     #[test]

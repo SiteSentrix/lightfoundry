@@ -35,7 +35,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let agent_link = agent_access.then(|| start_agent_link(&cc.egui_ctx)).flatten();
-            Ok(Box::new(host::Host { app: LightFoundryApp::new(session, Box::new(host::DesktopPlatform)), agent_link }))
+            Ok(Box::new(host::Host { app: LightFoundryApp::new(session, Box::new(host::DesktopPlatform::default())), agent_link }))
         }),
     )
 }

@@ -28,6 +28,7 @@ and that nothing below L7 depends on a UI toolkit. The table lives in `xtask/src
 | L3    | `gcode`    | `Job` to GRBL G-code with a `Placement` (absolute, or relative to a job anchor); bed-bounds and finiteness checks; framing |
 | L3    | `format`   | the native `.lightfoundry` file: versioned JSON, atomic save, validation on load                 |
 | L3    | `device`   | `Transport` trait, GRBL character-counting streamer (`JobStream`), status parsing, the persistent `Link` (worker thread: status polling, jog/home/unlock/zero, job streaming, pause/resume/stop, console), simulated controller, optional serial port (`serial` feature) |
+| L3    | `fontlib`  | downloads the font library (stitchfoundry-fonts) into the data folder: tree listing + raw files, caps, safe paths. Desktop app and CLI only (xtask layers enforces it) |
 | L5    | `engine`   | `Session` (document, selection, undo/redo), the command registry, the panic guard                |
 | L6    | `mcp`      | a Model Context Protocol server over stdio: every engine command is a tool                       |
 | L7    | `ui-egui`  | menus, tools, canvas, panels; talks to the engine only through `execute`                         |

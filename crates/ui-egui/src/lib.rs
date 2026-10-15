@@ -181,6 +181,8 @@ pub struct LightFoundryApp {
     awaiting_upload: Option<UploadKind>,
     /// Waiting for the host to finish choosing and opening a serial device.
     awaiting_serial: bool,
+    /// A font library download is running in the background.
+    font_download_running: bool,
     /// Backups from an earlier session were recovered and still sit on disk until the work is saved.
     stale_backups: bool,
     marks: register_ui::Marks,
@@ -331,6 +333,7 @@ impl LightFoundryApp {
             interrupted,
             awaiting_upload: None,
             awaiting_serial: false,
+            font_download_running: false,
             stale_backups: false,
             marks: register_ui::Marks::default(),
             auto_reconnect: true,
@@ -355,6 +358,7 @@ impl LightFoundryApp {
         self.watch_close_and_title(ui.ctx());
         self.track_recent();
         self.poll_upload(ui.ctx());
+        self.poll_font_download(ui.ctx());
         self.forget_crop_for_other_pictures();
         self.poll_serial(ui.ctx());
         if !self.has_modal() {
@@ -539,6 +543,35 @@ impl LightFoundryApp {
     pub(crate) fn begin_upload(&mut self, kind: UploadKind) {
         self.awaiting_upload = Some(kind);
         self.platform.request_upload(kind.extensions());
+    }
+
+    /// Starts the font library download if this host allows it.
+    pub(crate) fn download_font_library(&mut self, everything: bool) {
+        if !self.platform.font_library_available() {
+            return;
+        }
+        if self.platform.start_font_library_download(everything) {
+            self.font_download_running = true;
+            self.say(tr("Downloading the font library…"));
+        } else {
+            self.say(tr("A font download is already running"));
+        }
+    }
+
+    fn poll_font_download(&mut self, ctx: &egui::Context) {
+        if !self.font_download_running {
+            return;
+        }
+        match self.platform.take_font_library_result() {
+            Some(result) => {
+                self.font_download_running = false;
+                match result {
+                    Ok(summary) => self.say(summary),
+                    Err(reason) => self.status = Some((reason, true)),
+                }
+            }
+            None => ctx.request_repaint_after(Duration::from_millis(300)),
+        }
     }
 
     fn poll_upload(&mut self, ctx: &egui::Context) {

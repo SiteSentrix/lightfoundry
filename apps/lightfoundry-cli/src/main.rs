@@ -7,6 +7,7 @@
 //! lightfoundry-cli mcp                        # Model Context Protocol server on stdin/stdout
 //! lightfoundry-cli mcp --connect              # the same, but editing the drawing open in a running `lightfoundry --agent-link`
 //! lightfoundry-cli run script.json            # [{"id": "...", "params": {...}}, ...] then prints the last result
+//! lightfoundry-cli fonts download [--all] [--to DIR]   # fetch the font library (the Foundry fonts; --all adds Ink/Stitch's)
 //! lightfoundry-cli translation-template       # every text this tool prints, as a catalog to translate
 //! ```
 //!
@@ -31,6 +32,10 @@ const USAGE_LINES: &[&str] = &[
     "  mcp [--connect]      serve the engine's commands as MCP tools on stdin/stdout (for AI agents);",
     "                       --connect works in the window of a running `lightfoundry --agent-link` instead",
     "  run <script.json>    run a JSON array of {\"id\", \"params\"} commands and print the last result",
+    "  fonts download [--all] [--to DIR]",
+    "                       download the font library (Stitchwright/stitchfoundry-fonts) to the data folder or DIR;",
+    "                       --all adds the large Ink/Stitch collection",
+    "  fonts path           print the folder the font library is kept in",
     "  translation-template print every text this tool shows as a catalog to translate",
 ];
 
@@ -55,6 +60,11 @@ mod msg {
     pub const MISSING_ID: &str = "step {step}: missing \"id\"";
     pub const STEP_FAILED: &str = "step {step} ({id}): {error}";
     pub const NO_LINK_FOLDER: &str = "no folder for the link file";
+    pub const FONTS_PROGRESS: &str = "fonts: {done} of {total}";
+    pub const FONTS_DONE: &str = "font library in {path}: {fetched} downloaded, {kept} already there ({bytes} bytes)";
+    pub const FONTS_NOTE: &str = "These are embroidery fonts for StitchFoundry; LightFoundry's text tool cannot draw them yet.";
+    pub const NO_FONT_FOLDER: &str = "no folder to keep the fonts in; use --to DIR";
+    pub const FONTS_FAILED: &str = "{reason}";
     pub const TRANSLATION_FAILED: &str = "translation {path}: {error}";
 
     pub const ALL: &[&str] = &[
@@ -78,6 +88,11 @@ mod msg {
         MISSING_ID,
         STEP_FAILED,
         NO_LINK_FOLDER,
+        FONTS_PROGRESS,
+        FONTS_DONE,
+        FONTS_NOTE,
+        NO_FONT_FOLDER,
+        FONTS_FAILED,
         TRANSLATION_FAILED,
     ];
 }
@@ -152,9 +167,68 @@ fn run(args: &[String]) -> Result<String, String> {
         Some("gcode") => gcode(&args[1..]),
         Some("run") => script(args.get(1).ok_or_else(usage)?),
         Some("mcp") => mcp(args.get(1).map(String::as_str)),
+        Some("fonts") => fonts(&args[1..]),
         Some("translation-template") => Ok(translation_template()),
         _ => Err(usage()),
     }
+}
+
+/// `fonts download [--all] [--to DIR]` and `fonts path`.
+fn fonts(args: &[String]) -> Result<String, String> {
+    let mut set = lightfoundry_fontlib::Set::Foundry;
+    let mut dest = None;
+    let mut source = lightfoundry_fontlib::Source::default();
+    match args.first().map(String::as_str) {
+        Some("path") => return lightfoundry_fontlib::default_dir().map(|d| d.display().to_string()).ok_or_else(|| t(msg::NO_FONT_FOLDER)),
+        Some("download") => {}
+        _ => return Err(usage()),
+    }
+    let mut i = 1;
+    while let Some(flag) = args.get(i) {
+        let value = || args.get(i + 1).cloned().ok_or_else(|| tf(msg::NEEDS_VALUE, &[("flag", flag.clone())]));
+        match flag.as_str() {
+            "--all" => set = lightfoundry_fontlib::Set::Everything,
+            "--to" => {
+                dest = Some(std::path::PathBuf::from(value()?));
+                i += 1;
+            }
+            // For a mirror of the library (and for tests).
+            "--tree-url" => {
+                source.tree_url = value()?;
+                i += 1;
+            }
+            "--raw-base" => {
+                source.raw_base = value()?;
+                i += 1;
+            }
+            other => return Err(tf(msg::UNKNOWN_OPTION, &[("option", other.into())])),
+        }
+        i += 1;
+    }
+    let dest = dest.or_else(lightfoundry_fontlib::default_dir).ok_or_else(|| t(msg::NO_FONT_FOLDER))?;
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let mut shown = 0;
+    let summary = lightfoundry_fontlib::download(&dest, &source, set, &cancel, &mut |done, total| {
+        // Progress goes to stderr every so often so stdout stays the result.
+        if done == total || done >= shown + 25 {
+            shown = done;
+            eprintln!("{}", tf(msg::FONTS_PROGRESS, &[("done", done.to_string()), ("total", total.to_string())]));
+        }
+    })
+    .map_err(|e| tf(msg::FONTS_FAILED, &[("reason", engine(e))]))?;
+    Ok(format!(
+        "{}\n{}",
+        tf(
+            msg::FONTS_DONE,
+            &[
+                ("path", dest.display().to_string()),
+                ("fetched", summary.fetched.to_string()),
+                ("kept", summary.kept.to_string()),
+                ("bytes", summary.bytes.to_string())
+            ]
+        ),
+        t(msg::FONTS_NOTE)
+    ))
 }
 
 /// A catalog of every text this tool shows, with the interface's own strings left out.

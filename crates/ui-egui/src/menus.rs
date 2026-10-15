@@ -75,6 +75,31 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                         }
                     });
                 }
+                if app.platform.font_library_available() {
+                    ui.menu_button(tr("Font library"), |ui| {
+                        ui.add_enabled_ui(!app.font_download_running, |ui| {
+                            if ui
+                                .button(tr("Download the Foundry fonts"))
+                                .on_hover_text(tr("About a megabyte, from the stitchfoundry-fonts repository on GitHub"))
+                                .clicked()
+                            {
+                                app.download_font_library(false);
+                                ui.close();
+                            }
+                            if ui
+                                .button(tr("Download everything (large)…"))
+                                .on_hover_text(tr("Adds the Ink/Stitch collection: hundreds of megabytes"))
+                                .clicked()
+                            {
+                                app.download_font_library(true);
+                                ui.close();
+                            }
+                        });
+                        if let Some(dir) = app.platform.font_library_dir() {
+                            ui.weak(dir.display().to_string());
+                        }
+                    });
+                }
                 ui.menu_button(tr("Preview colours"), |ui| {
                     for (mode, label) in [
                         (crate::timeline_ui::PreviewColors::Layer, "By layer"),
