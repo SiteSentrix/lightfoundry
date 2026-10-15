@@ -47,6 +47,15 @@ pub trait Platform {
         None
     }
 
+    /// Small text the host keeps between visits for hosts with no files of their own (the browser's
+    /// local storage). `None` when nothing is stored or storage is unavailable.
+    fn storage_get(&self, _key: &str) -> Option<String> {
+        None
+    }
+
+    /// Stores `value` under `key`; failures (a full or blocked storage) are the host's to log.
+    fn storage_set(&self, _key: &str, _value: &str) {}
+
     /// Where the keyboard shortcut bindings are kept, if this platform has somewhere to keep them.
     fn shortcuts_file(&self) -> Option<PathBuf> {
         None

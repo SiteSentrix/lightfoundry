@@ -81,6 +81,18 @@ mod web {
             }
         }
 
+        fn storage_get(&self, key: &str) -> Option<String> {
+            // Storage can be missing or throw (private windows, blocked site data): then nothing is remembered.
+            web_sys::window()?.local_storage().ok()??.get_item(key).ok()?
+        }
+
+        fn storage_set(&self, key: &str, value: &str) {
+            let stored = web_sys::window().and_then(|w| w.local_storage().ok()).flatten().map(|s| s.set_item(key, value));
+            if !matches!(stored, Some(Ok(()))) {
+                log::warn!("could not remember the recent projects (browser storage is unavailable or full)");
+            }
+        }
+
         fn inline_link(&self) -> bool {
             true
         }

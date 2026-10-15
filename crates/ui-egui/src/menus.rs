@@ -185,6 +185,9 @@ fn template_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
 }
 
 fn recent_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    if app.platform_browser_files() {
+        return browser_recent_menu(app, ui);
+    }
     let mut chosen = None;
     let mut clear = false;
     ui.add_enabled_ui(!app.recent.files.is_empty(), |ui| {
@@ -353,6 +356,7 @@ pub(crate) fn save(app: &mut LightFoundryApp, always_ask: bool) -> bool {
         let name =
             app.session.path.as_ref().and_then(|p| p.file_name()).map_or("project.lightfoundry".to_string(), |n| n.to_string_lossy().into_owned());
         app.download(&name, &bytes, "application/json");
+        app.remember_project(&name, &bytes);
         return true;
     }
     let path = if always_ask || app.session.path.is_none() { app.pick_save("Save project", "project.lightfoundry", &["lightfoundry"]) } else { None };
@@ -393,6 +397,35 @@ pub fn format_duration(seconds: f64) -> String {
         (0, 0, s) => trf!("{s}s", s = s),
         (0, m, s) => trf!("{m}m {s}s", m = m, s = format!("{s:02}")),
         (h, m, s) => trf!("{h}h {m}m {s}s", h = h, m = format!("{m:02}"), s = format!("{s:02}")),
+    }
+}
+
+/// "Open Recent" in a browser: the projects it kept, by name.
+fn browser_recent_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+    let mut chosen = None;
+    let mut clear = false;
+    ui.add_enabled_ui(!app.browser_recent.entries.is_empty(), |ui| {
+        ui.menu_button(tr("Open Recent"), |ui| {
+            for entry in &app.browser_recent.entries {
+                if ui.button(&entry.name).on_hover_text(tr("Kept in this browser")).clicked() {
+                    chosen = Some(entry.name.clone());
+                    ui.close();
+                }
+            }
+            ui.separator();
+            if ui.button(tr("Clear list")).clicked() {
+                clear = true;
+                ui.close();
+            }
+        });
+    });
+    if clear {
+        app.browser_recent.entries.clear();
+        app.save_browser_recent();
+    }
+    if let Some(name) = chosen {
+        app.request(PendingAction::OpenStored(name));
+        ui.close();
     }
 }
 

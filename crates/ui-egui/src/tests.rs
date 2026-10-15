@@ -2153,6 +2153,7 @@ mod browser_file_tests {
         next: Option<Upload>,
         requested: Vec<Vec<String>>,
         downloads: Vec<(String, Vec<u8>)>,
+        storage: std::collections::HashMap<String, String>,
     }
 
     struct Browser(Rc<RefCell<Shared>>);
@@ -2180,6 +2181,14 @@ mod browser_file_tests {
 
         fn download(&self, name: &str, bytes: &[u8], _: &str) {
             self.0.borrow_mut().downloads.push((name.to_string(), bytes.to_vec()));
+        }
+
+        fn storage_get(&self, key: &str) -> Option<String> {
+            self.0.borrow().storage.get(key).cloned()
+        }
+
+        fn storage_set(&self, key: &str, value: &str) {
+            self.0.borrow_mut().storage.insert(key.to_string(), value.to_string());
         }
 
         fn serial_ports(&self) -> Vec<String> {
@@ -2222,6 +2231,44 @@ mod browser_file_tests {
         h.frame(vec![]);
         assert_eq!(h.app.session.doc.shapes.len(), 1);
         assert!(h.app.awaiting_upload.is_none());
+    }
+
+    #[test]
+    fn recent_projects_are_kept_in_browser_storage_and_reopen_after_a_restart() {
+        let (mut h, shared) = browser();
+        h.app.run("shape.rectangle", json!({"x": 5, "y": 6, "width": 20, "height": 10}));
+        assert!(crate::menus::save(&mut h.app, false));
+        let stored = shared.borrow().storage.get(crate::browser_recent::STORAGE_KEY).cloned().unwrap();
+        assert!(stored.contains("project.lightfoundry"), "{stored}");
+
+        // A new page load reads the list back, and choosing an entry opens that project.
+        let mut again = Harness {
+            ctx: egui::Context::default(),
+            app: LightFoundryApp::new(Session::new(), Box::new(Browser(Rc::clone(&shared)))),
+            time: 0.0,
+            modifiers: Modifiers::NONE,
+            sent_modifiers: Modifiers::NONE,
+        };
+        again.frame(vec![]);
+        assert_eq!(again.app.browser_recent.entries.len(), 1);
+        assert_eq!(again.app.session.doc.shapes.len(), 0);
+        again.app.request(PendingAction::OpenStored("project.lightfoundry".into()));
+        assert_eq!(again.app.session.doc.shapes.len(), 1);
+
+        // An uploaded project is remembered too, once; a vanished or damaged entry is dropped from the list.
+        let bytes = shared.borrow().downloads[0].1.clone();
+        again.app.begin_upload(crate::UploadKind::Project);
+        shared.borrow_mut().next = Some(Upload { name: "other.lightfoundry".into(), bytes });
+        again.frame(vec![]);
+        assert_eq!(
+            again.app.browser_recent.entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+            ["other.lightfoundry", "project.lightfoundry"]
+        );
+        again.app.browser_recent.entries[0].data = "!!!".into();
+        again.app.request(PendingAction::OpenStored("other.lightfoundry".into()));
+        assert_eq!(again.app.browser_recent.entries.len(), 1);
+        assert!(!shared.borrow().storage[crate::browser_recent::STORAGE_KEY].contains("other"), "the stored list follows");
+        again.app.request(PendingAction::OpenStored("never-existed".into()));
     }
 
     #[test]

@@ -407,3 +407,12 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   `translation-template` lists every text it shows. Process-level tests cover each way of choosing a
   catalog, the template, and broken or missing catalogs. Also: a Windows build workflow
   (`.github/workflows/desktop.yml`, now a Windows/Linux/macOS matrix with serial ports, attached to `v*` releases).
+- **2026-10-15 — recent projects in the browser.** A browser has no file paths, so "Open Recent" keeps the
+  projects' contents instead: up to 8, at most 1 MB (base64) each and 3 MB together, in the page's local
+  storage under `lightfoundry.recent` (`browser_recent.rs`; the oldest entries go first when the budget is
+  exceeded, a project too large to keep is simply not remembered). A project is remembered when it is
+  opened from an upload or saved (downloaded); choosing an entry opens it, and a damaged one is dropped from
+  the list. The host provides two new `Platform` hooks, `storage_get` / `storage_set` (the web build wraps
+  `localStorage` and tolerates it being blocked or full). Unit tests cover ordering, budget, round trip and
+  hostile stored text; a frame test covers save, restart, reopen and a damaged entry. The wasm build compiles; not
+  yet tried in a real browser.

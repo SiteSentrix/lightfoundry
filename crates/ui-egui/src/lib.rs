@@ -9,6 +9,7 @@ mod head_ui;
 pub(crate) mod i18n {
     pub use lightfoundry_i18n::*;
 }
+mod browser_recent;
 mod job_position;
 mod menus;
 mod nodes_ui;
@@ -148,6 +149,8 @@ pub struct LightFoundryApp {
     /// An action waiting for "save changes?" to be answered.
     pending_action: Option<PendingAction>,
     recent: recent::Recent,
+    /// Recent projects in a browser, which keeps their contents instead of their paths.
+    browser_recent: browser_recent::BrowserRecent,
     shortcuts: shortcuts::Shortcuts,
     shortcuts_open: bool,
     /// The fonts must be rebuilt (a translation with its own font was loaded or removed).
@@ -221,6 +224,8 @@ pub(crate) enum PendingAction {
     New,
     Open,
     OpenPath(PathBuf),
+    /// A project remembered by a browser host, by name.
+    OpenStored(String),
     /// A template: opens as a new untitled project.
     FromTemplate(PathBuf),
     Close,
@@ -236,6 +241,11 @@ impl LightFoundryApp {
         let pending_recovery = platform.recovery_file().and_then(|base| recovery::newest_readable(&base).or_else(|| base.exists().then_some(base)));
         let interrupted = platform.job_position_file().and_then(|p| job_position::load(&p));
         let recent = platform.recent_file().map(|p| recent::Recent::load(&p)).unwrap_or_default();
+        let browser_recent = if platform.browser_files() {
+            platform.storage_get(browser_recent::STORAGE_KEY).map(|t| browser_recent::BrowserRecent::parse(&t)).unwrap_or_default()
+        } else {
+            browser_recent::BrowserRecent::default()
+        };
         let shortcuts = platform.shortcuts_file().map(|p| shortcuts::Shortcuts::load(&p)).unwrap_or_default();
         let mut app = Self {
             session,
@@ -299,6 +309,7 @@ impl LightFoundryApp {
             pending_recovery,
             pending_action: None,
             recent,
+            browser_recent,
             shortcuts,
             shortcuts_open: false,
             fonts_dirty: false,
@@ -546,6 +557,7 @@ impl LightFoundryApp {
                     self.clear_recovery();
                     self.autosave_revision = None;
                     self.view = None;
+                    self.remember_project(&name, &upload.bytes);
                 }
                 ok
             }
@@ -574,6 +586,20 @@ impl LightFoundryApp {
             self.recent.push(path);
             self.save_recent();
         }
+    }
+
+    /// Remembers a project's contents for "Open Recent" in a browser (a no-op elsewhere).
+    pub(crate) fn remember_project(&mut self, name: &str, bytes: &[u8]) {
+        if !self.platform.browser_files() {
+            return;
+        }
+        if self.browser_recent.push(name, bytes) {
+            self.save_browser_recent();
+        }
+    }
+
+    pub(crate) fn save_browser_recent(&self) {
+        self.platform.storage_set(browser_recent::STORAGE_KEY, &self.browser_recent.to_text());
     }
 
     fn forget_recent(&mut self, path: &std::path::Path) {
@@ -629,6 +655,19 @@ impl LightFoundryApp {
                     self.forget_recent(&path);
                 }
             }
+            PendingAction::OpenStored(name) => match self.browser_recent.bytes(&name) {
+                Some(bytes) if self.run("file.open", serde_json::json!({ "data_base64": lightfoundry_doc::base64::encode(&bytes) })).is_some() => {
+                    self.clear_recovery();
+                    self.autosave_revision = None;
+                    self.view = None;
+                    self.say(trf!("Opened {name}", name = name));
+                }
+                _ => {
+                    // Damaged or gone: it should not stay on the menu.
+                    self.browser_recent.remove(&name);
+                    self.save_browser_recent();
+                }
+            },
             PendingAction::FromTemplate(path) => {
                 if self.run("file.open", serde_json::json!({ "path": path, "template": true })).is_some() {
                     self.clear_recovery();
