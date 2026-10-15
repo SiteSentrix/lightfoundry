@@ -61,6 +61,8 @@ pub(crate) struct Snapper {
     others: SnapTargets,
     /// Bounding boxes of the shapes that stay put while the selection moves (for equal spacing).
     still: Vec<Rect>,
+    /// Points acquired by hovering, whose rows and columns attract the cursor.
+    tracked: Vec<Point>,
     /// Snap distance in mm.
     threshold: f64,
 }
@@ -100,16 +102,24 @@ impl Snapper {
                 }
             }
         }
-        Snapper { settings: app.snapping, all, others, still, threshold: snap::SNAP_RADIUS_PX / f64::from(view.zoom) }
+        Snapper { settings: app.snapping, all, others, still, tracked: app.tracked.clone(), threshold: snap::SNAP_RADIUS_PX / f64::from(view.zoom) }
     }
 
     pub(crate) fn point(&self, p: Point) -> snap::Snapped {
-        snap::snap_point(p, &self.settings, &self.all, self.threshold)
+        snap::snap_point_tracked(p, &self.settings, &self.all, &self.tracked, self.threshold)
+    }
+
+    /// The vertex, midpoint or centre the cursor is on, which hovering would acquire for tracking.
+    fn acquirable(&self, p: Point) -> Option<Point> {
+        snap::acquirable(&snap::snap_point(p, &self.settings, &self.all, self.threshold))
     }
 }
 
+/// How long the cursor must rest on a point for it to be acquired for tracking, in seconds.
+const TRACK_DWELL_SECS: f64 = 0.5;
+
 /// The alignment targets a snap locked onto, per axis (for drawing).
-pub(crate) type SnapLines = (Option<snap::Target>, Option<snap::Target>);
+pub(crate) type SnapLines = (Option<snap::Target>, Option<snap::Target>, Option<snap::Diagonal>);
 
 /// The far end of a drag as it will be applied: constrained by Shift, otherwise snapped.
 fn drag_end(app: &LightFoundryApp, snapper: &Snapper, start: Point, raw: Point, shift: bool) -> (Point, SnapLines) {
@@ -119,10 +129,10 @@ fn drag_end(app: &LightFoundryApp, snapper: &Snapper, start: Point, raw: Point, 
             Tool::Rectangle | Tool::Ellipse => snap::constrain_square(start, raw),
             _ => raw,
         };
-        return (p, (None, None));
+        return (p, (None, None, None));
     }
     let s = snapper.point(raw);
-    (s.point, (s.x_line, s.y_line))
+    (s.point, (s.x_line, s.y_line, s.diagonal))
 }
 
 pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
@@ -146,9 +156,10 @@ pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     let pointer = resp.interact_pointer_pos().map(|p| view.to_world(p));
     let snapper = Snapper::new(app, &view);
     let shift = ui.input(|i| i.modifiers.shift);
-    app.snap_lines = (None, None);
+    app.snap_lines = (None, None, None);
     app.snap_spacing.clear();
     let offset = interact(app, ui, &resp, &view, pointer, &snapper, canvas_rect);
+    update_tracking(app, ui, &snapper, hover, pointer.is_none() && !shift);
 
     painter.rect_filled(canvas_rect, 0.0, app.tokens.workspace);
     draw_bed(app, &painter, &view, bed_w, bed_h);
@@ -306,7 +317,7 @@ fn move_offset(app: &mut LightFoundryApp, snapper: &Snapper, start: Point, p: Po
     keys.add_rect(b);
     // `add_rect` lists edges before centres, so the grid lands the selection's top-left corner.
     let (mut delta, xl, yl) = snap::snap_translation(raw, &keys, &snapper.settings, &snapper.others, snapper.threshold);
-    app.snap_lines = (xl, yl);
+    app.snap_lines = (xl, yl, None);
     // Where nothing lined up on an axis, an equal gap to the neighbours is worth locking onto.
     if snapper.settings.objects {
         let at = |d: (f64, f64)| Rect::new(b.x0 + d.0, b.y0 + d.1, b.x1 + d.0, b.y1 + d.1);
@@ -366,6 +377,8 @@ fn finish_drag(app: &mut LightFoundryApp, end: Point, offset: (f64, f64), shift:
         Drag::Create { start } => {
             let (end, _) = drag_end(app, snapper, start, end, shift);
             create(app, start, end);
+            app.tracked.clear(); // tracking belongs to the shape being placed
+            app.track_candidate = None;
         }
         Drag::Move { .. } => {
             if offset.0.hypot(offset.1) > 0.01 {
@@ -658,7 +671,7 @@ fn draw_overlays(
         }
         Drag::Resize { anchor } => {
             let s = snapper.point(p);
-            lines = (s.x_line, s.y_line);
+            lines = (s.x_line, s.y_line, s.diagonal);
             mover = Some(at_point(s.point));
             let r = egui::Rect::from_two_pos(view.to_screen(anchor), view.to_screen(s.point));
             painter.rect_stroke(r, 0.0, ghost, egui::StrokeKind::Inside);
@@ -668,7 +681,7 @@ fn draw_overlays(
         }
         Drag::None if hovering => {
             let s = snapper.point(p);
-            lines = (s.x_line, s.y_line);
+            lines = (s.x_line, s.y_line, s.diagonal);
             mover = Some(at_point(s.point));
         }
         Drag::None | Drag::Move { .. } | Drag::MoveGuide { .. } => {}
@@ -677,6 +690,7 @@ fn draw_overlays(
         draw_alignment(painter, view, &lines, mover, t.guide, view.to_screen(p));
     }
     draw_spacing(painter, view, &app.snap_spacing, t.spacing);
+    draw_tracked(app, painter, view);
 }
 
 /// Measured gaps that are equal: a line across each with ticks at both ends and its size in mm.
@@ -714,7 +728,11 @@ fn draw_alignment(painter: &egui::Painter, view: &View, lines: &SnapLines, mover
         let dir = (p1 - p0).normalized();
         let dir = if dir.x.is_finite() && dir.y.is_finite() { dir } else { vec2(0.0, 0.0) };
         // A little past each end, so a line between touching things is still visible.
-        painter.line_segment([p0 - dir * 12.0, p1 + dir * 12.0], stroke);
+        if al.dashed {
+            painter.extend(Shape::dashed_line(&[p0, p1], stroke, 6.0, 4.0));
+        } else {
+            painter.line_segment([p0 - dir * 12.0, p1 + dir * 12.0], stroke);
+        }
         for (mark, at) in &al.marks {
             let c = view.to_screen(*at);
             match mark {
@@ -736,11 +754,67 @@ fn draw_alignment(painter: &egui::Painter, view: &View, lines: &SnapLines, mover
             }
         }
     }
-    if let Some(text) = snap::label(lines.0.as_ref(), lines.1.as_ref()) {
+    if let Some(d) = lines.2 {
+        // Through the acquired point at 45 degrees, far enough to leave any view.
+        let far = 100_000.0;
+        let (a, b) = (Point::new(d.origin.x - far, d.origin.y - far * d.sign), Point::new(d.origin.x + far, d.origin.y + far * d.sign));
+        painter.extend(Shape::dashed_line(&[view.to_screen(a), view.to_screen(b)], stroke, 6.0, 4.0));
+        let c = view.to_screen(d.origin);
+        painter.line_segment([c + vec2(-6.0, 0.0), c + vec2(6.0, 0.0)], mark_stroke);
+        painter.line_segment([c + vec2(0.0, -6.0), c + vec2(0.0, 6.0)], mark_stroke);
+    }
+    let text = snap::label(lines.0.as_ref(), lines.1.as_ref()).or(lines.2.map(|_| "Tracking 45°"));
+    if let Some(text) = text {
         let galley = painter.layout_no_wrap(crate::i18n::tr(text), egui::FontId::proportional(11.0), Color32::WHITE);
         let rect = egui::Rect::from_min_size(label_at + vec2(14.0, 14.0), galley.size() + vec2(8.0, 4.0));
         painter.rect_filled(rect, 3.0, Color32::from_black_alpha(190));
         painter.galley(rect.min + vec2(4.0, 2.0), galley, Color32::WHITE);
+    }
+}
+
+/// Acquires a point once the cursor has rested on it with a drawing tool (Escape, finishing a shape or
+/// leaving the drawing tools forgets them). Hovering again does not toggle: it is already acquired.
+fn update_tracking(app: &mut LightFoundryApp, ui: &egui::Ui, snapper: &Snapper, hover: Option<Point>, idle: bool) {
+    if matches!(app.tool, Tool::Select | Tool::Nodes) {
+        app.tracked.clear();
+        app.track_candidate = None;
+        return;
+    }
+    let candidate = if idle && matches!(app.drag, Drag::None) { hover.and_then(|p| snapper.acquirable(p)) } else { None };
+    let now = ui.input(|i| i.time);
+    let Some(c) = candidate.filter(|c| !app.tracked.iter().any(|t| t.distance(*c) < 1e-6)) else {
+        app.track_candidate = None;
+        return;
+    };
+    match app.track_candidate {
+        Some((prev, since)) if prev.distance(c) < 1e-6 => {
+            if now - since >= TRACK_DWELL_SECS {
+                app.tracked.push(c);
+                if app.tracked.len() > snap::MAX_TRACKED {
+                    app.tracked.remove(0);
+                }
+                app.track_candidate = None;
+            } else {
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+            }
+        }
+        _ => {
+            app.track_candidate = Some((c, now));
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+}
+
+/// A + on each acquired point, and a ring on the one being acquired.
+fn draw_tracked(app: &LightFoundryApp, painter: &egui::Painter, view: &View) {
+    let stroke = Stroke::new(1.5, app.tokens.guide);
+    for p in &app.tracked {
+        let c = view.to_screen(*p);
+        painter.line_segment([c + vec2(-6.0, 0.0), c + vec2(6.0, 0.0)], stroke);
+        painter.line_segment([c + vec2(0.0, -6.0), c + vec2(0.0, 6.0)], stroke);
+    }
+    if let Some((p, _)) = app.track_candidate {
+        painter.circle_stroke(view.to_screen(p), 7.0, Stroke::new(1.0, app.tokens.guide.gamma_multiply(0.7)));
     }
 }
 

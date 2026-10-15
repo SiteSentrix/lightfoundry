@@ -374,3 +374,14 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   numbers and 20 000-shape inputs survived) with a frame test; the alignment label now sits below
   the cursor so the two do not collide. Still not done: CAD-style tracking (hover a point to
   acquire it, then align to it).
+- **2026-10-15 — object tracking.** With a drawing tool, resting the cursor half a second on a vertex,
+  midpoint or shape centre (a ring shows it arriving) acquires it: a + marks it, up to six at once.
+  From acquired points the cursor is pulled onto the dashed row and column through them (drawn across
+  the whole view) and onto 45-degree lines in both directions, including the exact crossing of a
+  diagonal with a locked column or row (an object line, guide or another tracking line). Objects on
+  an axis keep priority; right on the acquired point no angle is offered. Escape, leaving the drawing
+  tools, or finishing a shape forgets them (`Snapped::diagonal`, `snap_point_tracked`,
+  `acquirable`; frame tests for acquiring, passing over, diagonal start and forgetting). Note:
+  every vertex's row and column already attract the cursor without acquiring, so the row/column
+  part mostly adds the full-length dashed line; the diagonals are the new capability. Tracking
+  applies to creating, resizing and pen/click points, not to moving shapes.

@@ -1023,6 +1023,72 @@ mod snapping_tests {
         assert!(h.app.snap_spacing.iter().all(|g| (g.size - 30.0).abs() < 1e-6), "{:?}", h.app.snap_spacing);
     }
 
+    fn triangle(h: &mut Harness) {
+        h.app.run("path.create", json!({"nodes": [{"x": 100.0, "y": 100.0}, {"x": 180.0, "y": 100.0}, {"x": 120.0, "y": 140.0}], "closed": true}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.app.tool = Tool::Rectangle;
+        h.frame(vec![]);
+    }
+
+    #[test]
+    fn resting_on_a_vertex_with_a_drawing_tool_acquires_it_for_tracking() {
+        let mut h = Harness::new();
+        triangle(&mut h);
+        let on = h.at(120.0, 140.0);
+        h.frame(vec![Event::PointerMoved(on)]);
+        assert!(h.app.tracked.is_empty() && h.app.track_candidate.is_some(), "not yet: it has only just arrived");
+        for _ in 0..45 {
+            h.frame(vec![]);
+        }
+        assert_eq!(h.app.tracked, vec![Point::new(120.0, 140.0)]);
+        // Resting on it again does not toggle it off.
+        for _ in 0..45 {
+            h.frame(vec![]);
+        }
+        assert_eq!(h.app.tracked.len(), 1);
+    }
+
+    #[test]
+    fn passing_over_a_vertex_or_resting_on_a_plain_edge_acquires_nothing() {
+        let mut h = Harness::new();
+        triangle(&mut h);
+        let (a, b) = (h.at(120.0, 140.0), h.at(300.0, 300.0));
+        h.frame(vec![Event::PointerMoved(a)]);
+        for _ in 0..10 {
+            h.frame(vec![]);
+        }
+        h.frame(vec![Event::PointerMoved(b)]);
+        for _ in 0..60 {
+            h.frame(vec![]);
+        }
+        assert!(h.app.tracked.is_empty() && h.app.track_candidate.is_none());
+    }
+
+    #[test]
+    fn a_shape_started_on_a_tracked_diagonal_snaps_onto_it_and_finishing_forgets_the_point() {
+        let mut h = Harness::new();
+        triangle(&mut h);
+        h.app.tracked.push(Point::new(100.0, 100.0));
+        h.app.snapping = snap::SnapSettings { grid: None, objects: true };
+        h.frame(vec![]);
+        // 1.3 mm off the 45-degree line through (100, 100); no object line is near x = 250 or y = 251.3.
+        let (from, to) = (h.at(250.0, 251.3), h.at(300.0, 330.0));
+        h.drag(from, to);
+        let b = last_bounds(&h);
+        assert!((b.x0 - 100.0 - (b.y0 - 100.0)).abs() < 1e-6, "exactly 45 degrees from the tracked point: {b:?}");
+        assert!(h.app.tracked.is_empty(), "tracking belongs to the shape that was being placed");
+    }
+
+    #[test]
+    fn leaving_the_drawing_tools_forgets_tracked_points() {
+        let mut h = Harness::new();
+        triangle(&mut h);
+        h.app.tracked.push(Point::new(100.0, 100.0));
+        h.app.tool = Tool::Select;
+        h.frame(vec![]);
+        assert!(h.app.tracked.is_empty());
+    }
+
     #[test]
     fn shift_makes_squares_and_circles() {
         let mut h = Harness::new();
