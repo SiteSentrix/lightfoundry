@@ -21,18 +21,99 @@ impl Default for SnapSettings {
     }
 }
 
+/// What a snap target is, which decides its marker and its label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TargetKind {
+    /// A side of the bed.
+    Bed,
+    /// The middle of the bed.
+    BedCenter,
+    /// A guide pulled out of a ruler.
+    Guide,
+    /// A side of a shape's bounding box.
+    Edge,
+    /// The middle of a shape's bounding box.
+    Center,
+    /// The middle of a straight segment.
+    Midpoint,
+    /// A corner or segment end of a drawn path.
+    Endpoint,
+}
+
+impl TargetKind {
+    /// Wins when several targets are equally close: the more specific one.
+    fn rank(self) -> u8 {
+        match self {
+            Self::Guide => 1,
+            Self::Bed => 2,
+            Self::Edge => 3,
+            Self::Center | Self::BedCenter => 4,
+            Self::Midpoint => 5,
+            Self::Endpoint => 6,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Bed => "Bed edge",
+            Self::BedCenter => "Bed center",
+            Self::Guide => "Guide",
+            Self::Edge => "Edge",
+            Self::Center => "Center",
+            Self::Midpoint => "Midpoint",
+            Self::Endpoint => "Endpoint",
+        }
+    }
+}
+
+/// One coordinate the cursor can lock onto, with what it belongs to.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Target {
+    /// The coordinate on the snapping axis, in mm.
+    pub at: f64,
+    pub kind: TargetKind,
+    /// How far the owner extends along the other axis (`None`: unbounded, like a guide). A point's span is one value.
+    pub span: Option<(f64, f64)>,
+}
+
 /// Coordinates the cursor can lock onto, per axis.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SnapTargets {
-    pub xs: Vec<f64>,
-    pub ys: Vec<f64>,
+    pub xs: Vec<Target>,
+    pub ys: Vec<Target>,
 }
 
 impl SnapTargets {
-    /// Adds a rectangle's edges and centre lines.
+    /// Adds a shape's edges and centre lines.
     pub fn add_rect(&mut self, r: Rect) {
-        self.xs.extend([r.x0, (r.x0 + r.x1) / 2.0, r.x1]);
-        self.ys.extend([r.y0, (r.y0 + r.y1) / 2.0, r.y1]);
+        self.add_rect_as(r, TargetKind::Edge, TargetKind::Center);
+    }
+
+    /// Adds the bed's sides and centre lines.
+    pub fn add_bed(&mut self, r: Rect) {
+        self.add_rect_as(r, TargetKind::Bed, TargetKind::BedCenter);
+    }
+
+    fn add_rect_as(&mut self, r: Rect, edge: TargetKind, center: TargetKind) {
+        let (xspan, yspan) = (Some((r.y0, r.y1)), Some((r.x0, r.x1)));
+        for (at, kind) in [(r.x0, edge), ((r.x0 + r.x1) / 2.0, center), (r.x1, edge)] {
+            self.xs.push(Target { at, kind, span: xspan });
+        }
+        for (at, kind) in [(r.y0, edge), ((r.y0 + r.y1) / 2.0, center), (r.y1, edge)] {
+            self.ys.push(Target { at, kind, span: yspan });
+        }
+    }
+
+    /// Adds the vertical guide at `x`, or the horizontal one at `y`.
+    pub fn add_guide(&mut self, vertical: bool, pos: f64) {
+        let target = Target { at: pos, kind: TargetKind::Guide, span: None };
+        if vertical { self.xs.push(target) } else { self.ys.push(target) }
+    }
+
+    /// Adds the lines through a point (a vertex or midpoint).
+    pub fn add_point(&mut self, p: Point, kind: TargetKind) {
+        self.xs.push(Target { at: p.x, kind, span: Some((p.y, p.y)) });
+        self.ys.push(Target { at: p.y, kind, span: Some((p.x, p.x)) });
     }
 }
 
@@ -40,17 +121,9 @@ impl SnapTargets {
 pub const MAX_VERTEX_TARGETS_PER_SHAPE: usize = 200;
 pub const MAX_VERTEX_TARGETS: usize = 5000;
 
-impl SnapTargets {
-    /// Adds the lines through a point (a vertex or midpoint).
-    pub fn add_point(&mut self, p: Point) {
-        self.xs.push(p.x);
-        self.ys.push(p.y);
-    }
-}
-
 /// The points of a path worth snapping to, in workspace mm: every segment end, plus the midpoint
 /// of each straight segment. Stops after `cap` points.
-pub fn path_points(path: &kurbo::BezPath, transform: kurbo::Affine, cap: usize) -> Vec<Point> {
+pub fn path_points(path: &kurbo::BezPath, transform: kurbo::Affine, cap: usize) -> Vec<(Point, TargetKind)> {
     use kurbo::PathEl;
     let mut out = Vec::new();
     let mut at: Option<Point> = None;
@@ -61,31 +134,31 @@ pub fn path_points(path: &kurbo::BezPath, transform: kurbo::Affine, cap: usize) 
         }
         match *el {
             PathEl::MoveTo(p) => {
-                out.push(transform * p);
+                out.push((transform * p, TargetKind::Endpoint));
                 at = Some(p);
                 start = Some(p);
             }
             PathEl::LineTo(p) => {
                 if let Some(a) = at {
-                    out.push(transform * a.midpoint(p));
+                    out.push((transform * a.midpoint(p), TargetKind::Midpoint));
                 }
-                out.push(transform * p);
+                out.push((transform * p, TargetKind::Endpoint));
                 at = Some(p);
             }
             PathEl::QuadTo(_, p) | PathEl::CurveTo(_, _, p) => {
-                out.push(transform * p);
+                out.push((transform * p, TargetKind::Endpoint));
                 at = Some(p);
             }
             PathEl::ClosePath => {
                 if let (Some(a), Some(s)) = (at, start) {
-                    out.push(transform * a.midpoint(s));
+                    out.push((transform * a.midpoint(s), TargetKind::Midpoint));
                     at = Some(s);
                 }
             }
         }
     }
     out.truncate(cap);
-    out.retain(|p| p.x.is_finite() && p.y.is_finite());
+    out.retain(|(p, _)| p.x.is_finite() && p.y.is_finite());
     out
 }
 
@@ -94,8 +167,8 @@ pub fn path_points(path: &kurbo::BezPath, transform: kurbo::Affine, cap: usize) 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Snapped {
     pub point: Point,
-    pub x_line: Option<f64>,
-    pub y_line: Option<f64>,
+    pub x_line: Option<Target>,
+    pub y_line: Option<Target>,
 }
 
 /// Snaps a single point. `threshold` is in mm.
@@ -114,20 +187,20 @@ pub fn snap_translation(
     settings: &SnapSettings,
     targets: &SnapTargets,
     threshold: f64,
-) -> ((f64, f64), Option<f64>, Option<f64>) {
+) -> ((f64, f64), Option<Target>, Option<Target>) {
     let (dx, x_line) = snap_delta_axis(delta.0, &keys.xs, settings, &targets.xs, threshold);
     let (dy, y_line) = snap_delta_axis(delta.1, &keys.ys, settings, &targets.ys, threshold);
     ((dx, dy), x_line, y_line)
 }
 
-fn snap_axis(v: f64, settings: &SnapSettings, targets: &[f64], threshold: f64) -> (f64, Option<f64>) {
+fn snap_axis(v: f64, settings: &SnapSettings, targets: &[Target], threshold: f64) -> (f64, Option<Target>) {
     if !v.is_finite() {
         return (v, None);
     }
     if settings.objects
         && let Some(t) = nearest(v, targets, threshold)
     {
-        return (t, Some(t));
+        return (t.at, Some(t));
     }
     match settings.grid {
         Some(step) if step.is_finite() && step > 0.0 => ((v / step).round() * step, None),
@@ -135,16 +208,18 @@ fn snap_axis(v: f64, settings: &SnapSettings, targets: &[f64], threshold: f64) -
     }
 }
 
-fn snap_delta_axis(delta: f64, keys: &[f64], settings: &SnapSettings, targets: &[f64], threshold: f64) -> (f64, Option<f64>) {
+fn snap_delta_axis(delta: f64, keys: &[Target], settings: &SnapSettings, targets: &[Target], threshold: f64) -> (f64, Option<Target>) {
     if !delta.is_finite() {
         return (delta, None);
     }
     if settings.objects {
-        let mut best: Option<(f64, f64)> = None; // (adjustment, target line)
+        let mut best: Option<(f64, Target)> = None; // (adjustment, target line)
         for k in keys {
-            if let Some(t) = nearest(k + delta, targets, threshold) {
-                let adjust = t - (k + delta);
-                if best.is_none_or(|(a, _)| adjust.abs() < a.abs()) {
+            if let Some(t) = nearest(k.at + delta, targets, threshold) {
+                let adjust = t.at - (k.at + delta);
+                if best
+                    .is_none_or(|(a, bt)| adjust.abs() < a.abs() - 1e-9 || (adjust.abs() - a.abs()).abs() <= 1e-9 && t.kind.rank() > bt.kind.rank())
+                {
                     best = Some((adjust, t));
                 }
             }
@@ -154,13 +229,81 @@ fn snap_delta_axis(delta: f64, keys: &[f64], settings: &SnapSettings, targets: &
         }
     }
     match (settings.grid, keys.first()) {
-        (Some(step), Some(k0)) if step.is_finite() && step > 0.0 => (((k0 + delta) / step).round() * step - k0, None),
+        (Some(step), Some(k0)) if step.is_finite() && step > 0.0 => (((k0.at + delta) / step).round() * step - k0.at, None),
         _ => (delta, None),
     }
 }
 
-fn nearest(v: f64, targets: &[f64], threshold: f64) -> Option<f64> {
-    targets.iter().copied().filter(|t| t.is_finite() && (t - v).abs() <= threshold).min_by(|a, b| (a - v).abs().total_cmp(&(b - v).abs()))
+/// The closest target within `threshold`; of equally close ones, the most specific.
+fn nearest(v: f64, targets: &[Target], threshold: f64) -> Option<Target> {
+    targets.iter().copied().filter(|t| t.at.is_finite() && (t.at - v).abs() <= threshold).min_by(|a, b| {
+        let (da, db) = ((a.at - v).abs(), (b.at - v).abs());
+        if (da - db).abs() <= 1e-9 { b.kind.rank().cmp(&a.kind.rank()) } else { da.total_cmp(&db) }
+    })
+}
+
+/// The name to show beside a snap: the most specific thing the cursor or selection locked onto.
+pub fn label(x: Option<&Target>, y: Option<&Target>) -> Option<&'static str> {
+    [x, y].into_iter().flatten().max_by_key(|t| t.kind.rank()).map(|t| t.kind.label())
+}
+
+/// The shape of a mark drawn where things line up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mark {
+    /// An X on an edge or corner.
+    Cross,
+    /// A + at a centre.
+    Plus,
+    /// A square at an endpoint.
+    Square,
+    /// A triangle at a midpoint.
+    Triangle,
+}
+
+/// What to draw for one snapped axis, in workspace mm.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Alignment {
+    /// The alignment line's two ends.
+    pub line: (Point, Point),
+    pub marks: Vec<(Mark, Point)>,
+}
+
+/// Builds the alignment line and marks for a vertical line locked onto `hit` (pass `vertical:
+/// false` for a horizontal one). `mover` is the moving selection's box, or a zero-size box at the
+/// cursor; `extent` bounds lines whose owner has no span (guides). Both ends are ordered low to high.
+pub fn alignment(vertical: bool, hit: &Target, mover: Rect, extent: Rect) -> Alignment {
+    // Work in "line at u, running along v", then swap back for horizontal lines.
+    let (mu, mv, ev) = if vertical {
+        ((mover.x0, mover.x1), (mover.y0, mover.y1), (extent.y0, extent.y1))
+    } else {
+        ((mover.y0, mover.y1), (mover.x0, mover.x1), (extent.x0, extent.x1))
+    };
+    let u = hit.at;
+    let span = hit.span.unwrap_or(ev);
+    let (lo, hi) = (span.0.min(mv.0), span.1.max(mv.1));
+    let at = |u: f64, v: f64| if vertical { Point::new(u, v) } else { Point::new(v, u) };
+    let mut marks = Vec::new();
+    let mid = |a: f64, b: f64| (a + b) / 2.0;
+    match hit.kind {
+        TargetKind::Center | TargetKind::BedCenter => marks.push((Mark::Plus, at(u, mid(span.0, span.1)))),
+        TargetKind::Endpoint => marks.push((Mark::Square, at(u, span.0))),
+        TargetKind::Midpoint => marks.push((Mark::Triangle, at(u, span.0))),
+        TargetKind::Edge | TargetKind::Bed => {
+            marks.push((Mark::Cross, at(u, span.0)));
+            marks.push((Mark::Cross, at(u, span.1)));
+        }
+        TargetKind::Guide => {}
+    }
+    if mv.1 - mv.0 > 1e-9 {
+        // A moving box: mark where its edge, or centre, meets the line.
+        if (mid(mu.0, mu.1) - u).abs() <= 1e-6 {
+            marks.push((Mark::Plus, at(u, mid(mv.0, mv.1))));
+        } else {
+            marks.push((Mark::Cross, at(u, mv.0)));
+            marks.push((Mark::Cross, at(u, mv.1)));
+        }
+    }
+    Alignment { line: (at(u, lo), at(u, hi)), marks }
 }
 
 /// Shift while drawing a box or ellipse: the shorter side grows to match the longer, keeping the
@@ -221,6 +364,108 @@ mod tests {
         t
     }
 
+    mod alignment_tests {
+        use super::*;
+
+        const EXTENT: Rect = Rect { x0: 0.0, y0: 0.0, x1: 400.0, y1: 300.0 };
+
+        fn cursor(x: f64, y: f64) -> Rect {
+            Rect::new(x, y, x, y)
+        }
+
+        #[test]
+        fn rectangles_become_edges_and_a_centre_that_remember_their_extent() {
+            let mut t = SnapTargets::default();
+            t.add_rect(Rect::new(10.0, 20.0, 50.0, 40.0));
+            let kinds: Vec<_> = t.xs.iter().map(|x| (x.at, x.kind)).collect();
+            assert_eq!(kinds, [(10.0, TargetKind::Edge), (30.0, TargetKind::Center), (50.0, TargetKind::Edge)]);
+            assert!(t.xs.iter().all(|x| x.span == Some((20.0, 40.0))), "x lines run along y");
+            assert!(t.ys.iter().all(|y| y.span == Some((10.0, 50.0))), "y lines run along x");
+            let mut bed = SnapTargets::default();
+            bed.add_bed(Rect::new(0.0, 0.0, 400.0, 300.0));
+            assert_eq!(bed.xs.iter().map(|x| x.kind).collect::<Vec<_>>(), [TargetKind::Bed, TargetKind::BedCenter, TargetKind::Bed]);
+            bed.add_guide(true, 77.0);
+            assert_eq!(bed.xs.last().map(|g| (g.kind, g.span)), Some((TargetKind::Guide, None)));
+        }
+
+        #[test]
+        fn of_equally_close_targets_the_more_specific_one_wins() {
+            let mut t = SnapTargets::default();
+            t.add_rect(Rect::new(0.0, 0.0, 100.0, 100.0)); // edge at x = 100
+            t.add_point(Point::new(100.0, 40.0), TargetKind::Endpoint);
+            t.add_point(Point::new(100.0, 60.0), TargetKind::Midpoint);
+            let s = snap_point(Point::new(99.5, 40.0), &SnapSettings::default(), &t, 2.0);
+            assert_eq!(s.x_line.map(|x| x.kind), Some(TargetKind::Endpoint));
+            // A nearer edge still beats a farther endpoint.
+            let mut t = SnapTargets::default();
+            t.add_rect(Rect::new(0.0, 0.0, 100.0, 100.0));
+            t.add_point(Point::new(101.5, 40.0), TargetKind::Endpoint);
+            let s = snap_point(Point::new(99.8, 40.0), &SnapSettings::default(), &t, 2.0);
+            assert_eq!(s.x_line.map(|x| x.kind), Some(TargetKind::Edge));
+        }
+
+        #[test]
+        fn the_label_names_the_most_specific_hit() {
+            let hit = |kind| Some(Target { at: 0.0, kind, span: None });
+            assert_eq!(label(hit(TargetKind::Edge).as_ref(), hit(TargetKind::Endpoint).as_ref()), Some("Endpoint"));
+            assert_eq!(label(None, hit(TargetKind::BedCenter).as_ref()), Some("Bed center"));
+            assert_eq!(label(hit(TargetKind::Guide).as_ref(), hit(TargetKind::Bed).as_ref()), Some("Bed edge"));
+            assert_eq!(label(None, None), None);
+        }
+
+        #[test]
+        fn a_cursor_on_an_edge_gets_a_line_back_to_that_shape_with_crosses_on_its_corners() {
+            let hit = Target { at: 50.0, kind: TargetKind::Edge, span: Some((10.0, 30.0)) };
+            let a = alignment(true, &hit, cursor(50.0, 60.0), EXTENT);
+            assert_eq!(a.line, (Point::new(50.0, 10.0), Point::new(50.0, 60.0)));
+            assert_eq!(a.marks, [(Mark::Cross, Point::new(50.0, 10.0)), (Mark::Cross, Point::new(50.0, 30.0))]);
+        }
+
+        #[test]
+        fn centres_get_a_plus_and_vertices_a_square_or_triangle() {
+            let c = Target { at: 50.0, kind: TargetKind::Center, span: Some((10.0, 30.0)) };
+            assert_eq!(alignment(true, &c, cursor(50.0, 5.0), EXTENT).marks, [(Mark::Plus, Point::new(50.0, 20.0))]);
+            let v = Target { at: 50.0, kind: TargetKind::Endpoint, span: Some((12.0, 12.0)) };
+            assert_eq!(alignment(true, &v, cursor(50.0, 12.0), EXTENT).marks, [(Mark::Square, Point::new(50.0, 12.0))]);
+            let m = Target { kind: TargetKind::Midpoint, ..v };
+            assert_eq!(alignment(true, &m, cursor(50.0, 12.0), EXTENT).marks, [(Mark::Triangle, Point::new(50.0, 12.0))]);
+        }
+
+        #[test]
+        fn a_moving_box_is_marked_where_its_edge_or_centre_meets_the_line() {
+            let hit = Target { at: 50.0, kind: TargetKind::Edge, span: Some((0.0, 10.0)) };
+            let edge = alignment(true, &hit, Rect::new(50.0, 40.0, 70.0, 80.0), EXTENT);
+            assert_eq!(edge.line, (Point::new(50.0, 0.0), Point::new(50.0, 80.0)));
+            assert!(edge.marks.contains(&(Mark::Cross, Point::new(50.0, 40.0))) && edge.marks.contains(&(Mark::Cross, Point::new(50.0, 80.0))));
+            let centre = alignment(true, &hit, Rect::new(40.0, 40.0, 60.0, 80.0), EXTENT);
+            assert!(centre.marks.contains(&(Mark::Plus, Point::new(50.0, 60.0))), "{:?}", centre.marks);
+        }
+
+        #[test]
+        fn horizontal_lines_mirror_the_vertical_ones() {
+            let hit = Target { at: 20.0, kind: TargetKind::Endpoint, span: Some((5.0, 5.0)) };
+            let a = alignment(false, &hit, cursor(30.0, 20.0), EXTENT);
+            assert_eq!(a.line, (Point::new(5.0, 20.0), Point::new(30.0, 20.0)));
+            assert_eq!(a.marks, [(Mark::Square, Point::new(5.0, 20.0))]);
+        }
+
+        #[test]
+        fn guides_and_the_bed_centre_run_the_length_they_are_given() {
+            let guide = Target { at: 70.0, kind: TargetKind::Guide, span: None };
+            assert_eq!(alignment(true, &guide, cursor(70.0, 100.0), EXTENT).line, (Point::new(70.0, 0.0), Point::new(70.0, 300.0)));
+            let centre = Target { at: 200.0, kind: TargetKind::BedCenter, span: Some((0.0, 300.0)) };
+            let a = alignment(true, &centre, cursor(200.0, 10.0), EXTENT);
+            assert_eq!(a.marks, [(Mark::Plus, Point::new(200.0, 150.0))]);
+        }
+
+        #[test]
+        fn non_finite_numbers_do_not_produce_panics() {
+            let hit = Target { at: f64::NAN, kind: TargetKind::Edge, span: Some((f64::INFINITY, f64::NAN)) };
+            let _ = alignment(true, &hit, Rect::new(f64::NAN, 0.0, 1.0, f64::INFINITY), EXTENT);
+            let _ = alignment(false, &hit, cursor(f64::NAN, f64::NAN), EXTENT);
+        }
+    }
+
     mod vertex_tests {
         use kurbo::{Affine, BezPath};
 
@@ -231,7 +476,7 @@ mod tests {
             let path = lightfoundry_geom::rect_path(0.0, 0.0, 10.0, 4.0);
             let pts = path_points(&path, Affine::translate((100.0, 50.0)), 100);
             for want in [Point::new(100.0, 50.0), Point::new(110.0, 54.0), Point::new(105.0, 50.0), Point::new(110.0, 52.0)] {
-                assert!(pts.iter().any(|p| p.distance(want) < 1e-9), "{want:?} in {pts:?}");
+                assert!(pts.iter().any(|(p, _)| p.distance(want) < 1e-9), "{want:?} in {pts:?}");
             }
         }
 
@@ -241,7 +486,7 @@ mod tests {
             curve.move_to((0.0, 0.0));
             curve.curve_to((5.0, 30.0), (15.0, 30.0), (20.0, 0.0));
             let pts = path_points(&curve, Affine::IDENTITY, 100);
-            assert_eq!(pts, vec![Point::new(0.0, 0.0), Point::new(20.0, 0.0)], "no control points");
+            assert_eq!(pts, vec![(Point::new(0.0, 0.0), TargetKind::Endpoint), (Point::new(20.0, 0.0), TargetKind::Endpoint)], "no control points");
             let big = lightfoundry_geom::rect_path(0.0, 0.0, 10.0, 10.0);
             assert_eq!(path_points(&big, Affine::IDENTITY, 3).len(), 3);
             assert!(path_points(&big, Affine::IDENTITY, 0).is_empty());
@@ -251,7 +496,7 @@ mod tests {
         #[test]
         fn vertices_attract_on_both_axes() {
             let mut t = SnapTargets::default();
-            t.add_point(Point::new(33.0, 44.0));
+            t.add_point(Point::new(33.0, 44.0), TargetKind::Endpoint);
             let s = snap_point(Point::new(32.0, 45.0), &SnapSettings::default(), &t, 2.0);
             assert_eq!(s.point, Point::new(33.0, 44.0));
         }
@@ -264,7 +509,7 @@ mod tests {
         fn nearby_edges_and_centres_attract_and_report_their_line() {
             let s = snap_point(Point::new(101.2, 69.0), &SnapSettings::default(), &targets(), 2.0);
             assert_eq!(s.point, Point::new(100.0, 70.0), "left edge, and the centre line y=70");
-            assert_eq!((s.x_line, s.y_line), (Some(100.0), Some(70.0)));
+            assert_eq!((s.x_line.map(|t| t.at), s.y_line.map(|t| t.at)), (Some(100.0), Some(70.0)));
         }
 
         #[test]
@@ -295,7 +540,7 @@ mod tests {
             let nan_grid = SnapSettings { grid: Some(f64::NAN), objects: false };
             assert_eq!(snap_point(Point::new(3.3, 4.4), &nan_grid, &targets(), 2.0).point, Point::new(3.3, 4.4));
             let mut t = SnapTargets::default();
-            t.xs.push(f64::NAN);
+            t.xs.push(Target { at: f64::NAN, kind: TargetKind::Edge, span: None });
             assert_eq!(snap_point(Point::new(1.0, 1.0), &SnapSettings::default(), &t, 2.0).point, Point::new(1.0, 1.0));
         }
     }
@@ -316,7 +561,7 @@ mod tests {
             let k = keys(Rect::new(60.0, 50.0, 80.0, 70.0));
             let ((dx, dy), xl, _) = snap_translation((18.5, 0.0), &k, &SnapSettings::default(), &targets(), 2.0);
             assert!((dx - 20.0).abs() < 1e-9 && dy == 0.0, "{dx}");
-            assert_eq!(xl, Some(100.0));
+            assert_eq!(xl.map(|t| t.at), Some(100.0));
         }
 
         #[test]

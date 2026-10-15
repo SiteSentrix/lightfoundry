@@ -67,9 +67,9 @@ impl Snapper {
         let mut all = SnapTargets::default();
         let mut others = SnapTargets::default();
         for t in [&mut all, &mut others] {
-            t.add_rect(Rect::new(0.0, 0.0, app.session.doc.machine.bed_width, app.session.doc.machine.bed_height));
+            t.add_bed(Rect::new(0.0, 0.0, app.session.doc.machine.bed_width, app.session.doc.machine.bed_height));
             for g in &app.guides {
-                if g.vertical { t.xs.push(g.pos) } else { t.ys.push(g.pos) }
+                t.add_guide(g.vertical, g.pos);
             }
         }
         let mut vertices = 0;
@@ -84,10 +84,10 @@ impl Snapper {
                 && let lightfoundry_doc::ShapeKind::Path { path } = &shape.kind
                 && vertices < snap::MAX_VERTEX_TARGETS
             {
-                for p in snap::path_points(path, shape.transform, snap::MAX_VERTEX_TARGETS_PER_SHAPE) {
-                    all.add_point(p);
+                for (p, kind) in snap::path_points(path, shape.transform, snap::MAX_VERTEX_TARGETS_PER_SHAPE) {
+                    all.add_point(p, kind);
                     if !moving {
-                        others.add_point(p);
+                        others.add_point(p, kind);
                     }
                     vertices += 1;
                 }
@@ -101,8 +101,11 @@ impl Snapper {
     }
 }
 
+/// The alignment targets a snap locked onto, per axis (for drawing).
+pub(crate) type SnapLines = (Option<snap::Target>, Option<snap::Target>);
+
 /// The far end of a drag as it will be applied: constrained by Shift, otherwise snapped.
-fn drag_end(app: &LightFoundryApp, snapper: &Snapper, start: Point, raw: Point, shift: bool) -> (Point, (Option<f64>, Option<f64>)) {
+fn drag_end(app: &LightFoundryApp, snapper: &Snapper, start: Point, raw: Point, shift: bool) -> (Point, SnapLines) {
     if shift {
         let p = match app.tool {
             Tool::Line => snap::constrain_angle(start, raw, 15.0),
@@ -598,8 +601,9 @@ fn draw_overlays(
     shift: bool,
 ) {
     let t = &app.tokens;
-    if let Some(b) = app.session.doc.bounds_of(&app.session.selection) {
-        let moved = Rect::new(b.x0 + offset.0, b.y0 + offset.1, b.x1 + offset.0, b.y1 + offset.1);
+    let moved =
+        app.session.doc.bounds_of(&app.session.selection).map(|b| Rect::new(b.x0 + offset.0, b.y0 + offset.1, b.x1 + offset.0, b.y1 + offset.1));
+    if let Some(moved) = moved {
         let r = egui::Rect::from_two_pos(view.to_screen(Point::new(moved.x0, moved.y0)), view.to_screen(Point::new(moved.x1, moved.y1)));
         let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
         painter.extend(Shape::dashed_line(&corners, Stroke::new(1.0, t.selection), 5.0, 3.0));
@@ -609,13 +613,18 @@ fn draw_overlays(
             painter.rect_stroke(h, 1.0, Stroke::new(1.0, t.selection), egui::StrokeKind::Outside);
         }
     }
-    let Some(p) = pointer else { return };
+    // With a drawing tool and no button down, preview what the click would lock onto.
+    let hovering = pointer.is_none() && matches!(app.drag, Drag::None) && !matches!(app.tool, Tool::Select) && !shift;
+    let Some(p) = pointer.or(if hovering { app.hover_world } else { None }) else { return };
     let ghost = Stroke::new(1.0, t.selection);
+    let at_point = |p: Point| Rect::new(p.x, p.y, p.x, p.y);
     let mut lines = app.snap_lines;
+    let mut mover = moved;
     match app.drag {
         Drag::Create { start } => {
             let (end, hit) = drag_end(app, snapper, start, p, shift);
             lines = hit;
+            mover = Some(at_point(end));
             draw_create_ghost(app, painter, view, start, end, ghost);
         }
         Drag::Rubber { start } => {
@@ -626,24 +635,67 @@ fn draw_overlays(
         Drag::Resize { anchor } => {
             let s = snapper.point(p);
             lines = (s.x_line, s.y_line);
+            mover = Some(at_point(s.point));
             let r = egui::Rect::from_two_pos(view.to_screen(anchor), view.to_screen(s.point));
             painter.rect_stroke(r, 0.0, ghost, egui::StrokeKind::Inside);
         }
         Drag::NewGuide { vertical } => {
             draw_guide_line(painter, view, painter.clip_rect(), Guide { vertical, pos: if vertical { p.x } else { p.y } }, t.guide)
         }
+        Drag::None if hovering => {
+            let s = snapper.point(p);
+            lines = (s.x_line, s.y_line);
+            mover = Some(at_point(s.point));
+        }
         Drag::None | Drag::Move { .. } | Drag::MoveGuide { .. } => {}
     }
-    // Alignment lines the cursor or selection is locked onto.
-    let clip = painter.clip_rect();
-    let guide_stroke = Stroke::new(1.0, t.guide);
-    if let Some(x) = lines.0 {
-        let sx = view.to_screen(Point::new(x, 0.0)).x;
-        painter.line_segment([Pos2::new(sx, clip.min.y), Pos2::new(sx, clip.max.y)], guide_stroke);
+    if let Some(mover) = mover {
+        draw_alignment(painter, view, &lines, mover, t.guide, view.to_screen(p));
     }
-    if let Some(y) = lines.1 {
-        let sy = view.to_screen(Point::new(0.0, y)).y;
-        painter.line_segment([Pos2::new(clip.min.x, sy), Pos2::new(clip.max.x, sy)], guide_stroke);
+}
+
+/// Alignment lines from the moving thing to what it locked onto, with a mark at each end (X on
+/// edges, + at centres, a square at endpoints, a triangle at midpoints) and the target's name.
+fn draw_alignment(painter: &egui::Painter, view: &View, lines: &SnapLines, mover: Rect, color: Color32, label_at: Pos2) {
+    let clip = painter.clip_rect();
+    let (a, b) = (view.to_world(clip.min), view.to_world(clip.max));
+    let extent = Rect::new(a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y));
+    let stroke = Stroke::new(1.25, color);
+    let mark_stroke = Stroke::new(1.75, color);
+    for (vertical, hit) in [(true, &lines.0), (false, &lines.1)] {
+        let Some(hit) = hit else { continue };
+        let al = snap::alignment(vertical, hit, mover, extent);
+        let (p0, p1) = (view.to_screen(al.line.0), view.to_screen(al.line.1));
+        let dir = (p1 - p0).normalized();
+        let dir = if dir.x.is_finite() && dir.y.is_finite() { dir } else { vec2(0.0, 0.0) };
+        // A little past each end, so a line between touching things is still visible.
+        painter.line_segment([p0 - dir * 12.0, p1 + dir * 12.0], stroke);
+        for (mark, at) in &al.marks {
+            let c = view.to_screen(*at);
+            match mark {
+                snap::Mark::Cross => {
+                    painter.line_segment([c + vec2(-4.0, -4.0), c + vec2(4.0, 4.0)], mark_stroke);
+                    painter.line_segment([c + vec2(-4.0, 4.0), c + vec2(4.0, -4.0)], mark_stroke);
+                }
+                snap::Mark::Plus => {
+                    painter.line_segment([c + vec2(-6.0, 0.0), c + vec2(6.0, 0.0)], mark_stroke);
+                    painter.line_segment([c + vec2(0.0, -6.0), c + vec2(0.0, 6.0)], mark_stroke);
+                }
+                snap::Mark::Square => {
+                    painter.rect_stroke(egui::Rect::from_center_size(c, vec2(9.0, 9.0)), 0.0, mark_stroke, egui::StrokeKind::Middle);
+                }
+                snap::Mark::Triangle => {
+                    let tri = [c + vec2(0.0, -5.0), c + vec2(5.0, 4.0), c + vec2(-5.0, 4.0), c + vec2(0.0, -5.0)];
+                    painter.add(Shape::line(tri.to_vec(), mark_stroke));
+                }
+            }
+        }
+    }
+    if let Some(text) = snap::label(lines.0.as_ref(), lines.1.as_ref()) {
+        let galley = painter.layout_no_wrap(crate::i18n::tr(text), egui::FontId::proportional(11.0), Color32::WHITE);
+        let rect = egui::Rect::from_min_size(label_at + vec2(14.0, -26.0), galley.size() + vec2(8.0, 4.0));
+        painter.rect_filled(rect, 3.0, Color32::from_black_alpha(190));
+        painter.galley(rect.min + vec2(4.0, 2.0), galley, Color32::WHITE);
     }
 }
 

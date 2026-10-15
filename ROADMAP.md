@@ -356,3 +356,13 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   live link the check runs every frame, so the person's own edits in the window are announced too.
   Unknown URIs are errors and a connection may watch at most 16. Writes to each agent now go through
   one writer thread per connection, so answers and notifications keep their order.
+- **2026-10-15 — CAD-style alignment cues.** Snap targets now know what they are (bed edge, bed centre,
+  guide, shape edge, shape centre, path endpoint, midpoint) and how far their owner extends. The canvas
+  draws a line only from the moving thing to what it locked onto (guides and the bed's own lines
+  run the length of the view), with an X on edges and corners, a + at centres, a square at endpoints
+  and a triangle at midpoints, plus a small label naming the target. Where several targets are
+  equally near, the more specific wins (endpoint over midpoint over centre over edge). With a
+  drawing tool chosen and no button down, the same cues preview what a click would lock onto.
+  Pure geometry in `snap::alignment`, tested for every mark and both axes; frame tests check a
+  moving shape reports an endpoint and the bed centre. Not yet: equal-spacing hints between three
+  shapes, and CAD-style tracking (hover a point to acquire it, then align to it).

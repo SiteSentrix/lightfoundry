@@ -970,6 +970,44 @@ mod snapping_tests {
         assert_eq!(b.y1, 120.0, "and its bottom to the centre line y = 120");
     }
 
+    /// Presses on `from`, moves to `to` and leaves the button down, so the drag's overlays can be inspected.
+    fn hold_drag(h: &mut Harness, from: egui::Pos2, to: egui::Pos2) {
+        h.frame(vec![Event::PointerMoved(from)]);
+        h.frame(vec![Event::PointerButton { pos: from, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }]);
+        h.frame(vec![Event::PointerMoved(from + (to - from) * 0.5)]);
+        h.frame(vec![Event::PointerMoved(to)]);
+        h.frame(vec![]);
+    }
+
+    #[test]
+    fn a_moving_shape_reports_what_it_is_aligned_with() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 100, "y": 20, "width": 30, "height": 30}));
+        h.app.run("shape.rectangle", json!({"x": 20, "y": 120, "width": 30, "height": 30}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.frame(vec![]);
+        let (from, to) = (h.at(35.0, 135.0), h.at(35.0 + 78.7, 135.0));
+        hold_drag(&mut h, from, to);
+        let x = h.app.snap_lines.0.expect("locked onto the other rectangle's left side");
+        // A rectangle is a path, so its corner (the more specific target) is what the line comes from.
+        assert_eq!((x.at, x.kind), (100.0, snap::TargetKind::Endpoint));
+        assert!(matches!(x.span, Some((y, _)) if y == 20.0 || y == 50.0), "the line can be drawn back to that corner: {x:?}");
+    }
+
+    #[test]
+    fn a_shape_dragged_to_the_middle_of_the_bed_reports_the_bed_centre() {
+        let mut h = Harness::new();
+        let (bw, bh) = (h.app.session.doc.machine.bed_width, h.app.session.doc.machine.bed_height);
+        h.app.run("shape.rectangle", json!({"x": 20, "y": 20, "width": 20, "height": 20}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.frame(vec![]);
+        // Its centre is at (30, 30); drag it to 0.6 mm short of the bed's centre on both axes.
+        let (from, to) = (h.at(30.0, 30.0), h.at(bw / 2.0 - 0.6, bh / 2.0 - 0.6));
+        hold_drag(&mut h, from, to);
+        assert_eq!(h.app.snap_lines.0.map(|t| (t.at, t.kind)), Some((bw / 2.0, snap::TargetKind::BedCenter)));
+        assert_eq!(h.app.snap_lines.1.map(|t| (t.at, t.kind)), Some((bh / 2.0, snap::TargetKind::BedCenter)));
+    }
+
     #[test]
     fn shift_makes_squares_and_circles() {
         let mut h = Harness::new();
