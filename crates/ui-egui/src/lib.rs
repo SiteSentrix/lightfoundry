@@ -117,7 +117,7 @@ pub struct LightFoundryApp {
     /// Where the canvas was drawn last frame (screen points).
     canvas_rect: Option<egui::Rect>,
     /// Alignment lines the last drag locked onto, for drawing: (x, y).
-    snap_lines: (Option<f64>, Option<f64>),
+    snap_lines: canvas::SnapLines,
     grid_cols: u32,
     grid_rows: u32,
     grid_speed: (f64, f64),
