@@ -406,4 +406,4 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   `--translation FILE`, `$LIGHTFOUNDRY_TRANSLATION` or the desktop app's catalog, and
   `translation-template` lists every text it shows. Process-level tests cover each way of choosing a
   catalog, the template, and broken or missing catalogs. Also: a Windows build workflow
-  (`.github/workflows/windows.yml`, exe artifacts, attached to `v*` releases).
+  (`.github/workflows/desktop.yml`, now a Windows/Linux/macOS matrix with serial ports, attached to `v*` releases).
