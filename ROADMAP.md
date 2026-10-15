@@ -427,6 +427,16 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   everything. Checked against the real raw host (15 files, identical to the repository) and against a
   local server in tests. **The hosted browser build never downloads:** `Platform::font_library_available`
   defaults to false (only the desktop host turns it on), the menu is absent there, and `cargo xtask layers`
-  now fails if anything but `lightfoundry` and `lightfoundry-cli` depends on `fontlib` or `ureq`. Caveat:
-  the library holds *embroidery* fonts (stitch glyph data) made for StitchFoundry, not TTF/OTF, so
-  LightFoundry's text tool cannot draw them yet; that needs an importer, or a library of outline fonts.
+  now fails if anything but `lightfoundry` and `lightfoundry-cli` depends on `fontlib` or `ureq`. Caveat
+  at that point: the library holds embroidery fonts, not TTF/OTF (see the next entry).
+- **2026-10-15 — library fonts usable for text.** The Foundry fonts' `glyphs.stitchfoundry` turn out to hold
+  ready-drawn vector glyphs (anchors with absolute in/out Bézier handles, y down, baseline y = 0) and
+  `font.json` the advances and leading. `text::GlyphFont` reads them (every size, count, depth and number
+  bounded; hostile-input tests), works out the cap height from H/E/I/T, winds counters against their outer
+  shapes so holes survive either fill rule, and `layout_glyph_font` lays text out left to right (no shaping,
+  bidi or kerning: these are Latin lettering fonts) in the same coordinates as outline text. `text.create` /
+  `text.edit` take a font folder (or its `font.json`/`glyphs.stitchfoundry`) as `font`, anywhere a TTF path
+  was accepted; a library folder cannot be a fallback font. The text inspector has a **Library fonts** drop
+  down listing the downloaded folders by name. Looked at with the real fonts (all five, including holes in
+  A/B/O and Script's swashes) and in the running app. Not covered: the 131 Ink/Stitch fonts, which are SVG
+  glyph fonts (`ltr.svg`, up to 14 MB each) in a different format; the web build has no font folder.

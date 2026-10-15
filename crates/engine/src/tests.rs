@@ -1282,6 +1282,43 @@ mod import_tests {
     }
 
     #[test]
+    fn text_can_use_a_font_library_folder_by_folder_or_by_either_file() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-glyphfont-{}", std::process::id()));
+        let folder = dir.join("block");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("font.json"), r#"{"name":"Block","horiz_adv_x":{"H":50,"o":40},"horiz_adv_x_space":30,"leading":98}"#).unwrap();
+        let glyph = |name: &str, pts: &str| {
+            format!(r#"{{"name":"{name}","kind":{{"type":"path","path":{{"subpaths":[{{"anchors":[{pts}],"closed":true}}]}}}}}}"#)
+        };
+        let h = glyph("H", r#"{"p":[0,0]},{"p":[0,-70]},{"p":[50,-70]},{"p":[50,0]}"#);
+        let o = glyph("o", r#"{"p":[0,0]},{"p":[0,-50]},{"p":[40,-50]},{"p":[40,0]}"#);
+        std::fs::write(
+            folder.join("glyphs.stitchfoundry"),
+            format!(r#"{{"document":{{"layers":[{{"kind":{{"type":"layer","children":[{h},{o}]}}}}]}}}}"#),
+        )
+        .unwrap();
+
+        let mut s = Session::new();
+        for font in [folder.clone(), folder.join("font.json"), folder.join("glyphs.stitchfoundry")] {
+            let v = s.execute("text.create", &json!({"text": "Ho", "x": 20, "y": 30, "height": 14, "font": font})).unwrap();
+            let b = s.doc.shape(v["id"].as_u64().unwrap()).unwrap().world_bounds().unwrap();
+            assert!((b.y1 - b.y0 - 14.0).abs() < 0.1 && b.x0 >= 19.9, "{font:?} {b:?}");
+            assert!(v["unsupported"].as_array().unwrap().is_empty());
+        }
+        // A letter the font lacks is reported; a fallback font cannot be a library folder; damaged files are errors.
+        let v = s.execute("text.create", &json!({"text": "HZ", "font": folder})).unwrap();
+        assert_eq!(v["unsupported"], json!(["Z"]));
+        let other = dir.join("tiny.ttf");
+        std::fs::write(&other, lightfoundry_text::testfont::tiny_font()).unwrap();
+        assert!(s.execute("text.create", &json!({"text": "H", "font": other, "fallback_font": folder})).is_err());
+        std::fs::write(folder.join("glyphs.stitchfoundry"), b"{ broken").unwrap();
+        assert!(s.execute("text.create", &json!({"text": "H", "font": folder})).is_err());
+        std::fs::write(folder.join("glyphs.stitchfoundry"), [0xff, 0xfe, 0x00]).unwrap();
+        assert!(s.execute("text.create", &json!({"text": "H", "font": folder})).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn two_marks_move_and_turn_the_whole_design_onto_where_they_really_are() {
         let mut s = Session::new();
         let a = s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 4, "height": 4})).unwrap()["id"].as_u64().unwrap();

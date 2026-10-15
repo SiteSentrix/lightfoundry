@@ -898,6 +898,10 @@ impl LightFoundryApp {
         }
     }
 
+    pub(crate) fn platform_font_library_dir(&self) -> Option<PathBuf> {
+        self.platform.font_library_dir()
+    }
+
     pub(crate) fn platform_browser_files(&self) -> bool {
         self.platform.browser_files()
     }

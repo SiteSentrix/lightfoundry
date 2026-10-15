@@ -13,7 +13,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Text",
         menu: "Create",
         shortcut: Some("T"),
-        params_doc: "{text, x, y, height? (cap height mm, default 10), letter_spacing?, line_spacing?, align?: left|center|right, layer?}  (single-line stroke font), font? (path to a .ttf/.otf file: draws filled outlines; use a Fill layer to engrave them), vertical? (stack letters top to bottom, one column per line, first line rightmost), fallback_font? (path to a second .ttf/.otf for characters the font lacks)",
+        params_doc: "{text, x, y, height? (cap height mm, default 10), letter_spacing?, line_spacing?, align?: left|center|right, layer?}  (single-line stroke font), font? (path to a .ttf/.otf file, or a font library folder: draws filled outlines; use a Fill layer to engrave them), vertical? (stack letters top to bottom, one column per line, first line rightmost), fallback_font? (path to a second .ttf/.otf for characters the font lacks)",
         mutates: true,
         run: create,
     },
@@ -146,12 +146,17 @@ pub(super) fn generate(text: &str, s: &TextSettings) -> Result<(lightfoundry_geo
         },
     };
     let font = s.font.as_deref().map(read_font).transpose()?;
+    // A fallback only applies to a file font; a font folder from the font library has none.
     let fallback = match (&font, s.fallback_font.as_deref()) {
-        (Some(_), Some(path)) => Some(read_font(path)?),
+        (Some(LoadedFont::File(_)), Some(path)) => match read_font(path)? {
+            LoadedFont::File(data) => Some(data),
+            LoadedFont::Glyphs(_) => return Err(EngineError::BadParams("a font library folder cannot be used as a fallback font".into())),
+        },
         _ => None,
     };
     let one = |t: &str, st: &TextStyle| match &font {
-        Some(data) => lightfoundry_text::layout_outline_with_fallback(data, fallback.as_deref(), t, st),
+        Some(LoadedFont::File(data)) => lightfoundry_text::layout_outline_with_fallback(data, fallback.as_deref(), t, st),
+        Some(LoadedFont::Glyphs(font)) => lightfoundry_text::layout_glyph_font(font, t, st),
         None => layout(t, st),
     };
     let l = if s.vertical { lightfoundry_text::layout_vertical(text, &style, |c| one(c, &style)) } else { one(text, &style) }
@@ -159,15 +164,50 @@ pub(super) fn generate(text: &str, s: &TextSettings) -> Result<(lightfoundry_geo
     Ok((l.path, l.unsupported))
 }
 
-/// Reads a font file, refusing anything unreasonably large before it is loaded.
-fn read_font(path: &str) -> Result<Vec<u8>, EngineError> {
+/// A font as loaded: a TrueType/OpenType file's bytes, or a font library folder's ready-drawn glyphs.
+enum LoadedFont {
+    File(Vec<u8>),
+    Glyphs(Box<lightfoundry_text::GlyphFont>),
+}
+
+/// The font library's files: a folder with `font.json` and `glyphs.stitchfoundry`, named by the folder
+/// or by either file in it.
+const GLYPH_FONT_FILES: [&str; 2] = ["font.json", "glyphs.stitchfoundry"];
+
+/// Reads a font, refusing anything unreasonably large before it is loaded.
+fn read_font(path: &str) -> Result<LoadedFont, EngineError> {
+    let p = std::path::Path::new(path);
+    let folder =
+        if p.is_dir() { Some(p) } else { p.file_name().and_then(|n| n.to_str()).filter(|n| GLYPH_FONT_FILES.contains(n)).and_then(|_| p.parent()) };
+    match folder {
+        Some(folder) if GLYPH_FONT_FILES.iter().all(|f| folder.join(f).is_file()) => read_glyph_font(folder),
+        _ => read_font_file(path).map(LoadedFont::File),
+    }
+}
+
+fn read_glyph_font(folder: &std::path::Path) -> Result<LoadedFont, EngineError> {
+    let read = |name: &str, limit: usize| -> Result<String, EngineError> {
+        let path = folder.join(name);
+        let bytes = read_limited(&path.display().to_string(), limit)?;
+        String::from_utf8(bytes).map_err(|_| EngineError::BadParams(format!("{} is not text", path.display())))
+    };
+    let info = read("font.json", lightfoundry_text::MAX_FONT_JSON_BYTES)?;
+    let glyphs = read("glyphs.stitchfoundry", lightfoundry_text::MAX_GLYPH_FILE_BYTES)?;
+    let font = lightfoundry_text::GlyphFont::parse(&info, &glyphs).map_err(|e| EngineError::BadParams(e.to_string()))?;
+    Ok(LoadedFont::Glyphs(Box::new(font)))
+}
+
+fn read_font_file(path: &str) -> Result<Vec<u8>, EngineError> {
+    read_limited(path, lightfoundry_text::MAX_FONT_BYTES)
+}
+
+/// Reads a file of at most `limit` bytes; a larger one is an error, not a truncation.
+fn read_limited(path: &str, limit: usize) -> Result<Vec<u8>, EngineError> {
     use std::io::Read;
     let file = std::fs::File::open(path).map_err(|e| EngineError::BadParams(format!("cannot open the font {path}: {e}")))?;
     let mut data = Vec::new();
-    file.take(lightfoundry_text::MAX_FONT_BYTES as u64 + 1)
-        .read_to_end(&mut data)
-        .map_err(|e| EngineError::BadParams(format!("cannot read the font {path}: {e}")))?;
-    if data.len() > lightfoundry_text::MAX_FONT_BYTES {
+    file.take(limit as u64 + 1).read_to_end(&mut data).map_err(|e| EngineError::BadParams(format!("cannot read the font {path}: {e}")))?;
+    if data.len() > limit {
         return Err(EngineError::BadParams("the font file is too large".into()));
     }
     Ok(data)

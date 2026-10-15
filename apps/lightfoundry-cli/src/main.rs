@@ -62,7 +62,8 @@ mod msg {
     pub const NO_LINK_FOLDER: &str = "no folder for the link file";
     pub const FONTS_PROGRESS: &str = "fonts: {done} of {total}";
     pub const FONTS_DONE: &str = "font library in {path}: {fetched} downloaded, {kept} already there ({bytes} bytes)";
-    pub const FONTS_NOTE: &str = "These are embroidery fonts for StitchFoundry; LightFoundry's text tool cannot draw them yet.";
+    pub const FONTS_NOTE: &str =
+        "The Foundry fonts work for text: give a folder under fonts/ as the font. The Ink/Stitch fonts are not drawable yet.";
     pub const NO_FONT_FOLDER: &str = "no folder to keep the fonts in; use --to DIR";
     pub const FONTS_FAILED: &str = "{reason}";
     pub const TRANSLATION_FAILED: &str = "translation {path}: {error}";

@@ -5,6 +5,7 @@ SVG is larger than {1} MB
 a batch may hold at most {MAX_BATCH} commands
 a boolean needs at least two shapes
 a coordinate is not a finite number
+a font library folder cannot be used as a fallback font
 a group needs at least two shapes
 a job is running; stop it first
 a move lies far outside the job's declared extent
@@ -139,5 +140,6 @@ width must be positive
 {1} is an image and cannot be offset
 {1} is an image; booleans need vector shapes
 {1} is not an editable path (text and images must be converted first)
+{1} is not text
 {name} must be between {lo} and {hi}
 {name} must be within {min}-{max}

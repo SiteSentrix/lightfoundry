@@ -15,6 +15,7 @@ thiserror = { workspace = true }
 skrifa = { workspace = true }
 harfrust = { workspace = true }
 unicode-bidi = { workspace = true }
+serde_json = { workspace = true }
 
 [features]
 # Exposes `testfont::tiny_font()`, a font built in code, for other crates' tests.

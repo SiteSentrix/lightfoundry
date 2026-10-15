@@ -1979,6 +1979,7 @@ dependencies = [
  "harfrust",
  "kurbo",
  "lightfoundry-geom",
+ "serde_json",
  "skrifa",
  "thiserror 2.0.21",
  "unicode-bidi",

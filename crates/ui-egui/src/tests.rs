@@ -2361,6 +2361,30 @@ mod font_library_tests {
     }
 
     #[test]
+    fn the_text_inspector_lists_only_complete_library_font_folders_by_name() {
+        let dir = std::env::temp_dir().join(format!("lf-ui-libfonts-{}", std::process::id()));
+        let fonts = dir.join("fonts");
+        for (folder, files, name) in [
+            ("zeta", &["font.json", "glyphs.stitchfoundry"][..], Some("Alpha Face")),
+            ("beta", &["font.json", "glyphs.stitchfoundry"], None),
+            ("partial", &["font.json"], Some("No Glyphs")),
+        ] {
+            std::fs::create_dir_all(fonts.join(folder)).unwrap();
+            for f in files {
+                let body = match (*f, name) {
+                    ("font.json", Some(n)) => format!(r#"{{"name":"{n}"}}"#),
+                    _ => "{}".to_string(),
+                };
+                std::fs::write(fonts.join(folder).join(f), body).unwrap();
+            }
+        }
+        let listed: Vec<String> = crate::panels::library_fonts(&dir).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(listed, ["Alpha Face", "beta"], "named by font.json or else the folder, sorted, incomplete ones left out");
+        assert!(crate::panels::library_fonts(&dir.join("missing")).is_empty());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_desktop_host_downloads_in_the_background_and_reports_the_result() {
         let result = Rc::new(RefCell::new(None));
         let started = Rc::new(RefCell::new(Vec::new()));

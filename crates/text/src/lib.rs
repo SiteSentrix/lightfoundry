@@ -4,9 +4,11 @@
 //! outline fonts (for Fill mode) come from a font file the person supplies, see [`layout_outline`].
 //! The stroke glyph shapes below are our own design.
 
+mod glyphfont;
 mod glyphs;
 mod outline;
 
+pub use glyphfont::{GlyphFont, MAX_FONT_JSON_BYTES, MAX_GLYPH_FILE_BYTES, layout_glyph_font};
 #[cfg(any(test, feature = "testfont"))]
 pub use outline::testfont;
 pub use outline::{MAX_FONT_BYTES, layout_outline, layout_outline_with_fallback};

@@ -20,7 +20,7 @@ mod download_tests {
         assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
         let text = String::from_utf8_lossy(&out.stdout);
         assert!(text.contains("1 downloaded"), "{text}");
-        assert!(text.contains("embroidery fonts"), "the limitation is stated: {text}");
+        assert!(text.contains("Ink/Stitch fonts are not drawable yet"), "the limitation is stated: {text}");
         assert!(dest.join("fonts/foundry-block/font.json").exists());
         assert!(!dest.join("fonts/foundry-block/preview.png").exists());
         assert!(!dest.join("inkstitch").exists(), "--all was not given");

@@ -871,6 +871,27 @@ fn text_properties(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             app.run("text.edit", json!({ "id": id, "font": "" }));
             app.text_buffer = None;
         }
+        if let Some(dir) = app.platform_font_library_dir() {
+            let mut chosen = None;
+            egui::ComboBox::from_id_salt("library_font").selected_text(tr("Library fonts")).show_ui(ui, |ui| {
+                let fonts = library_fonts(&dir);
+                for (name, path) in &fonts {
+                    if ui.button(name).clicked() {
+                        chosen = Some(path.clone());
+                        ui.close();
+                    }
+                }
+                if fonts.is_empty() {
+                    ui.weak(tr("None downloaded yet: View > Font library"));
+                }
+            });
+            if let Some(path) = chosen
+                && let Some(v) = app.run("text.edit", json!({ "id": id, "font": path }))
+            {
+                app.note_unsupported(&v);
+                app.text_buffer = None;
+            }
+        }
     });
     if style.font.is_some() {
         ui.horizontal_wrapped(|ui| {
@@ -1227,4 +1248,31 @@ fn node_section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
             app.run("node.set_closed", with(json!({ "closed": !closed })));
         }
     });
+}
+
+/// Most library fonts listed.
+const MAX_LIBRARY_FONTS: usize = 200;
+
+/// The downloaded library fonts that can be drawn: folders under `<dir>/fonts` holding `font.json`
+/// and `glyphs.stitchfoundry`, by the name in `font.json` (else the folder's), sorted.
+pub(crate) fn library_fonts(dir: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    let Ok(entries) = std::fs::read_dir(dir.join("fonts")) else { return Vec::new() };
+    let mut fonts: Vec<(String, std::path::PathBuf)> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.join("font.json").is_file() && p.join("glyphs.stitchfoundry").is_file())
+        .take(MAX_LIBRARY_FONTS)
+        .map(|p| {
+            let folder = p.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            let named = std::fs::read_to_string(p.join("font.json"))
+                .ok()
+                .filter(|t| t.len() < 1_048_576)
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(|n| n.chars().take(60).collect::<String>()))
+                .filter(|n| !n.is_empty());
+            (named.unwrap_or(folder), p)
+        })
+        .collect();
+    fonts.sort();
+    fonts
 }

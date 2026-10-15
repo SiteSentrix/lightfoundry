@@ -78,7 +78,7 @@ impl Platform for DesktopPlatform {
             let result = lightfoundry_fontlib::download(&dest, &lightfoundry_fontlib::Source::default(), set, &cancel, &mut |_, _| {})
                 .map(|s| {
                     format!(
-                        "Font library: {} downloaded, {} already there, in {}. These are embroidery fonts; the text tool cannot draw them yet.",
+                        "Font library: {} downloaded, {} already there, in {}. The Foundry fonts are under Library fonts in the text inspector.",
                         s.fetched,
                         s.kept,
                         dest.display()
