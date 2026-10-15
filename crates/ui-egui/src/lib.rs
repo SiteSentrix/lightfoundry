@@ -121,6 +121,10 @@ pub struct LightFoundryApp {
     snap_lines: canvas::SnapLines,
     /// Equal gaps the last move locked onto, for drawing.
     snap_spacing: Vec<spacing::Gap>,
+    /// Points acquired by hovering with a drawing tool; horizontal and vertical lines through them attract the cursor.
+    tracked: Vec<lightfoundry_geom::Point>,
+    /// The point being hovered with the time it was first hovered, until it is acquired.
+    track_candidate: Option<(lightfoundry_geom::Point, f64)>,
     grid_cols: u32,
     grid_rows: u32,
     grid_speed: (f64, f64),
@@ -270,8 +274,10 @@ impl LightFoundryApp {
             pen: None,
             hover_world: None,
             canvas_rect: None,
-            snap_lines: (None, None),
+            snap_lines: (None, None, None),
             snap_spacing: Vec::new(),
+            tracked: Vec::new(),
+            track_candidate: None,
             grid_cols: 5,
             grid_rows: 5,
             grid_speed: (200.0, 1200.0),
@@ -1054,6 +1060,8 @@ impl LightFoundryApp {
             nodes_ui::finish(self, false);
         }
         if escape {
+            self.tracked.clear();
+            self.track_candidate = None;
             if self.move_head_mode {
                 self.move_head_mode = false;
             } else if self.crop_mode {

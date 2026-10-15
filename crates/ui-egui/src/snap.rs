@@ -38,12 +38,15 @@ pub enum TargetKind {
     Midpoint,
     /// A corner or segment end of a drawn path.
     Endpoint,
+    /// A line through a point the person acquired by hovering over it.
+    Tracked,
 }
 
 impl TargetKind {
     /// Wins when several targets are equally close: the more specific one.
     fn rank(self) -> u8 {
         match self {
+            Self::Tracked => 0,
             Self::Guide => 1,
             Self::Bed => 2,
             Self::Edge => 3,
@@ -62,6 +65,7 @@ impl TargetKind {
             Self::Center => "Center",
             Self::Midpoint => "Midpoint",
             Self::Endpoint => "Endpoint",
+            Self::Tracked => "Tracking",
         }
     }
 }
@@ -169,13 +173,22 @@ pub struct Snapped {
     pub point: Point,
     pub x_line: Option<Target>,
     pub y_line: Option<Target>,
+    /// A 45-degree tracking line the point was pulled onto.
+    pub diagonal: Option<Diagonal>,
+}
+
+/// A 45-degree line through an acquired point: `sign` is +1 for down-right (y grows with x) and -1 for up-right.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Diagonal {
+    pub origin: Point,
+    pub sign: f64,
 }
 
 /// Snaps a single point. `threshold` is in mm.
 pub fn snap_point(p: Point, settings: &SnapSettings, targets: &SnapTargets, threshold: f64) -> Snapped {
     let (x, x_line) = snap_axis(p.x, settings, &targets.xs, threshold);
     let (y, y_line) = snap_axis(p.y, settings, &targets.ys, threshold);
-    Snapped { point: Point::new(x, y), x_line, y_line }
+    Snapped { point: Point::new(x, y), x_line, y_line, diagonal: None }
 }
 
 /// Snaps a translation of a group of coordinates (the moving selection's edges and centre): the
@@ -191,6 +204,81 @@ pub fn snap_translation(
     let (dx, x_line) = snap_delta_axis(delta.0, &keys.xs, settings, &targets.xs, threshold);
     let (dy, y_line) = snap_delta_axis(delta.1, &keys.ys, settings, &targets.ys, threshold);
     ((dx, dy), x_line, y_line)
+}
+
+/// Most points that can be acquired for tracking at once.
+pub const MAX_TRACKED: usize = 6;
+
+/// The point the cursor is exactly on, if both axes locked onto the same point-like target (a
+/// vertex, midpoint or centre) and not onto two different things. That is what hovering acquires.
+pub fn acquirable(s: &Snapped) -> Option<Point> {
+    let (x, y) = (s.x_line?, s.y_line?);
+    let pointlike = |k: TargetKind| matches!(k, TargetKind::Endpoint | TargetKind::Midpoint | TargetKind::Center | TargetKind::BedCenter);
+    if !(pointlike(x.kind) && pointlike(y.kind)) {
+        return None;
+    }
+    let mid = |t: &Target| t.span.map(|(a, b)| (a + b) / 2.0);
+    let same = (mid(&x)? - y.at).abs() < 1e-6 && (mid(&y)? - x.at).abs() < 1e-6;
+    (same && x.at.is_finite() && y.at.is_finite()).then(|| Point::new(x.at, y.at))
+}
+
+/// [`snap_point`], then on each axis that no object caught, a horizontal or vertical line through
+/// an acquired point within `threshold` pulls the result onto it (over the grid, too).
+pub fn snap_point_tracked(p: Point, settings: &SnapSettings, targets: &SnapTargets, tracked: &[Point], threshold: f64) -> Snapped {
+    let mut s = snap_point(p, settings, targets, threshold);
+    let pull = |v: f64, along: fn(&Point) -> f64, other: fn(&Point) -> f64| {
+        tracked
+            .iter()
+            .filter(|t| along(t).is_finite() && other(t).is_finite() && (along(t) - v).abs() <= threshold)
+            .min_by(|a, b| (along(a) - v).abs().total_cmp(&(along(b) - v).abs()))
+            .map(|t| (along(t), Target { at: along(t), kind: TargetKind::Tracked, span: Some((other(t), other(t))) }))
+    };
+    if settings.objects && p.x.is_finite() && p.y.is_finite() {
+        if s.x_line.is_none()
+            && let Some((x, target)) = pull(p.x, |t| t.x, |t| t.y)
+        {
+            s.point.x = x;
+            s.x_line = Some(target);
+        }
+        if s.y_line.is_none()
+            && let Some((y, target)) = pull(p.y, |t| t.y, |t| t.x)
+        {
+            s.point.y = y;
+            s.y_line = Some(target);
+        }
+        pull_diagonal(&mut s, p, tracked, threshold);
+    }
+    s
+}
+
+/// Pulls the point onto the nearest 45-degree line through an acquired point: free in both axes
+/// where nothing else caught, else along the one line that an axis lock already fixed (so it lands
+/// on the crossing of a tracking or object line with the diagonal).
+fn pull_diagonal(s: &mut Snapped, raw: Point, tracked: &[Point], threshold: f64) {
+    let mut best: Option<(f64, Point, Diagonal)> = None;
+    for t in tracked.iter().filter(|t| t.x.is_finite() && t.y.is_finite()) {
+        for sign in [1.0, -1.0] {
+            let q = match (s.x_line.is_some(), s.y_line.is_some()) {
+                (false, false) => {
+                    // Foot of the perpendicular from the cursor onto the line.
+                    let along = ((raw.x - t.x) + sign * (raw.y - t.y)) / 2.0;
+                    Point::new(t.x + along, t.y + sign * along)
+                }
+                (true, false) => Point::new(s.point.x, t.y + sign * (s.point.x - t.x)),
+                (false, true) => Point::new(t.x + sign * (s.point.y - t.y), s.point.y),
+                (true, true) => continue,
+            };
+            let d = q.distance(raw);
+            // Right on the acquired point itself every angle fits, which is no guidance.
+            if d <= threshold && q.distance(*t) > threshold && best.is_none_or(|(bd, _, _)| d < bd) {
+                best = Some((d, q, Diagonal { origin: *t, sign }));
+            }
+        }
+    }
+    if let Some((_, q, diagonal)) = best {
+        s.point = q;
+        s.diagonal = Some(diagonal);
+    }
 }
 
 fn snap_axis(v: f64, settings: &SnapSettings, targets: &[Target], threshold: f64) -> (f64, Option<Target>) {
@@ -266,6 +354,8 @@ pub struct Alignment {
     /// The alignment line's two ends.
     pub line: (Point, Point),
     pub marks: Vec<(Mark, Point)>,
+    /// Tracking lines are dashed.
+    pub dashed: bool,
 }
 
 /// Builds the alignment line and marks for a vertical line locked onto `hit` (pass `vertical:
@@ -280,7 +370,9 @@ pub fn alignment(vertical: bool, hit: &Target, mover: Rect, extent: Rect) -> Ali
     };
     let u = hit.at;
     let span = hit.span.unwrap_or(ev);
-    let (lo, hi) = (span.0.min(mv.0), span.1.max(mv.1));
+    let tracked = hit.kind == TargetKind::Tracked;
+    // A tracking line runs the whole view, like the construction lines of a CAD program.
+    let (lo, hi) = if tracked { (ev.0.min(ev.1), ev.0.max(ev.1)) } else { (span.0.min(mv.0), span.1.max(mv.1)) };
     let at = |u: f64, v: f64| if vertical { Point::new(u, v) } else { Point::new(v, u) };
     let mut marks = Vec::new();
     let mid = |a: f64, b: f64| (a + b) / 2.0;
@@ -292,6 +384,7 @@ pub fn alignment(vertical: bool, hit: &Target, mover: Rect, extent: Rect) -> Ali
             marks.push((Mark::Cross, at(u, span.0)));
             marks.push((Mark::Cross, at(u, span.1)));
         }
+        TargetKind::Tracked => marks.push((Mark::Plus, at(u, span.0))),
         TargetKind::Guide => {}
     }
     if mv.1 - mv.0 > 1e-9 {
@@ -303,7 +396,7 @@ pub fn alignment(vertical: bool, hit: &Target, mover: Rect, extent: Rect) -> Ali
             marks.push((Mark::Cross, at(u, mv.1)));
         }
     }
-    Alignment { line: (at(u, lo), at(u, hi)), marks }
+    Alignment { line: (at(u, lo), at(u, hi)), marks, dashed: tracked }
 }
 
 /// Shift while drawing a box or ellipse: the shorter side grows to match the longer, keeping the
@@ -463,6 +556,135 @@ mod tests {
             let hit = Target { at: f64::NAN, kind: TargetKind::Edge, span: Some((f64::INFINITY, f64::NAN)) };
             let _ = alignment(true, &hit, Rect::new(f64::NAN, 0.0, 1.0, f64::INFINITY), EXTENT);
             let _ = alignment(false, &hit, cursor(f64::NAN, f64::NAN), EXTENT);
+        }
+    }
+
+    mod tracking_tests {
+        use super::*;
+
+        fn targets() -> SnapTargets {
+            let mut t = SnapTargets::default();
+            t.add_point(Point::new(40.0, 30.0), TargetKind::Endpoint);
+            t
+        }
+
+        #[test]
+        fn hovering_exactly_on_a_vertex_can_be_acquired() {
+            let s = snap_point(Point::new(40.5, 29.5), &SnapSettings::default(), &targets(), 2.0);
+            assert_eq!(acquirable(&s), Some(Point::new(40.0, 30.0)));
+        }
+
+        #[test]
+        fn lining_up_with_two_different_things_is_not_a_point() {
+            let mut t = targets();
+            t.add_point(Point::new(90.0, 80.0), TargetKind::Endpoint);
+            // x from the first vertex, y from the second: nothing is actually there.
+            let s = snap_point(Point::new(40.0, 80.0), &SnapSettings::default(), &t, 2.0);
+            assert!(s.x_line.is_some() && s.y_line.is_some());
+            assert_eq!(acquirable(&s), None);
+            // Edges and guides are not points either.
+            let mut e = SnapTargets::default();
+            e.add_rect(Rect::new(0.0, 0.0, 10.0, 10.0));
+            let s = snap_point(Point::new(0.5, 0.5), &SnapSettings::default(), &e, 2.0);
+            assert_eq!(acquirable(&s), None);
+            // A shape's centre is a point: both centre lines come from the same rectangle.
+            let s = snap_point(Point::new(5.2, 4.9), &SnapSettings::default(), &e, 2.0);
+            assert_eq!(acquirable(&s), Some(Point::new(5.0, 5.0)));
+        }
+
+        #[test]
+        fn a_tracked_point_pulls_the_cursor_onto_its_row_and_column() {
+            let tracked = [Point::new(40.0, 30.0)];
+            let none = SnapTargets::default();
+            let s = snap_point_tracked(Point::new(100.0, 31.2), &SnapSettings::default(), &none, &tracked, 2.0);
+            assert_eq!(s.point, Point::new(100.0, 30.0));
+            assert_eq!(s.y_line.map(|t| (t.kind, t.at)), Some((TargetKind::Tracked, 30.0)));
+            assert_eq!(s.x_line, None);
+            let s = snap_point_tracked(Point::new(41.0, 90.0), &SnapSettings::default(), &none, &tracked, 2.0);
+            assert_eq!(s.point, Point::new(40.0, 90.0));
+            // Out of range, nothing happens.
+            let s = snap_point_tracked(Point::new(100.0, 36.0), &SnapSettings::default(), &none, &tracked, 2.0);
+            assert_eq!(s.point, Point::new(100.0, 36.0));
+        }
+
+        #[test]
+        fn two_tracked_points_give_an_intersection_and_objects_still_win() {
+            let tracked = [Point::new(40.0, 30.0), Point::new(90.0, 80.0)];
+            let none = SnapTargets::default();
+            let s = snap_point_tracked(Point::new(90.4, 29.6), &SnapSettings::default(), &none, &tracked, 2.0);
+            assert_eq!(s.point, Point::new(90.0, 30.0), "column of one, row of the other");
+            let mut t = SnapTargets::default();
+            t.add_rect(Rect::new(0.0, 0.0, 100.0, 31.0));
+            let s = snap_point_tracked(Point::new(50.0, 30.4), &SnapSettings::default(), &t, &tracked, 2.0);
+            assert_eq!(s.y_line.map(|t| t.kind), Some(TargetKind::Edge), "an object on the axis keeps priority");
+        }
+
+        #[test]
+        fn tracking_overrides_the_grid_and_is_off_with_object_snapping() {
+            let tracked = [Point::new(43.0, 33.0)];
+            let none = SnapTargets::default();
+            let grid = SnapSettings { grid: Some(5.0), objects: true };
+            let s = snap_point_tracked(Point::new(100.0, 33.4), &grid, &none, &tracked, 2.0);
+            assert_eq!(s.point.y, 33.0);
+            let off = SnapSettings { grid: None, objects: false };
+            let s = snap_point_tracked(Point::new(100.0, 33.4), &off, &none, &tracked, 2.0);
+            assert_eq!(s.point.y, 33.4);
+        }
+
+        #[test]
+        fn tracking_lines_are_dashed_and_cross_the_whole_view_with_a_plus_at_the_point() {
+            let hit = Target { at: 30.0, kind: TargetKind::Tracked, span: Some((40.0, 40.0)) };
+            let a = alignment(false, &hit, Rect::new(90.0, 30.0, 90.0, 30.0), Rect::new(0.0, 0.0, 400.0, 300.0));
+            assert!(a.dashed);
+            assert_eq!(a.line, (Point::new(0.0, 30.0), Point::new(400.0, 30.0)));
+            assert_eq!(a.marks, [(Mark::Plus, Point::new(40.0, 30.0))]);
+            assert_eq!(label(Some(&hit), None), Some("Tracking"));
+        }
+
+        #[test]
+        fn a_diagonal_through_a_tracked_point_pulls_the_cursor_onto_it() {
+            let tracked = [Point::new(100.0, 100.0)];
+            let none = SnapTargets::default();
+            let s = snap_point_tracked(Point::new(250.0, 251.4), &SnapSettings::default(), &none, &tracked, 3.0);
+            assert!((s.point.x - 250.7).abs() < 1e-9 && (s.point.y - 250.7).abs() < 1e-9, "{:?}", s.point);
+            assert_eq!(s.diagonal.map(|d| d.sign), Some(1.0));
+            let s = snap_point_tracked(Point::new(250.0, -49.0), &SnapSettings::default(), &none, &tracked, 3.0);
+            assert_eq!(s.diagonal.map(|d| d.sign), Some(-1.0), "up and to the right");
+            assert!(s.point.distance(Point::new(250.0, -50.0)) < 1.5, "{:?}", s.point);
+            // Off every angle: untouched.
+            let s = snap_point_tracked(Point::new(250.0, 180.0), &SnapSettings::default(), &none, &tracked, 3.0);
+            assert_eq!((s.point, s.diagonal), (Point::new(250.0, 180.0), None));
+        }
+
+        #[test]
+        fn a_diagonal_meets_a_locked_column_exactly() {
+            let tracked = [Point::new(100.0, 100.0)];
+            let mut t = SnapTargets::default();
+            t.add_guide(true, 250.0);
+            let s = snap_point_tracked(Point::new(249.0, 252.0), &SnapSettings::default(), &t, &tracked, 3.0);
+            assert_eq!(s.point, Point::new(250.0, 250.0), "the guide's column and the diagonal cross there");
+            assert!(s.x_line.is_some() && s.diagonal.is_some());
+            // Both axes already locked: nothing left for a diagonal to do.
+            t.add_guide(false, 252.0);
+            let s = snap_point_tracked(Point::new(249.0, 252.0), &SnapSettings::default(), &t, &tracked, 3.0);
+            assert_eq!(s.diagonal, None);
+        }
+
+        #[test]
+        fn right_on_the_acquired_point_there_is_no_diagonal_to_follow() {
+            let tracked = [Point::new(100.0, 100.0)];
+            let none = SnapTargets::default();
+            let s = snap_point_tracked(Point::new(101.0, 100.5), &SnapSettings { grid: None, objects: true }, &none, &tracked, 3.0);
+            assert_eq!(s.diagonal, None);
+        }
+
+        #[test]
+        fn bad_numbers_are_ignored() {
+            let none = SnapTargets::default();
+            let s = snap_point_tracked(Point::new(f64::NAN, 1.0), &SnapSettings::default(), &none, &[Point::new(f64::NAN, 1.0)], 2.0);
+            assert!(s.x_line.is_none());
+            let s = snap_point_tracked(Point::new(1.0, 1.0), &SnapSettings::default(), &none, &[Point::new(f64::INFINITY, f64::NAN)], 2.0);
+            assert_eq!(s.point, Point::new(1.0, 1.0));
         }
     }
 
