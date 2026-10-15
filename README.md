@@ -30,7 +30,7 @@ simulator when nothing is plugged in.
 ## Quick start
 
 ```sh
-git clone https://github.com/SiteSentrix/lightfoundry
+git clone https://github.com/Stitchwright/lightfoundry
 cd lightfoundry
 
 cargo run --release -p lightfoundry                         # desktop app
