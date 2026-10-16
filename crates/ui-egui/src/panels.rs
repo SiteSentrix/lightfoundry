@@ -75,7 +75,7 @@ fn layers(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                 if used.contains(&layer.id) {
                     ui.painter().circle_filled(rect.right_top() + egui::vec2(-5.0, 5.0), 2.5, egui::Color32::BLACK);
                 }
-                let name = format!("Layer {}{}", layer.name, if layer.output { "" } else { " (output off)" });
+                let name = if layer.output { trf!("Layer {name}", name = layer.name) } else { trf!("Layer {name} (output off)", name = layer.name) };
                 resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, app.active_layer == layer.id, name.clone()));
                 if resp.on_hover_text(&name).clicked() {
                     app.active_layer = layer.id;
@@ -773,7 +773,7 @@ fn arrow_button(ui: &mut egui::Ui, dx: f64, dy: f64) -> egui::Response {
 fn anchor_button(ui: &mut egui::Ui, selected: bool, name: &str) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::click());
     let enabled = ui.is_enabled();
-    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, format!("Job origin {name}")));
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, trf!("Job origin {name}", name = name)));
     let resp = resp.on_hover_text(name);
     let visuals = ui.style().interact(&resp);
     ui.painter().rect_filled(rect, 3.0, visuals.weak_bg_fill);

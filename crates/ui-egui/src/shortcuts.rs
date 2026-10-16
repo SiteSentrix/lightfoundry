@@ -1,7 +1,7 @@
 //! Rebindable keyboard shortcuts for the editing commands, kept in a small JSON file the platform
 //! provides. Navigation keys (arrows, Delete, Enter, Escape) are fixed.
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -196,10 +196,10 @@ impl Shortcuts {
     /// Binds a chord, refusing one that is not allowed or belongs to another action.
     pub fn set(&mut self, action: Action, chord: Chord) -> Result<(), String> {
         if !chord.is_allowed() {
-            return Err("use Ctrl or Alt together with a key".into());
+            return Err(tr("use Ctrl or Alt together with a key"));
         }
         if let Some(other) = self.conflict(action, chord) {
-            return Err(format!("{} is already {}", chord.text(), other.label()));
+            return Err(trf!("{chord} is already {action}", chord = chord.text(), action = tr(other.label())));
         }
         self.chords.insert(action, chord);
         Ok(())
@@ -300,6 +300,16 @@ mod tests {
         assert!(s.set(Action::Undo, Chord::command(Key::U)).is_ok());
         s.reset();
         assert_eq!(s, Shortcuts::default());
+    }
+
+    #[test]
+    fn the_conflict_message_follows_the_translation() {
+        let catalog =
+            crate::i18n::parse(r#"{"strings":{"{chord} is already {action}":"{action} hat schon {chord}","Select all":"Alles auswählen"}}"#).unwrap();
+        crate::i18n::set_active(Some(catalog));
+        let err = Shortcuts::default().set(Action::Undo, Chord::command(Key::A)).unwrap_err();
+        crate::i18n::set_active(None);
+        assert!(err.starts_with("Alles auswählen hat schon"), "{err}");
     }
 
     #[test]

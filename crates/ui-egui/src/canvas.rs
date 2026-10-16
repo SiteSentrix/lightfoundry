@@ -3,7 +3,7 @@ use lightfoundry_doc::Origin;
 use lightfoundry_geom::{Affine, Point, Rect};
 use serde_json::json;
 
-use crate::i18n::tr;
+use crate::i18n::{tr, trf};
 use crate::snap::{self, SnapSettings, SnapTargets};
 use crate::spacing;
 
@@ -677,7 +677,7 @@ fn draw_preview(app: &LightFoundryApp, painter: &egui::Painter, view: &View) {
         painter.text(
             painter.clip_rect().left_top() + vec2(10.0, 10.0),
             Align2::LEFT_TOP,
-            format!("Preview unavailable: {err}"),
+            trf!("Preview unavailable: {err}", err = err),
             FontId::proportional(13.0),
             app.tokens.error,
         );
@@ -852,7 +852,8 @@ fn draw_alignment(painter: &egui::Painter, view: &View, lines: &SnapLines, mover
         painter.line_segment([c + vec2(-6.0, 0.0), c + vec2(6.0, 0.0)], mark_stroke);
         painter.line_segment([c + vec2(0.0, -6.0), c + vec2(0.0, 6.0)], mark_stroke);
     }
-    let text = snap::label(lines.0.as_ref(), lines.1.as_ref()).map(str::to_string).or(lines.2.map(|d| format!("Tracking {}°", d.degrees)));
+    let text =
+        snap::label(lines.0.as_ref(), lines.1.as_ref()).map(str::to_string).or(lines.2.map(|d| trf!("Tracking {degrees}°", degrees = d.degrees)));
     if let Some(text) = text {
         let galley = painter.layout_no_wrap(crate::i18n::tr(&text), egui::FontId::proportional(11.0), Color32::WHITE);
         let rect = egui::Rect::from_min_size(label_at + vec2(14.0, 14.0), galley.size() + vec2(8.0, 4.0));

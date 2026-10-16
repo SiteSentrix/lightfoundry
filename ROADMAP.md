@@ -524,3 +524,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   template. A catalog's `font` is ignored in the browser (it names a file the page cannot read). Checked by a
   headless frame test (load, restart, damaged catalog, English, template download); not yet clicked through in a
   real browser. Not done: a font for non-Latin scripts in the browser, and shipping any translation.
+- **2026-10-16 — translations, composed labels.** Texts that were assembled with `format!` now go through the
+  catalog with named places: the canvas preview error and tracking-angle label, the layer button names and
+  tooltips (including "output off"), the job-origin names, the two-mark alignment result, the unset mark, GRBL
+  setting names and their "not documented" hint, and the shortcut editor's refusals. Checked by a test that a
+  translation reaches the shortcut conflict message, and the full gate. Not done: successful command results
+  in the status bar, and any shipped catalog.

@@ -71,9 +71,11 @@ pub fn section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                     "lock_scale": !app.marks.free_scale,
                 });
                 if let Some(v) = app.run("align.two_point", params) {
-                    app.say(format!(
-                        "Aligned {} shapes: turned {:.2}°, size x{:.4}",
-                        v["moved"], v["rotation_deg"].as_f64().unwrap_or(0.0), v["scale"].as_f64().unwrap_or(1.0)
+                    app.say(trf!(
+                        "Aligned {moved} shapes: turned {turned}°, size x{scale}",
+                        moved = v["moved"],
+                        turned = format!("{:.2}", v["rotation_deg"].as_f64().unwrap_or(0.0)),
+                        scale = format!("{:.4}", v["scale"].as_f64().unwrap_or(1.0))
                     ));
                     app.marks = Marks { free_scale: app.marks.free_scale, ..Marks::default() };
                 }
@@ -89,7 +91,7 @@ fn mark_row(app: &mut LightFoundryApp, ui: &mut egui::Ui, actual: bool, index: u
     let current = if actual { app.marks.actual } else { app.marks.design }.get(index).copied().flatten();
     ui.horizontal(|ui| {
         ui.label(trf!("Mark {number}", number = index + 1));
-        ui.monospace(current.map_or("not set".to_string(), |p| format!("{:.2}, {:.2}", p.x, p.y)));
+        ui.monospace(current.map_or(tr("not set"), |p| format!("{:.2}, {:.2}", p.x, p.y)));
         let picking = app.marks.pick == Some(Pick { actual, index });
         if ui.selectable_label(picking, "Click on canvas").clicked() {
             app.marks.pick = if picking { None } else { Some(Pick { actual, index }) };

@@ -75,7 +75,7 @@ pub fn section(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
         egui::Grid::new("controller_settings").num_columns(3).spacing([8.0, 3.0]).show(ui, |ui| {
             for (id, value) in &settings {
                 let info = describe(*id);
-                ui.label(format!("${id}")).on_hover_text(info.map_or("Not a documented GRBL 1.1 setting", |i| i.name));
+                ui.label(format!("${id}")).on_hover_text(info.map_or(tr("Not a documented GRBL 1.1 setting"), |i| tr(i.name)));
                 ui.label(tr(info.map_or("(unknown)", |i| i.name)));
                 ui.add_enabled_ui(!busy, |ui| {
                     if let Some(v) = edit_value(ui, info.map_or(Kind::Number, |i| i.kind), value, info.map_or("", |i| i.unit)) {
