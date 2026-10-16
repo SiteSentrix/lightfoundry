@@ -501,3 +501,15 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   lines for Line). Fuzzed: stable mutation test plus 5.2 M coverage-guided executions, nothing found.
   Not done: right-to-left fonts, the one-file-per-letter fonts, kerning, and the web build (Ink/Stitch is
   hundreds of MB, so it is desktop only).
+- **2026-10-16 — reconciled with VectorCraft and CADCraft.** Read the latest `storytold/vectorcraft` and
+  `storytold/cadcraft` (both public; `craftrules` is still not reachable) and took over their standards, not
+  their code (their rule: the crafting apps share standards, never code). New gates in `cargo xtask ci`:
+  **wasm** ("never break wasm": every crate of the browser build is checked for `wasm32-unknown-unknown`; new
+  crates must be classified in `xtask/src/wasm.rs`) and **brands** (no other vendor's names in user-visible
+  text: Rust string literals outside tests, crate descriptions, the hosted page); plus `cargo xtask stats`
+  (tests and lines per crate) and a GitHub **CI workflow** that runs the whole gate on every push and pull
+  request (we had only build and deploy workflows). `CLAUDE.md`/`AGENTS.md` gained: share standards never
+  code, bound recursion and nesting, a regression test per crash fix, a fuzz entry point per new parser, the
+  progress-docs update rules, and the shell and parallel-agent notes. Not taken over (they need more than a
+  rule): the `--control` JSON-lines channel with `ui.screenshot` (our agent link is MCP), the `cli perf`
+  budgets, shared test-corpus repos, and the About-window contributor credits.

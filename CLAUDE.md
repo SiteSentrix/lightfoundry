@@ -6,8 +6,10 @@ preview the toolpath, and send GRBL G-code to the machine. It runs natively (efr
 built so the same engine can drive a headless CLI and, later, the web.
 
 The conventions follow the `storytold` crafting apps (VectorCraft, CADCraft). Their shared standards
-repo (`craftrules`) was not accessible when this project was started, so the rules below are
-transcribed from those two repos' `AGENTS.md`; reconcile with `craftrules` when it is available.
+repo (`craftrules`) is still not accessible to us, so the rules below are transcribed from those two repos'
+`AGENTS.md` (last reconciled with `storytold/vectorcraft` and `storytold/cadcraft` on 2026-10-16); reconcile
+with `craftrules` when it is available. The crafting apps share standards, **never code**: do not copy source
+from a sibling repo, write it here.
 
 ## Start every session here
 1. Read [`ROADMAP.md`](ROADMAP.md) (stage, what is next) and the ranked work list in [`docs/gaps.md`](docs/gaps.md). Unless the user gives you a task, pick work from that list.
@@ -27,12 +29,25 @@ transcribed from those two repos' `AGENTS.md`; reconcile with `craftrules` when 
   - Fallible work returns `Result`/`Option`. Workspace clippy lints deny `unwrap`, `expect`, `panic!`, `todo!`, `unimplemented!`, `unreachable!` outside tests; tests may use them (`clippy.toml`). `unsafe_code` is denied.
   - Files, pasted data, command parameters and anything from a serial port are untrusted: use `.get()` instead of indexing with data, cap sizes and counts read from input, check floats are finite before using them as loop bounds or casting, never divide by something that can be zero.
   - `lightfoundry_engine::guard` is the last line of defence around every command (a panic restores the document); it does not replace `Result`.
-  - Every new importer, parser or protocol path ships with hostile-input tests (see `dxf`, `svg`, `format`, `device`, and `command_sweep_never_panics` in the engine).
+  - Bound recursion and nesting of anything read from input (group depth, nested references), as the SVG, DXF and font importers do.
+  - Every new importer, parser or protocol path ships with hostile-input tests (see `dxf`, `svg`, `format`, `device`, and `command_sweep_never_panics` in the engine) and a fuzz entry point in `crates/fuzzkit` (stable mutation test plus a `fuzz/` target).
+  - Every crash fix lands with a regression test that fails without it.
 - **Laser safety is a correctness property.** G-code generation must refuse (not clamp silently) out-of-bed coordinates and non-finite numbers, comments must not be able to inject commands, cancelling a job must soft-reset the controller (laser off), and dropping a job runner cancels it. Never add a path that can leave the laser on.
 - **Everything is a command.** User-visible behaviour is a `CommandSpec` in `crates/engine/src/cmd/*` (id, label, menu, params doc, `mutates`, `run`) plus tests. The UI, CLI (and later MCP/control channel) all go through `Session::execute`; mutating commands are one undo step and roll back on failure. Programmatic calls never open dialogs.
 - **Layering** is enforced by `cargo xtask layers` (table in `xtask/src/layers.rs`; add new crates there). Nothing below the UI layer depends on egui/eframe/winit/rfd. **The UI is thin**: panels read engine state and act through `execute`; colours come from `theme::Tokens`.
+- **Never break wasm.** The browser build is part of the product: `cargo xtask wasm` checks every crate of it for `wasm32-unknown-unknown` (new crates must be classified in `xtask/src/wasm.rs`). Nothing the browser build contains may use threads, sockets, files or the network; the browser host provides those through `Platform`.
+- **No other vendor's names in user-visible text.** Labels, command and parameter docs, menus, tool text, crate descriptions and the hosted page say "the reference app" instead; `cargo xtask brands` fails otherwise (mark a line `brand-ok` only where a legacy name must stay). Markdown docs may name other software when they must.
 - **Rust only** (no handwritten JS/TS).
-- **Quality gate** before every commit: `cargo xtask ci` (fmt, clippy `-D warnings`, tests, layers, cleanroom, assets).
+- **Quality gate** before every commit: `cargo xtask ci` (fmt, clippy `-D warnings`, tests, layers, cleanroom, brands, assets, messages, wasm). It also runs on every push (`.github/workflows/ci.yml`).
+
+## Progress docs
+[`ROADMAP.md`](ROADMAP.md) (stage and progress log), [`docs/target-app-parity.md`](docs/target-app-parity.md) (the assessment) and
+[`docs/gaps.md`](docs/gaps.md) (the ranked work list) follow the crafting apps' progress-docs standard. When a task lands, in the same commit:
+- add a dated entry to the ROADMAP log (what changed, how it was checked, what is not done);
+- update the area row in `docs/target-app-parity.md` and the gap entry in `docs/gaps.md` if it closed or shrank;
+- keep the README's status in step with the ROADMAP.
+
+Grade by behaviour, not by whether a menu item exists; scores are self-assessed, so err low, and say whether a number was measured or estimated. `cargo xtask stats` counts tests and lines per crate for the numbers.
 
 ## Code style
 - Edition 2024, `rustfmt.toml` as committed (`max_width = 150`); `log` macros, never `println!`/`eprintln!` in library code (the CLI and xtask print by design).
@@ -43,4 +58,5 @@ transcribed from those two repos' `AGENTS.md`; reconcile with `craftrules` when 
 ## Running and looking at the app
 - `cargo run --release -p lightfoundry [file.svg|file.dxf|image.png|project.lightfoundry]` — desktop app. On a headless box: `xvfb-run` plus `LIBGL_ALWAYS_SOFTWARE=1`, and `libxkbcommon-x11` must be installed.
 - `cargo run -p lightfoundry-cli -- commands` lists every command; `... gcode in.svg -o out.gcode --bed 300x200` converts headlessly; `... run script.json` runs a JSON command script.
+- Shell gotcha: `mv`/`cp` may be aliased interactive in some shells; use `/bin/mv -f` / `/bin/cp -f` in scripts. Parallel agents: use a separate `CARGO_TARGET_DIR` per agent, edit only the crates you own, and delete your target directory when you finish (`target/` grows to many gigabytes; a full disk fails links with `errno=28`).
 - **For UI work, look at the result**: take a screenshot (Xvfb + `import -window root`) and drive it with `xdotool`, and cover interactions with the headless egui frame tests in `crates/ui-egui/src/tests.rs` (they feed real pointer events).
