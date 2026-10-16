@@ -60,3 +60,12 @@ Grade by behaviour, not by whether a menu item exists; scores are self-assessed,
 - `cargo run -p lightfoundry-cli -- commands` lists every command; `... gcode in.svg -o out.gcode --bed 300x200` converts headlessly; `... run script.json` runs a JSON command script.
 - Shell gotcha: `mv`/`cp` may be aliased interactive in some shells; use `/bin/mv -f` / `/bin/cp -f` in scripts. Parallel agents: use a separate `CARGO_TARGET_DIR` per agent, edit only the crates you own, and delete your target directory when you finish (`target/` grows to many gigabytes; a full disk fails links with `errno=28`).
 - **For UI work, look at the result**: take a screenshot (Xvfb + `import -window root`) and drive it with `xdotool`, and cover interactions with the headless egui frame tests in `crates/ui-egui/src/tests.rs` (they feed real pointer events).
+
+## Commit authorship
+
+Commits in this repository are authored by **Bruce Wattendorf**, so the work shows on his GitHub profile. AI assistance is credited with a trailer, not as the author.
+
+- Before the first commit in a session, set the identity: `git config user.name "Bruce Wattendorf"` and `git config user.email "bwattendorf@gmail.com"`. If you can't change the config, pass `--author="Bruce Wattendorf <bwattendorf@gmail.com>"` on every `git commit`.
+- Never author or commit as `Claude <noreply@anthropic.com>`.
+- End every commit message with this trailer as its last line:
+  `Co-Authored-By: Claude <noreply@anthropic.com>`
