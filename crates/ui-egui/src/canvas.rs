@@ -3,6 +3,7 @@ use lightfoundry_doc::Origin;
 use lightfoundry_geom::{Affine, Point, Rect};
 use serde_json::json;
 
+use crate::i18n::tr;
 use crate::snap::{self, SnapSettings, SnapTargets};
 use crate::spacing;
 
@@ -147,7 +148,7 @@ impl Snapper {
 
     /// The vertex, midpoint or centre the cursor is on, which hovering would acquire for tracking.
     fn acquirable(&self, p: Point) -> Option<Point> {
-        snap::acquirable(&snap::snap_point(p, &self.settings, &self.all, self.threshold))
+        snap::acquirable_near(p, &self.all, self.threshold)
     }
 }
 
@@ -197,6 +198,20 @@ pub fn show(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     app.snap_spacing.clear();
     let offset = interact(app, ui, &resp, &view, pointer, &snapper, canvas_rect);
     update_tracking(app, ui, &snapper, hover, pointer.is_none() && !shift);
+    // A right click, or a long press on a touch screen, opens the context menu on what is under the pointer.
+    if (resp.secondary_clicked() || resp.long_touched())
+        && matches!(app.drag, Drag::None)
+        && let Some(p) = resp.interact_pointer_pos().map(|p| view.to_world(p))
+    {
+        app.menu_point = Some(p);
+        let tol = f64::from(app.hit_px() / view.zoom);
+        if let Some(id) = app.geometry.pick(p, tol)
+            && !app.session.selection.contains(&id)
+        {
+            app.run("edit.select", json!({ "ids": [id] }));
+        }
+    }
+    resp.context_menu(|ui| canvas_menu(app, ui, &snapper));
 
     painter.rect_filled(canvas_rect, 0.0, app.tokens.workspace);
     draw_bed(app, &painter, &view, bed_w, bed_h);
@@ -719,6 +734,8 @@ fn draw_overlays(
     }
     // With a drawing tool and no button down, preview what the click would lock onto.
     let hovering = pointer.is_none() && matches!(app.drag, Drag::None) && !matches!(app.tool, Tool::Select) && !shift;
+    // Acquired points stay visible with no pointer or hover (a touch screen has neither between touches).
+    draw_tracked(app, painter, view);
     let Some(p) = pointer.or(if hovering { app.hover_world } else { None }) else { return };
     let ghost = Stroke::new(1.0, t.selection);
     let at_point = |p: Point| Rect::new(p.x, p.y, p.x, p.y);
@@ -762,7 +779,6 @@ fn draw_overlays(
     }
     draw_spacing(painter, view, &app.snap_spacing, t.spacing);
     draw_spacing(painter, view, &sized_gaps, t.spacing);
-    draw_tracked(app, painter, view);
 }
 
 /// Measured gaps that are equal: a line across each with ticks at both ends and its size in mm.
@@ -888,6 +904,58 @@ fn update_tracking(app: &mut LightFoundryApp, ui: &egui::Ui, snapper: &Snapper, 
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         }
     }
+}
+
+/// The context menu: the usual edits on the selection, tracking and guides at the point pressed (both
+/// work without hovering, for touch screens), and the Arrange commands.
+fn canvas_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui, snapper: &Snapper) {
+    let (can_undo, can_redo, selected) = (app.session.can_undo(), app.session.can_redo(), !app.session.selection.is_empty());
+    for (enabled, label, id) in [
+        (can_undo, "Undo", "edit.undo"),
+        (can_redo, "Redo", "edit.redo"),
+        (true, "Select All", "edit.select_all"),
+        (selected, "Duplicate", "edit.duplicate"),
+        (selected, "Delete", "edit.delete"),
+    ] {
+        let response = ui.add_enabled(enabled, egui::Button::new(tr(label)));
+        crate::tablet::note_menu(app, label, &response);
+        if response.clicked() {
+            app.run(id, serde_json::Value::Null);
+            ui.close();
+        }
+    }
+    ui.separator();
+    if let Some(at) = app.menu_point {
+        let acquirable = snapper.acquirable(at);
+        let tracked = acquirable.is_some_and(|c| app.tracked.iter().any(|t| t.distance(c) < 1e-6));
+        let label = if tracked { "Stop tracking this point" } else { "Track this point" };
+        let response = ui
+            .add_enabled(acquirable.is_some(), egui::Button::new(tr(label)))
+            .on_hover_text(tr("Aligns what you draw or move to this corner, middle or centre (the same as resting on it)"))
+            .on_disabled_hover_text(tr("Press on a corner, a middle of a side, or a centre"));
+        crate::tablet::note_menu(app, label, &response);
+        if response.clicked()
+            && let Some(c) = acquirable
+        {
+            match app.tracked.iter().position(|t| t.distance(c) < 1e-6) {
+                Some(i) => {
+                    app.tracked.remove(i);
+                }
+                None => acquire(app, c),
+            }
+            ui.close();
+        }
+        for (label, vertical) in [("Vertical guide here", true), ("Horizontal guide here", false)] {
+            let response = ui.button(tr(label));
+            crate::tablet::note_menu(app, label, &response);
+            if response.clicked() {
+                app.guides.push(Guide { vertical, pos: if vertical { at.x } else { at.y } });
+                ui.close();
+            }
+        }
+        ui.separator();
+    }
+    ui.menu_button(tr("Arrange"), |ui| crate::menus::arrange_menu(app, ui));
 }
 
 fn acquire(app: &mut LightFoundryApp, p: Point) {

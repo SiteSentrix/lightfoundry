@@ -473,3 +473,15 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   with stable mutation tests (run by `cargo xtask ci`) and a cargo-fuzz target. Coverage-guided runs of 90 s
   each (nightly): 1.2 M, 2.3 M and 2.1 M executions, nothing found. `fuzzkit` may depend on the downloader
   (the layering rule that keeps the network out of the browser build exempts it, as it ships nowhere).
+- **2026-10-16 — canvas context menu; tracking without hover.** Right-click, or a long press on a touch
+  screen, opens a context menu on the canvas (first selecting the shape under the pointer): Undo, Redo, Select
+  All, Duplicate, Delete, **Track this point / Stop tracking this point**, vertical and horizontal guides at the
+  pressed point, and the Arrange commands. "Track this point" is the hover-free way to acquire a tracking
+  point on a touch screen. Fixes found on the way: acquirable points are now looked up among the targets
+  themselves (`snap::acquirable_near`) instead of read back from the snapped lines, which failed whenever two
+  vertices shared a row or column (so hovering on a rectangle's corner never worked, on desktop either); the
+  corners, side middles and centre of every shape's box are acquirable, not only drawn-path vertices; and
+  acquired points are drawn with no pointer or hover (they vanished on touch screens). Frame tests for the
+  menu (selection, Duplicate, Delete, tracking on a path vertex and a plain rectangle's corner, guides) and
+  unit tests for `acquirable_near` (shared rows, guides, hostile numbers); tried with a real long press in
+  headless Chromium.

@@ -260,17 +260,44 @@ pub fn snap_translation(
 /// Most points that can be acquired for tracking at once.
 pub const MAX_TRACKED: usize = 6;
 
-/// The point the cursor is exactly on, if both axes locked onto the same point-like target (a
-/// vertex, midpoint or centre) and not onto two different things. That is what hovering acquires.
-pub fn acquirable(s: &Snapped) -> Option<Point> {
-    let (x, y) = (s.x_line?, s.y_line?);
-    let pointlike = |k: TargetKind| matches!(k, TargetKind::Endpoint | TargetKind::Midpoint | TargetKind::Center | TargetKind::BedCenter);
-    if !(pointlike(x.kind) && pointlike(y.kind)) {
+/// The nearest point the cursor is on (within `threshold` mm), looked for among the targets themselves:
+/// vertices, midpoints and centres, and the corners, side middles and centre of each shape's box. Unlike
+/// reading it back from a snapped result, this is not confused by points that share a row or column.
+pub fn acquirable_near(p: Point, targets: &SnapTargets, threshold: f64) -> Option<Point> {
+    if !(p.x.is_finite() && p.y.is_finite() && threshold.is_finite() && threshold >= 0.0) {
         return None;
     }
-    let mid = |t: &Target| t.span.map(|(a, b)| (a + b) / 2.0);
-    let same = (mid(&x)? - y.at).abs() < 1e-6 && (mid(&y)? - x.at).abs() < 1e-6;
-    (same && x.at.is_finite() && y.at.is_finite()).then(|| Point::new(x.at, y.at))
+    let mut best: Option<(f64, Point)> = None;
+    let mut consider = |c: Point| {
+        let d = c.distance(p);
+        if d.is_finite() && d <= threshold && best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, c));
+        }
+    };
+    // Candidates come from the vertical lines (a point's column, a box's left, middle and right) and
+    // the horizontal lines of box tops and bottoms; the box's x extent is read from the horizontal lines.
+    for t in &targets.xs {
+        let Some((a, b)) = t.span.filter(|(a, b)| a.is_finite() && b.is_finite()) else { continue };
+        if (t.at - p.x).abs() > threshold || !t.at.is_finite() {
+            continue;
+        }
+        match t.kind {
+            TargetKind::Endpoint | TargetKind::Midpoint | TargetKind::Center | TargetKind::BedCenter => consider(Point::new(t.at, (a + b) / 2.0)),
+            TargetKind::Edge => [a, (a + b) / 2.0, b].into_iter().for_each(|y| consider(Point::new(t.at, y))),
+            _ => {}
+        }
+    }
+    for t in &targets.ys {
+        let Some((a, b)) = t.span.filter(|(a, b)| a.is_finite() && b.is_finite()) else { continue };
+        if (t.at - p.y).abs() > threshold || !t.at.is_finite() {
+            continue;
+        }
+        // Tops and bottoms of boxes (their corners are already found from the sides).
+        if t.kind == TargetKind::Edge {
+            consider(Point::new((a + b) / 2.0, t.at));
+        }
+    }
+    best.map(|(_, c)| c)
 }
 
 /// [`snap_point`], then on each axis that no object caught, a horizontal or vertical line through
@@ -668,8 +695,7 @@ mod tests {
 
         #[test]
         fn hovering_exactly_on_a_vertex_can_be_acquired() {
-            let s = snap_point(Point::new(40.5, 29.5), &SnapSettings::default(), &targets(), 2.0);
-            assert_eq!(acquirable(&s), Some(Point::new(40.0, 30.0)));
+            assert_eq!(acquirable_near(Point::new(40.5, 29.5), &targets(), 2.0), Some(Point::new(40.0, 30.0)));
         }
 
         #[test]
@@ -677,17 +703,14 @@ mod tests {
             let mut t = targets();
             t.add_point(Point::new(90.0, 80.0), TargetKind::Endpoint);
             // x from the first vertex, y from the second: nothing is actually there.
-            let s = snap_point(Point::new(40.0, 80.0), &SnapSettings::default(), &t, 2.0);
-            assert!(s.x_line.is_some() && s.y_line.is_some());
-            assert_eq!(acquirable(&s), None);
-            // Edges and guides are not points either.
+            assert_eq!(acquirable_near(Point::new(40.0, 80.0), &t, 2.0), None);
+            // A shape's own corner is a point (its two edge lines cross there); a point on one edge line is not.
             let mut e = SnapTargets::default();
             e.add_rect(Rect::new(0.0, 0.0, 10.0, 10.0));
-            let s = snap_point(Point::new(0.5, 0.5), &SnapSettings::default(), &e, 2.0);
-            assert_eq!(acquirable(&s), None);
+            assert_eq!(acquirable_near(Point::new(0.5, 0.5), &e, 2.0), Some(Point::new(0.0, 0.0)));
+            assert_eq!(acquirable_near(Point::new(0.5, 7.0), &e, 0.8), None);
             // A shape's centre is a point: both centre lines come from the same rectangle.
-            let s = snap_point(Point::new(5.2, 4.9), &SnapSettings::default(), &e, 2.0);
-            assert_eq!(acquirable(&s), Some(Point::new(5.0, 5.0)));
+            assert_eq!(acquirable_near(Point::new(5.2, 4.9), &e, 2.0), Some(Point::new(5.0, 5.0)));
         }
 
         #[test]
@@ -715,6 +738,37 @@ mod tests {
             t.add_rect(Rect::new(0.0, 0.0, 100.0, 31.0));
             let s = snap_point_tracked(Point::new(50.0, 30.4), &SnapSettings::default(), &t, &tracked, 2.0);
             assert_eq!(s.y_line.map(|t| t.kind), Some(TargetKind::Edge), "an object on the axis keeps priority");
+        }
+
+        #[test]
+        fn the_corners_middles_and_centre_of_one_shapes_box_can_be_acquired_but_not_lines_of_two() {
+            let mut targets = SnapTargets::default();
+            targets.add_rect(Rect::new(10.0, 20.0, 50.0, 60.0));
+            targets.add_rect(Rect::new(100.0, 120.0, 140.0, 160.0));
+            let at = |x: f64, y: f64| acquirable_near(Point::new(x, y), &targets, 1.0);
+            assert_eq!(at(10.5, 20.4), Some(Point::new(10.0, 20.0)), "a corner");
+            assert_eq!(at(50.0, 60.0), Some(Point::new(50.0, 60.0)), "the opposite corner");
+            assert_eq!(at(30.0, 20.2), Some(Point::new(30.0, 20.0)), "the middle of the top side");
+            assert_eq!(at(30.0, 40.0), Some(Point::new(30.0, 40.0)), "the centre");
+            assert_eq!(at(120.0, 160.0), Some(Point::new(120.0, 160.0)), "the second shape's bottom middle");
+            // The first shape's left line and the second shape's top line cross in empty space.
+            assert_eq!(at(10.0, 120.0), None);
+            assert_eq!(at(25.0, 33.0), None, "nothing locked");
+            // Guides and the bed are not shapes' boxes.
+            let mut guided = SnapTargets::default();
+            guided.add_guide(true, 70.0);
+            guided.add_guide(false, 80.0);
+            assert_eq!(acquirable_near(Point::new(70.0, 80.0), &guided, 1.0), None);
+            // Corners that share a row (both top corners of a box) are each found, not confused with one another.
+            let mut shared = SnapTargets::default();
+            for p in [(50.0, 50.0), (80.0, 50.0), (80.0, 80.0), (50.0, 80.0)] {
+                shared.add_point(Point::new(p.0, p.1), TargetKind::Endpoint);
+            }
+            assert_eq!(acquirable_near(Point::new(80.0, 50.0), &shared, 1.0), Some(Point::new(80.0, 50.0)));
+            assert_eq!(acquirable_near(Point::new(50.2, 80.3), &shared, 1.0), Some(Point::new(50.0, 80.0)));
+            assert_eq!(acquirable_near(Point::new(65.0, 50.0), &shared, 1.0), None, "between the corners is not a point");
+            assert_eq!(acquirable_near(Point::new(f64::NAN, 1.0), &shared, 1.0), None);
+            assert_eq!(acquirable_near(Point::new(50.0, 50.0), &shared, f64::NAN), None);
         }
 
         #[test]

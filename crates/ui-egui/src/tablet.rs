@@ -154,6 +154,15 @@ pub(crate) fn action_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     });
 }
 
+/// Remembers where a canvas context menu item was drawn, for the frame tests.
+#[cfg(test)]
+pub(crate) fn note_menu(app: &mut LightFoundryApp, name: &'static str, response: &egui::Response) {
+    app.button_rects.insert(name, response.rect);
+}
+
+#[cfg(not(test))]
+pub(crate) fn note_menu(_app: &mut LightFoundryApp, _name: &'static str, _response: &egui::Response) {}
+
 /// Remembers where a button was drawn, for the frame tests (which click it).
 #[cfg(test)]
 fn note(app: &mut LightFoundryApp, name: &'static str, response: &egui::Response) {

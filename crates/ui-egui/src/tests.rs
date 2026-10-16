@@ -2142,6 +2142,104 @@ mod tablet_tests {
     }
 }
 
+mod context_menu_tests {
+    use super::*;
+
+    fn secondary_click(h: &mut Harness, at: egui::Pos2) {
+        h.frame(vec![Event::PointerMoved(at)]);
+        h.frame(vec![Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed: true, modifiers: Modifiers::NONE }]);
+        h.frame(vec![Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed: false, modifiers: Modifiers::NONE }]);
+        h.frame(vec![]);
+        h.frame(vec![]);
+    }
+
+    #[test]
+    fn a_right_click_selects_what_is_under_it_and_the_menu_edits_it() {
+        let mut h = Harness::new();
+        let id = h.app.run("shape.rectangle", json!({"x": 50, "y": 50, "width": 30, "height": 30})).unwrap()["id"].as_u64().unwrap();
+        h.app.run("shape.rectangle", json!({"x": 150, "y": 50, "width": 30, "height": 30}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.settle();
+        // On the first rectangle's outline.
+        {
+            let at = h.at(50.0, 65.0);
+            secondary_click(&mut h, at);
+        }
+        assert_eq!(h.app.session.selection, vec![id], "the shape under the pointer is selected first");
+        assert!(h.app.menu_point.is_some());
+        let duplicate = h.app.button_rects["Duplicate"].center();
+        h.click(duplicate);
+        assert_eq!(h.app.session.doc.shapes.len(), 3, "Duplicate from the menu");
+        // Empty canvas: the selection is left alone, and Delete (still enabled) acts on it.
+        let before = h.app.session.selection.clone();
+        {
+            let at = h.at(300.0, 300.0);
+            secondary_click(&mut h, at);
+        }
+        assert_eq!(h.app.session.selection, before);
+        let delete = h.app.button_rects["Delete"].center();
+        h.click(delete);
+        assert_eq!(h.app.session.doc.shapes.len(), 2);
+    }
+
+    #[test]
+    fn a_plain_rectangles_corner_can_be_tracked_from_the_menu() {
+        let mut h = Harness::new();
+        h.app.run("shape.rectangle", json!({"x": 50, "y": 50, "width": 30, "height": 30}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.settle();
+        {
+            let at = h.at(80.0, 50.0);
+            secondary_click(&mut h, at);
+        }
+        let track = h.app.button_rects["Track this point"].center();
+        h.click(track);
+        assert_eq!(h.app.tracked.len(), 1, "{:?} menu point {:?}", h.app.tracked, h.app.menu_point);
+    }
+
+    #[test]
+    fn the_menu_acquires_and_forgets_a_tracking_point_and_adds_guides_without_hovering() {
+        let mut h = Harness::new();
+        h.app.snapping = crate::snap::SnapSettings { grid: None, objects: true, ..Default::default() };
+        h.app.run("path.create", json!({"nodes": [{"x": 100.0, "y": 100.0}, {"x": 180.0, "y": 100.0}, {"x": 120.0, "y": 140.0}], "closed": true}));
+        h.app.run("edit.select", json!({"ids": []}));
+        h.settle();
+        assert!(h.app.tracked.is_empty());
+        {
+            let at = h.at(100.0, 100.0);
+            secondary_click(&mut h, at);
+        }
+        let track = h.app.button_rects["Track this point"].center();
+        h.click(track);
+        assert_eq!(h.app.tracked.len(), 1, "the vertex was acquired");
+        // Again on the same vertex: the item now forgets it.
+        {
+            let at = h.at(100.0, 100.0);
+            secondary_click(&mut h, at);
+        }
+        let forget = h.app.button_rects["Stop tracking this point"].center();
+        h.click(forget);
+        assert!(h.app.tracked.is_empty());
+        // A guide through the pressed point, from the same menu.
+        {
+            let at = h.at(100.0, 100.0);
+            secondary_click(&mut h, at);
+        }
+        let guide = h.app.button_rects["Vertical guide here"].center();
+        h.click(guide);
+        assert_eq!(h.app.guides.len(), 1);
+        assert!(h.app.guides[0].vertical && (h.app.guides[0].pos - 100.0).abs() < 1.0, "{:?}", h.app.guides);
+        // Away from any point the item is disabled, and nothing is acquired.
+        {
+            let at = h.at(300.0, 250.0);
+            secondary_click(&mut h, at);
+        }
+        let disabled = h.app.button_rects["Track this point"].center();
+        h.click(disabled);
+        assert!(h.app.tracked.is_empty());
+    }
+}
+
 mod selection_scope_tests {
     use super::*;
 

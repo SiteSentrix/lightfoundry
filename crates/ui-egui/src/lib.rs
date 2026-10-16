@@ -94,6 +94,8 @@ pub struct LightFoundryApp {
     sticky_shift: bool,
     show_inspector: bool,
     inspector_decided: bool,
+    /// Where the canvas context menu was opened (right-click, or a long press on a touch screen).
+    menu_point: Option<lightfoundry_geom::Point>,
     /// Frames left in which the view is refitted after the interface scale changed.
     refit_frames: u8,
     /// Where the tablet action bar drew its buttons (the frame tests click them).
@@ -277,6 +279,7 @@ impl LightFoundryApp {
             sticky_shift: false,
             show_inspector: true,
             inspector_decided: false,
+            menu_point: None,
             refit_frames: 0,
             #[cfg(test)]
             button_rects: std::collections::HashMap::new(),

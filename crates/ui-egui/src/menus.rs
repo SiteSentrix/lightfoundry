@@ -280,7 +280,7 @@ fn edit_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     }
 }
 
-fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
+pub(crate) fn arrange_menu(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
     ui.add_enabled_ui(!app.session.selection.is_empty(), |ui| {
         for (label, to) in [
             ("Align Left", "left"),
