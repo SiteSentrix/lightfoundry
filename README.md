@@ -57,6 +57,13 @@ A layered Rust workspace, "everything is a command", no panics in shipped code, 
 See [`docs/architecture.md`](docs/architecture.md). Contributor and agent rules are in
 [`AGENTS.md`](AGENTS.md).
 
+## Reporting bugs
+
+In the app, **Help → Report a Bug…** opens StitchHub's report page, filled in with the version and your system.
+Describe what happened and send it: it becomes an issue in this repository (a public one, so leave out anything
+private). You can also [open an issue](https://github.com/Stitchwright/lightfoundry/issues) yourself. A maintainer can
+have Claude work on an issue by labelling it `claude-fix`; Claude opens a pull request for review, and never merges.
+
 ## Licence
 
 MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE`).
