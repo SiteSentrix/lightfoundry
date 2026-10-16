@@ -518,3 +518,9 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   `chunks_exact` calls with a constant size (`doc`, `toolpath`). Fixed with `as_chunks` (stable since 1.88,
   below our minimum 1.95); the full gate now passes locally on 1.99.1. Lesson: run the gate on current
   stable before relying on a green local result.
+- **2026-10-16 — browser translations.** The browser build's View > Language menu now works: *Load translation…*
+  picks a JSON catalog through the upload path and keeps its text in local storage (`lightfoundry.translation`),
+  so it is used again at the next visit; *Use English* clears it; *Save translation template…* downloads the
+  template. A catalog's `font` is ignored in the browser (it names a file the page cannot read). Checked by a
+  headless frame test (load, restart, damaged catalog, English, template download); not yet clicked through in a
+  real browser. Not done: a font for non-Latin scripts in the browser, and shipping any translation.

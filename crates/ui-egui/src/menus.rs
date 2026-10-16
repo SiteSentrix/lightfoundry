@@ -64,7 +64,7 @@ pub fn menu_bar(app: &mut LightFoundryApp, ui: &mut egui::Ui) {
                         }
                     }
                 });
-                if !app.platform.browser_files() {
+                {
                     ui.menu_button(tr("Language"), |ui| {
                         if let Some(name) = crate::i18n::active_name() {
                             ui.weak(if name.is_empty() { tr("Custom translation") } else { name });

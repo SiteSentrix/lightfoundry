@@ -54,7 +54,14 @@ the values are picked out of the message and put where your text says.
 
 Menus, buttons, labels, tooltips, headings, drop-downs, the status-bar messages the desktop app
 writes itself, and engine errors. Not covered yet: successful command results shown in the status
-bar, a few small texts such as layer descriptions built from layer names, and the browser build (which has no way to pick a file).
+bar, a few small texts such as layer descriptions built from layer names, and a font for non-Latin scripts in the browser build.
+
+## In the browser
+
+The hosted build has the same **View > Language** menu. *Load translation…* opens a file chooser, the
+catalog is kept in the browser's local storage and used on the next visit, *Use English* forgets it, and
+*Save translation template…* downloads the template. The `font` entry is ignored there (a page cannot read
+a font path), so scripts the built-in font lacks are not available in the browser yet.
 
 ## The command line
 

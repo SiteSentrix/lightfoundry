@@ -218,6 +218,9 @@ pub struct LightFoundryApp {
     last_title: String,
 }
 
+/// Where a browser-style host keeps the chosen translation catalog.
+const TRANSLATION_KEY: &str = "lightfoundry.translation";
+
 /// What a file chosen in a browser-style host is for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UploadKind {
@@ -225,6 +228,7 @@ pub(crate) enum UploadKind {
     Svg,
     Dxf,
     Image,
+    Translation,
 }
 
 impl UploadKind {
@@ -234,6 +238,7 @@ impl UploadKind {
             UploadKind::Svg => &["svg"],
             UploadKind::Dxf => &["dxf"],
             UploadKind::Image => &["png", "jpg", "jpeg", "bmp", "gif", "webp"],
+            UploadKind::Translation => &["json"],
         }
     }
 }
@@ -412,6 +417,16 @@ impl LightFoundryApp {
 
     /// Loads the saved translation, if there is one. A damaged file is reported and ignored.
     fn load_saved_translation(&mut self) {
+        if self.platform.browser_files() {
+            // The browser keeps the catalog's text in local storage.
+            if let Some(text) = self.platform.storage_get(TRANSLATION_KEY).filter(|t| !t.is_empty()) {
+                match i18n::parse(&text) {
+                    Ok(t) => i18n::set_active(Some(t)),
+                    Err(e) => self.status = Some((trf!("Could not use the saved translation: {e}", e = e), true)),
+                }
+            }
+            return;
+        }
         let Some(path) = self.platform.translation_file().filter(|p| p.exists()) else { return };
         match i18n::load(&path) {
             Ok(t) => {
@@ -444,6 +459,10 @@ impl LightFoundryApp {
 
     /// Asks for a translation file, keeps a copy as the saved translation, and starts using it.
     pub(crate) fn choose_translation(&mut self) {
+        if self.platform.browser_files() {
+            self.begin_upload(UploadKind::Translation);
+            return;
+        }
         let Some(path) = self.pick_open("Choose a translation", &["json"]) else { return };
         match i18n::load(&path) {
             Ok(t) => {
@@ -464,10 +483,32 @@ impl LightFoundryApp {
         }
     }
 
+    /// Uses a catalog chosen in a browser-style host and keeps its text for the next visit. The catalog's
+    /// `font` names a file the browser cannot read, so it is ignored there.
+    fn use_uploaded_translation(&mut self, bytes: &[u8]) -> bool {
+        let text = String::from_utf8_lossy(bytes);
+        match i18n::parse(&text) {
+            Ok(mut t) => {
+                t.font = None;
+                self.platform.storage_set(TRANSLATION_KEY, &text);
+                self.status =
+                    Some((trf!("Using the translation {name}", name = if t.name.is_empty() { tr("(unnamed)") } else { t.name.clone() }), false));
+                i18n::set_active(Some(t));
+                self.fonts_dirty = true;
+            }
+            Err(e) => self.status = Some((e, true)),
+        }
+        false
+    }
+
     /// Goes back to English and forgets the saved translation.
     pub(crate) fn use_english(&mut self) {
         i18n::set_active(None);
         self.fonts_dirty = true;
+        if self.platform.browser_files() {
+            self.platform.storage_set(TRANSLATION_KEY, "");
+            return;
+        }
         if let Some(saved) = self.platform.translation_file()
             && let Err(e) = std::fs::remove_file(&saved)
             && e.kind() != std::io::ErrorKind::NotFound
@@ -478,6 +519,10 @@ impl LightFoundryApp {
 
     /// Writes every string the interface has shown so far as a catalog to translate.
     pub(crate) fn save_translation_template(&mut self) {
+        if self.platform.browser_files() {
+            self.download("translation-template.json", i18n::template().as_bytes(), "application/json");
+            return;
+        }
         let Some(path) = self.pick_save("Save translation template", "translation-template.json", &["json"]) else { return };
         self.status = Some(match std::fs::write(&path, i18n::template()) {
             Ok(()) => (trf!("Saved the translation template to {path}", path = path.display()), false),
@@ -632,6 +677,7 @@ impl LightFoundryApp {
             UploadKind::Svg => self.run("file.import_svg", serde_json::json!({ "data": String::from_utf8_lossy(&upload.bytes) })).is_some(),
             UploadKind::Dxf => self.run("file.import_dxf", serde_json::json!({ "data": String::from_utf8_lossy(&upload.bytes) })).is_some(),
             UploadKind::Image => self.run("file.import_image", serde_json::json!({ "data_base64": data, "name": name })).is_some(),
+            UploadKind::Translation => self.use_uploaded_translation(&upload.bytes),
         };
         if ok {
             self.say(trf!("Opened {name}", name = name));

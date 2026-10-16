@@ -2577,6 +2577,41 @@ mod browser_file_tests {
         assert!(matches!(&h.app.status, Some((_, true))), "{:?}", h.app.status);
         assert_eq!(h.app.session.doc.shapes.len(), 2, "a failed open leaves the document alone");
     }
+
+    #[test]
+    fn the_browser_loads_keeps_and_clears_a_translation_and_offers_the_template() {
+        let (mut h, shared) = browser();
+        let catalog = br#"{"name":"Test","font":"/not/readable.ttf","strings":{"Rulers":"Lineale"}}"#.to_vec();
+        h.app.choose_translation();
+        assert_eq!(shared.borrow().requested.last().unwrap(), &vec!["json".to_string()]);
+        shared.borrow_mut().next = Some(Upload { name: "de.json".into(), bytes: catalog.clone() });
+        h.frame(vec![]);
+        assert_eq!(crate::i18n::tr("Rulers"), "Lineale");
+        assert_eq!(crate::i18n::active_font(), None, "the browser cannot read a font path");
+        assert!(matches!(&h.app.status, Some((_, false))), "{:?}", h.app.status);
+        assert!(shared.borrow().storage["lightfoundry.translation"].contains("Lineale"));
+
+        // The next page load picks it up again.
+        crate::i18n::set_active(None);
+        let again = LightFoundryApp::new(Session::new(), Box::new(Browser(Rc::clone(&shared))));
+        assert_eq!(crate::i18n::tr("Rulers"), "Lineale");
+        drop(again);
+
+        // A damaged catalog is reported and changes nothing; English forgets the stored one.
+        h.app.choose_translation();
+        shared.borrow_mut().next = Some(Upload { name: "bad.json".into(), bytes: b"[]".to_vec() });
+        h.frame(vec![]);
+        assert!(matches!(&h.app.status, Some((_, true))), "{:?}", h.app.status);
+        assert_eq!(crate::i18n::tr("Rulers"), "Lineale");
+        h.app.use_english();
+        assert_eq!(crate::i18n::tr("Rulers"), "Rulers");
+        assert!(shared.borrow().storage["lightfoundry.translation"].is_empty());
+
+        h.app.save_translation_template();
+        let downloads = shared.borrow().downloads.clone();
+        assert_eq!(downloads.last().unwrap().0, "translation-template.json");
+        assert!(String::from_utf8_lossy(&downloads.last().unwrap().1).contains("\"strings\""));
+    }
 }
 
 mod font_library_tests {
