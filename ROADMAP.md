@@ -530,3 +530,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   setting names and their "not documented" hint, and the shortcut editor's refusals. Checked by a test that a
   translation reaches the shortcut conflict message, and the full gate. Not done: successful command results
   in the status bar, and any shipped catalog.
+- **2026-10-16 — translations, catalog errors.** The errors the catalog loader reports (not JSON, no `strings`,
+  too many or too long strings, unreadable or oversize files) now go through the active catalog too. A review of
+  the status bar found no successful command result still shown in English: what remains are the font-library
+  download summaries and failures, which the hosts build. Checked by a test that a loader error is translated,
+  and the full gate. Not done: those download messages, a non-Latin font in the browser, any shipped catalog.

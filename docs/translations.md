@@ -53,8 +53,7 @@ the values are picked out of the message and put where your text says.
 ## What is covered
 
 Menus, buttons, labels, tooltips, headings, drop-downs, the status-bar messages the desktop app
-writes itself, and engine errors. Not covered yet: successful command results shown in the status
-bar, and a font for non-Latin scripts in the browser build.
+writes itself, and engine errors. Not covered yet: messages from the font-library download, and a font for non-Latin scripts in the browser build.
 
 ## In the browser
 

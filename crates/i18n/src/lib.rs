@@ -206,11 +206,11 @@ pub fn active_name() -> Option<String> {
 /// Reads a font file for the active catalog, refusing one that is too large.
 pub fn read_font(path: &Path) -> Result<Vec<u8>, String> {
     use std::io::Read;
-    let file = std::fs::File::open(path).map_err(|e| format!("cannot open the font {}: {e}", path.display()))?;
+    let file = std::fs::File::open(path).map_err(|e| trf!("cannot open the font {path}: {e}", path = path.display(), e = e))?;
     let mut data = Vec::new();
-    file.take(MAX_FONT_BYTES + 1).read_to_end(&mut data).map_err(|e| format!("cannot read the font {}: {e}", path.display()))?;
+    file.take(MAX_FONT_BYTES + 1).read_to_end(&mut data).map_err(|e| trf!("cannot read the font {path}: {e}", path = path.display(), e = e))?;
     if data.len() as u64 > MAX_FONT_BYTES {
-        return Err("the font file is too large".into());
+        return Err(tr("the font file is too large"));
     }
     Ok(data)
 }
@@ -229,19 +229,19 @@ pub fn template() -> String {
 
 /// Parses a catalog. Unusable input is an error with a reason; nothing here can panic.
 pub fn parse(text: &str) -> Result<Translation, String> {
-    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| format!("not a translation file: {e}"))?;
-    let obj = v.as_object().ok_or("a translation file is a JSON object")?;
+    let v: serde_json::Value = serde_json::from_str(text).map_err(|e| trf!("not a translation file: {e}", e = e))?;
+    let obj = v.as_object().ok_or_else(|| tr("a translation file is a JSON object"))?;
     let name = obj.get("name").and_then(|n| n.as_str()).unwrap_or("").chars().take(80).collect();
     let font = obj.get("font").and_then(|f| f.as_str()).filter(|f| !f.is_empty()).map(PathBuf::from);
-    let raw = obj.get("strings").and_then(|s| s.as_object()).ok_or("the file has no \"strings\" object")?;
+    let raw = obj.get("strings").and_then(|s| s.as_object()).ok_or_else(|| tr("the file has no \"strings\" object"))?;
     if raw.len() > MAX_STRINGS {
-        return Err(format!("more than {MAX_STRINGS} strings"));
+        return Err(trf!("more than {max} strings", max = MAX_STRINGS));
     }
     let mut strings = HashMap::with_capacity(raw.len());
     for (key, value) in raw {
-        let Some(value) = value.as_str() else { return Err(format!("the translation of {key:?} is not text")) };
+        let Some(value) = value.as_str() else { return Err(trf!("the translation of {key} is not text", key = format!("{key:?}"))) };
         if key.chars().count() > MAX_LEN || value.chars().count() > MAX_LEN {
-            return Err("a string is too long".into());
+            return Err(tr("a string is too long"));
         }
         if !value.is_empty() && value != key {
             strings.insert(key.clone(), value.to_string());
@@ -256,11 +256,11 @@ pub fn parse(text: &str) -> Result<Translation, String> {
 /// Reads and parses the catalog at `path`.
 pub fn load(path: &Path) -> Result<Translation, String> {
     use std::io::Read;
-    let file = std::fs::File::open(path).map_err(|e| format!("cannot open {}: {e}", path.display()))?;
+    let file = std::fs::File::open(path).map_err(|e| trf!("cannot open {path}: {e}", path = path.display(), e = e))?;
     let mut text = String::new();
-    file.take(MAX_FILE_BYTES + 1).read_to_string(&mut text).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    file.take(MAX_FILE_BYTES + 1).read_to_string(&mut text).map_err(|e| trf!("cannot read {path}: {e}", path = path.display(), e = e))?;
     if text.len() as u64 > MAX_FILE_BYTES {
-        return Err("the translation file is too large".into());
+        return Err(tr("the translation file is too large"));
     }
     parse(&text)
 }
@@ -290,6 +290,15 @@ mod tests {
         assert_eq!(t.name, "Test");
         assert_eq!(t.strings.len(), 1, "identical and empty entries are not kept");
         assert_eq!(t.strings.get("Open…").map(String::as_str), Some("Öffnen…"));
+    }
+
+    #[test]
+    fn catalog_errors_follow_the_active_catalog() {
+        assert_eq!(parse("[]").err().as_deref(), Some("a translation file is a JSON object"));
+        set_active(parse(r#"{"strings":{"a translation file is a JSON object":"ein Katalog ist ein JSON-Objekt"}}"#).ok());
+        let err = parse("[]").err();
+        set_active(None);
+        assert_eq!(err.as_deref(), Some("ein Katalog ist ein JSON-Objekt"));
     }
 
     #[test]
