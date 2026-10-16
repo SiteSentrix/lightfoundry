@@ -6,9 +6,11 @@
 
 mod glyphfont;
 mod glyphs;
+mod inkstitch;
 mod outline;
 
 pub use glyphfont::{GlyphFont, MAX_FONT_JSON_BYTES, MAX_GLYPH_FILE_BYTES, layout_glyph_font};
+pub use inkstitch::MAX_SVG_BYTES as MAX_INKSTITCH_SVG_BYTES;
 #[cfg(any(test, feature = "testfont"))]
 pub use outline::testfont;
 pub use outline::{MAX_FONT_BYTES, layout_outline, layout_outline_with_fallback};

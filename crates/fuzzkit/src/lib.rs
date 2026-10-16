@@ -84,6 +84,22 @@ pub fn glyph_font(data: &[u8]) {
     }
 }
 
+/// An Ink/Stitch font: the first two bytes say where `font.json` ends and the drawing starts.
+pub fn inkstitch_font(data: &[u8]) {
+    let Some((head, rest)) = data.split_at_checked(2) else { return };
+    let at = (usize::from(head[0]) << 8 | usize::from(head[1])) % (rest.len() + 1);
+    let (info, svg) = rest.split_at(at);
+    let (info, svg) = (String::from_utf8_lossy(info), String::from_utf8_lossy(svg));
+    if let Ok(font) = lightfoundry_text::GlyphFont::parse_inkstitch(&info, &svg) {
+        for style in [
+            lightfoundry_text::TextStyle::default(),
+            lightfoundry_text::TextStyle { height: 1000.0, letter_spacing: 10.0, line_spacing: 10.0, ..Default::default() },
+        ] {
+            let _ = lightfoundry_text::layout_glyph_font(&font, "Hello World\nÄ? abc 123", &style);
+        }
+    }
+}
+
 /// The hosted site's font index and the list of fonts remembered from an earlier visit.
 pub fn font_index(data: &[u8]) {
     let text = String::from_utf8_lossy(data);
@@ -247,6 +263,20 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn inkstitch_fonts_survive_mutation() {
+        let info = r#"{"name":"Seed","horiz_adv_x":{"H":14},"horiz_adv_x_space":9,"leading":30}"#;
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:inkstitch="http://inkstitch.org/namespace" viewBox="0 0 30 30"><g transform="translate(1,2) scale(1.5)"><g inkscape:label="GlyphLayer-H" inkscape:groupmode="layer"><path inkstitch:satin_column="True" d="M 2 6 C 2 10 2 20 2 25 M 8 6 L 8 25 M 2 15 L 8 15"/><path d="M 8 15 Q 10 14 12 15"/></g><g inkscape:label="GlyphLayer-o"><path style="display:none" d="M 0 0 L 9 9"/><path d="M 1 12 L 9 12 A 4 4 0 0 1 9 25 Z" transform="rotate(5 3 3)"/></g></g></svg>"#;
+        let mut seed = vec![0, info.len() as u8];
+        seed.extend_from_slice(info.as_bytes());
+        seed.extend_from_slice(svg.as_bytes());
+        let mut rng = Rng(0xdec0_ded5);
+        for input in mutations(&seed, &mut rng, 4000) {
+            inkstitch_font(&input);
+        }
+        assert!(lightfoundry_text::GlyphFont::parse_inkstitch(info, svg).is_ok(), "the seed is a working font");
     }
 
     #[test]

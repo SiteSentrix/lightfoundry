@@ -90,3 +90,10 @@ path = "fuzz_targets/font_listing.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "inkstitch_font"
+path = "fuzz_targets/inkstitch_font.rs"
+test = false
+doc = false
+bench = false

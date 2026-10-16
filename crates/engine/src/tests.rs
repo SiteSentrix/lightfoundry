@@ -1319,6 +1319,49 @@ mod import_tests {
     }
 
     #[test]
+    fn text_can_use_an_inkstitch_font_folder_and_edits_to_its_files_are_picked_up() {
+        let dir = std::env::temp_dir().join(format!("lf-engine-inkstitch-{}", std::process::id()));
+        let folder = dir.join("tiny");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("font.json"), r#"{"name":"Tiny Satin","horiz_adv_x":{"H":14},"horiz_adv_x_space":9,"leading":30}"#).unwrap();
+        let layer =
+            |ch: &str, body: &str| format!(r#"<g inkscape:label="GlyphLayer-{ch}" inkscape:groupmode="layer" style="display:none">{body}</g>"#);
+        // H: a satin column (two rails, a rung) and a plain bar, drawn 25 units down the page; o: one closed shape.
+        let h = layer("H", r#"<path inkstitch:satin_column="True" d="M 2 6 L 2 25 M 8 6 L 8 25 M 2 15 L 8 15"/><path d="M 8 15 L 12 15"/>"#);
+        let o = layer("o", r#"<path d="M 1 12 L 9 12 L 9 25 L 1 25 Z"/>"#);
+        let svg = |extra: &str| {
+            format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:inkstitch="http://inkstitch.org/namespace" viewBox="0 0 30 30">{h}{o}{extra}</svg>"#
+            )
+        };
+        std::fs::write(folder.join("ltr.svg"), svg("")).unwrap();
+
+        let mut s = Session::new();
+        let v = s.execute("text.create", &json!({"text": "Ho", "x": 20, "y": 30, "height": 19, "font": folder})).unwrap();
+        let id = v["id"].as_u64().unwrap();
+        assert!(v["unsupported"].as_array().unwrap().is_empty());
+        let b = s.doc.shape(id).unwrap().world_bounds().unwrap();
+        assert!((b.y1 - b.y0 - 19.0).abs() < 0.1 && b.x0 >= 19.9, "capitals are the requested height: {b:?}");
+        // By file name too.
+        assert!(s.execute("text.create", &json!({"text": "H", "font": folder.join("ltr.svg")})).is_ok());
+        // Editing a file is noticed (the parsed font is cached by size and time): a third letter appears.
+        std::fs::write(folder.join("ltr.svg"), svg(&layer("i", r#"<path d="M 0 12 L 3 12 L 3 25 L 0 25 Z"/>"#))).unwrap();
+        let v = s.execute("text.create", &json!({"text": "Hi", "font": folder})).unwrap();
+        assert!(v["unsupported"].as_array().unwrap().is_empty(), "{v}");
+        // A folder with only a right-to-left drawing is explained, not mistaken for a file.
+        let rtl = dir.join("rtl-only");
+        std::fs::create_dir_all(&rtl).unwrap();
+        std::fs::write(rtl.join("font.json"), "{}").unwrap();
+        std::fs::write(rtl.join("rtl.svg"), svg("")).unwrap();
+        let err = s.execute("text.create", &json!({"text": "H", "font": rtl})).unwrap_err().to_string();
+        assert!(err.contains("not supported yet"), "{err}");
+        // A broken drawing is an error.
+        std::fs::write(folder.join("ltr.svg"), "<svg>").unwrap();
+        assert!(s.execute("text.create", &json!({"text": "H", "font": folder})).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn text_can_use_a_font_library_folder_by_folder_or_by_either_file() {
         let dir = std::env::temp_dir().join(format!("lf-engine-glyphfont-{}", std::process::id()));
         let folder = dir.join("block");

@@ -2653,6 +2653,14 @@ mod font_library_tests {
         }
         let listed: Vec<String> = crate::panels::library_fonts(&dir).into_iter().map(|(n, _)| n).collect();
         assert_eq!(listed, ["Alpha Face", "beta"], "named by font.json or else the folder, sorted, incomplete ones left out");
+        // Ink/Stitch fonts (ltr.svg) are listed too, from their own folder; right-to-left-only ones are not.
+        for (folder, file) in [("ink-a", "ltr.svg"), ("ink-rtl", "rtl.svg")] {
+            std::fs::create_dir_all(dir.join("inkstitch").join(folder)).unwrap();
+            std::fs::write(dir.join("inkstitch").join(folder).join("font.json"), r#"{"name":"Ink Face"}"#).unwrap();
+            std::fs::write(dir.join("inkstitch").join(folder).join(file), "<svg/>").unwrap();
+        }
+        let listed: Vec<String> = crate::panels::library_fonts(&dir).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(listed, ["Alpha Face", "Ink Face", "beta"]);
         assert!(crate::panels::library_fonts(&dir.join("missing")).is_empty());
         std::fs::remove_dir_all(&dir).ok();
     }

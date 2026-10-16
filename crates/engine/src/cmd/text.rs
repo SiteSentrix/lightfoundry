@@ -13,7 +13,7 @@ pub(super) const COMMANDS: &[CommandSpec] = &[
         label: "Text",
         menu: "Create",
         shortcut: Some("T"),
-        params_doc: "{text, x, y, height? (cap height mm, default 10), letter_spacing?, line_spacing?, align?: left|center|right, layer?}  (single-line stroke font), font? (path to a .ttf/.otf file, a font library folder, or library:<folder> for a font a browser host loaded: draws filled outlines; use a Fill layer to engrave them), vertical? (stack letters top to bottom, one column per line, first line rightmost), fallback_font? (path to a second .ttf/.otf for characters the font lacks)",
+        params_doc: "{text, x, y, height? (cap height mm, default 10), letter_spacing?, line_spacing?, align?: left|center|right, layer?}  (single-line stroke font), font? (path to a .ttf/.otf file, a font library folder (Foundry or Ink/Stitch), or library:<folder> for a font a browser host loaded: draws filled outlines; use a Fill layer to engrave them), vertical? (stack letters top to bottom, one column per line, first line rightmost), fallback_font? (path to a second .ttf/.otf for characters the font lacks)",
         mutates: true,
         run: create,
     },
@@ -170,9 +170,9 @@ enum LoadedFont {
     Glyphs(std::sync::Arc<lightfoundry_text::GlyphFont>),
 }
 
-/// The font library's files: a folder with `font.json` and `glyphs.stitchfoundry`, named by the folder
-/// or by either file in it.
-const GLYPH_FONT_FILES: [&str; 2] = ["font.json", "glyphs.stitchfoundry"];
+/// The font library's folders: `font.json` with either `glyphs.stitchfoundry` (the Foundry fonts) or
+/// `ltr.svg` (the Ink/Stitch collection), named by the folder or by one of its files.
+const GLYPH_FONT_FILES: [&str; 3] = ["font.json", "glyphs.stitchfoundry", "ltr.svg"];
 
 /// Reads a font, refusing anything unreasonably large before it is loaded.
 fn read_font(path: &str) -> Result<LoadedFont, EngineError> {
@@ -186,21 +186,61 @@ fn read_font(path: &str) -> Result<LoadedFont, EngineError> {
     let folder =
         if p.is_dir() { Some(p) } else { p.file_name().and_then(|n| n.to_str()).filter(|n| GLYPH_FONT_FILES.contains(n)).and_then(|_| p.parent()) };
     match folder {
-        Some(folder) if GLYPH_FONT_FILES.iter().all(|f| folder.join(f).is_file()) => read_glyph_font(folder),
+        Some(folder) if folder.join("font.json").is_file() && (folder.join("glyphs.stitchfoundry").is_file() || folder.join("ltr.svg").is_file()) => {
+            read_glyph_font(folder)
+        }
+        // A font library folder this program cannot read yet: say so, rather than failing to open a folder as a file.
+        Some(folder) if folder.join("font.json").is_file() => Err(EngineError::BadParams(format!(
+            "{} has no ltr.svg or glyphs.stitchfoundry (fonts that are right-to-left only, or split into one file per letter, are not supported yet)",
+            folder.display()
+        ))),
         _ => read_font_file(path).map(LoadedFont::File),
     }
 }
 
+/// Parsed library fonts, so laying text out again (every edit) does not parse a drawing of many
+/// megabytes each time. Keyed by folder; an entry is stale when either file's size or time changed.
+type FontCache = std::sync::Mutex<Vec<(std::path::PathBuf, [(u64, Option<std::time::SystemTime>); 2], std::sync::Arc<lightfoundry_text::GlyphFont>)>>;
+const CACHED_FONTS: usize = 8;
+
+fn font_cache() -> &'static FontCache {
+    static CACHE: std::sync::OnceLock<FontCache> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
 fn read_glyph_font(folder: &std::path::Path) -> Result<LoadedFont, EngineError> {
+    let inkstitch = !folder.join("glyphs.stitchfoundry").is_file();
+    let second = if inkstitch { "ltr.svg" } else { "glyphs.stitchfoundry" };
+    let signature = |name: &str| std::fs::metadata(folder.join(name)).map(|m| (m.len(), m.modified().ok())).unwrap_or((0, None));
+    let sig = [signature("font.json"), signature(second)];
+    if let Ok(cache) = font_cache().lock()
+        && let Some((_, _, font)) = cache.iter().find(|(path, s, _)| path == folder && *s == sig)
+    {
+        return Ok(LoadedFont::Glyphs(std::sync::Arc::clone(font)));
+    }
     let read = |name: &str, limit: usize| -> Result<String, EngineError> {
         let path = folder.join(name);
         let bytes = read_limited(&path.display().to_string(), limit)?;
         String::from_utf8(bytes).map_err(|_| EngineError::BadParams(format!("{} is not text", path.display())))
     };
     let info = read("font.json", lightfoundry_text::MAX_FONT_JSON_BYTES)?;
-    let glyphs = read("glyphs.stitchfoundry", lightfoundry_text::MAX_GLYPH_FILE_BYTES)?;
-    let font = lightfoundry_text::GlyphFont::parse(&info, &glyphs).map_err(|e| EngineError::BadParams(e.to_string()))?;
-    Ok(LoadedFont::Glyphs(std::sync::Arc::new(font)))
+    let font = if inkstitch {
+        let svg = read("ltr.svg", lightfoundry_text::MAX_INKSTITCH_SVG_BYTES)?;
+        lightfoundry_text::GlyphFont::parse_inkstitch(&info, &svg)
+    } else {
+        let glyphs = read("glyphs.stitchfoundry", lightfoundry_text::MAX_GLYPH_FILE_BYTES)?;
+        lightfoundry_text::GlyphFont::parse(&info, &glyphs)
+    }
+    .map_err(|e| EngineError::BadParams(e.to_string()))?;
+    let font = std::sync::Arc::new(font);
+    if let Ok(mut cache) = font_cache().lock() {
+        cache.retain(|(path, _, _)| path != folder);
+        if cache.len() >= CACHED_FONTS {
+            cache.remove(0);
+        }
+        cache.push((folder.to_path_buf(), sig, std::sync::Arc::clone(&font)));
+    }
+    Ok(LoadedFont::Glyphs(font))
 }
 
 fn read_font_file(path: &str) -> Result<Vec<u8>, EngineError> {

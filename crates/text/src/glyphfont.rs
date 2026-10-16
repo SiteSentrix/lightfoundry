@@ -14,7 +14,7 @@ use serde_json::Value;
 use crate::{Align, MAX_CHARS, MAX_HEIGHT_MM, MIN_HEIGHT_MM, TextError, TextLayout, TextStyle};
 
 /// Largest `font.json` accepted, in bytes.
-pub const MAX_FONT_JSON_BYTES: usize = 1024 * 1024;
+pub const MAX_FONT_JSON_BYTES: usize = 16 * 1024 * 1024;
 /// Largest glyph file accepted, in bytes.
 pub const MAX_GLYPH_FILE_BYTES: usize = 32 * 1024 * 1024;
 /// Most glyphs kept, anchors in one glyph, and anchors in the whole font.
@@ -50,6 +50,56 @@ struct Contour {
 }
 
 impl GlyphFont {
+    /// Reads an Ink/Stitch font: its `font.json` and `ltr.svg` (see the `inkstitch` module). Glyphs are
+    /// placed on a baseline at y = 0 and scaled by nothing here (layout scales from the capital height);
+    /// advances come from `font.json` where it has them, else the glyph's width plus a small gap.
+    pub fn parse_inkstitch(font_json: &str, svg: &str) -> Result<GlyphFont, TextError> {
+        let bad = |why: &str| TextError::BadFont(why.to_string());
+        if font_json.len() > MAX_FONT_JSON_BYTES {
+            return Err(bad("the font files are too large"));
+        }
+        let info: Value = serde_json::from_str(font_json).map_err(|e| TextError::BadFont(format!("font.json: {e}")))?;
+        let number = |v: Option<&Value>| v.and_then(Value::as_f64).filter(|n| n.is_finite() && *n >= 0.0);
+        let drawn = crate::inkstitch::read_glyphs(svg)?;
+        let (baseline, cap_height) = crate::inkstitch::baseline_and_cap(&drawn).ok_or_else(|| bad("cannot tell how tall a letter is"))?;
+        let advances: HashMap<char, f64> = info
+            .get("horiz_adv_x")
+            .and_then(Value::as_object)
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| {
+                        let mut chars = k.chars();
+                        let c = chars.next().filter(|_| chars.next().is_none())?;
+                        Some((c, number(Some(v))?))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut glyphs = HashMap::new();
+        for g in drawn {
+            let bounds = g.path.bounding_box();
+            if !(bounds.x0.is_finite() && bounds.x1.is_finite()) {
+                continue;
+            }
+            // Left edge to x = 0 and the baseline to y = 0 (up is negative), as in the other glyph fonts.
+            let mut path = g.path;
+            path.apply_affine(kurbo::Affine::translate((-bounds.x0, -baseline)));
+            let width = bounds.x1 - bounds.x0;
+            let advance = advances.get(&g.ch).map_or(width + cap_height * 0.12, |a| a.max(width));
+            glyphs.entry(g.ch).or_insert(Glyph { path, advance });
+        }
+        if glyphs.is_empty() {
+            return Err(bad("the drawing has no usable glyphs"));
+        }
+        Ok(GlyphFont {
+            name: info.get("name").and_then(Value::as_str).unwrap_or("").chars().take(80).collect(),
+            glyphs,
+            space_advance: number(info.get("horiz_adv_x_space")).filter(|n| *n > 0.0),
+            leading: number(info.get("leading")).filter(|n| *n > 0.0),
+            cap_height,
+        })
+    }
+
     /// Reads the two files' text. `Err` says what is wrong; nothing here panics on any input.
     pub fn parse(font_json: &str, glyphs_json: &str) -> Result<GlyphFont, TextError> {
         let bad = |why: &str| TextError::BadFont(why.to_string());

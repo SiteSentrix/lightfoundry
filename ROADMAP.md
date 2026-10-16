@@ -485,3 +485,19 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   menu (selection, Duplicate, Delete, tracking on a path vertex and a plain rectangle's corner, guides) and
   unit tests for `acquirable_near` (shared rows, guides, hostile numbers); tried with a real long press in
   headless Chromium.
+- **2026-10-16 — Ink/Stitch fonts for text.** `GlyphFont::parse_inkstitch` reads the collection's folders
+  (`font.json` + `ltr.svg`, one `GlyphLayer-<char>` layer per glyph; `text/src/inkstitch.rs`, using
+  `roxmltree` and kurbo's SVG path parser): transforms are composed through groups, a satin column
+  (`inkstitch:satin_column`, first two subpaths = rails) becomes the outline between its rails, filled areas
+  stay closed shapes and running-stitch lines stay open lines; the baseline and capital height come from a
+  flat-bottomed capital rather than from guide conventions, advances from `font.json`. All bounded (24 MB
+  drawing, 3 M XML nodes, nesting, paths per glyph, every number); `font.json` may be 16 MB (kerning tables).
+  `text.create`/`text.edit` accept such a folder like a Foundry folder, parsed fonts are cached by folder
+  (size and time of the two files), and the Library fonts list covers `fonts/` and `inkstitch/` (scrolling).
+  Tried with the real collection: 121 of 131 fonts lay out text in at most 0.27 s (the other 10 are
+  right-to-left-only or split into one file per letter and get a clear message); looked at 8 of them (the
+  plain satin and script fonts read well, ornament fonts draw their ornaments, `bluenesia_satin`, built of
+  many short columns, is fragmentary). Satin outlines overlap where columns cross (right for Fill, doubled
+  lines for Line). Fuzzed: stable mutation test plus 5.2 M coverage-guided executions, nothing found.
+  Not done: right-to-left fonts, the one-file-per-letter fonts, kerning, and the web build (Ink/Stitch is
+  hundreds of MB, so it is desktop only).

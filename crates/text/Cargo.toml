@@ -16,6 +16,7 @@ skrifa = { workspace = true }
 harfrust = { workspace = true }
 unicode-bidi = { workspace = true }
 serde_json = { workspace = true }
+roxmltree = "0.21"
 
 [features]
 # Exposes `testfont::tiny_font()`, a font built in code, for other crates' tests.

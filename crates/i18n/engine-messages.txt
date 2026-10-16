@@ -140,6 +140,7 @@ unknown command {0}
 width and height must be positive
 width must be positive
 {1} has no closed outline (open lines and stroke text cannot be combined)
+{1} has no ltr.svg or glyphs.stitchfoundry (fonts that are right-to-left only, or split into one file per letter, are not supported yet)
 {1} is an image and cannot be joined
 {1} is an image and cannot be offset
 {1} is an image; booleans need vector shapes
