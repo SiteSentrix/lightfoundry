@@ -601,7 +601,7 @@ impl RasterImage {
     /// The colour planes as grey pictures, so every grey operation can be applied to each.
     fn planes(&self) -> Option<[RasterImage; 3]> {
         let rgb = self.rgb.as_ref()?;
-        let plane = |c: usize| RasterImage::new(self.width, self.height, rgb.chunks_exact(3).map(|px| px[c]).collect());
+        let plane = |c: usize| RasterImage::new(self.width, self.height, rgb.as_chunks::<3>().0.iter().map(|px| px[c]).collect());
         Some([plane(0)?, plane(1)?, plane(2)?])
     }
 

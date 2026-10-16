@@ -24,7 +24,7 @@ pub fn quantize(rgb: &[u8], colors: usize) -> Option<Quantized> {
     if !(1..=MAX_COLORS).contains(&colors) || rgb.is_empty() || !rgb.len().is_multiple_of(3) {
         return None;
     }
-    let pixels: Vec<[u8; 3]> = rgb.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect();
+    let pixels: Vec<[u8; 3]> = rgb.as_chunks::<3>().0.to_vec();
     let is_paper = |p: &[u8; 3]| p.iter().all(|c| *c >= PAPER);
     let ink: Vec<[u8; 3]> = pixels.iter().filter(|p| !is_paper(p)).copied().collect();
     if ink.is_empty() {

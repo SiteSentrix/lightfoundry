@@ -21,7 +21,7 @@ pub fn fill_segments(lines: &[Polyline], interval: f64, angle_deg: f64, bidirect
         let mut xs = crossings(&rotated, y);
         xs.sort_by(f64::total_cmp);
         let reverse = bidirectional && row % 2 == 1;
-        let mut spans: Vec<(f64, f64)> = xs.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+        let mut spans: Vec<(f64, f64)> = xs.as_chunks::<2>().0.iter().map(|c| (c[0], c[1])).collect();
         if reverse {
             spans.reverse();
         }

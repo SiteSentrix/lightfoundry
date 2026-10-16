@@ -513,3 +513,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   progress-docs update rules, and the shell and parallel-agent notes. Not taken over (they need more than a
   rule): the `--control` JSON-lines channel with `ui.screenshot` (our agent link is MCP), the `cli perf`
   budgets, shared test-corpus repos, and the About-window contributor credits.
+- **2026-10-16 — first CI run.** The new GitHub CI workflow failed on its first run: CI's stable Rust (1.99)
+  has a clippy lint (`chunks_exact_to_as_chunks`) that the older local toolchain (1.97) lacked, flagging three
+  `chunks_exact` calls with a constant size (`doc`, `toolpath`). Fixed with `as_chunks` (stable since 1.88,
+  below our minimum 1.95); the full gate now passes locally on 1.99.1. Lesson: run the gate on current
+  stable before relying on a green local result.
