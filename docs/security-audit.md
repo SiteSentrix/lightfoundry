@@ -25,26 +25,23 @@ Result: no critical issue, nothing that leaves the laser on or injects G-code, n
 | `desktop.yml` gave every build job a write token                                                           | Builds read-only; only the release job can write                                          |
 | Checkouts kept the token in `.git/config`                                                                  | `persist-credentials: false` (CI, Desktop, Fix workflows)                                 |
 | No automated advisory or action updates                                                                    | `audit.yml` (weekly and on `Cargo.lock` changes) and `dependabot.yml`                     |
+| The bug-fix workflow ran `cargo test` while holding the API key, on untrusted issue text                   | It now runs no builds or tests (the pull request's CI runs the gate); keep requiring a maintainer to apply the `claude-fix` label after reading the issue |
 
 ## Open, for a decision
 
-1. **`claude-fix.yml` runs `cargo test` with the API key present.** Issue text is untrusted; a prompt-injected
-   change to a test or build script would run on a runner that holds `ANTHROPIC_API_KEY`. Options: drop the
-   cargo allowances and let the pull request's CI run them, or run them in a later job without secrets.
-   Keep requiring a maintainer to apply the `claude-fix` label after reading the issue.
-2. **Actions are pinned to tags, not commit hashes** (`dtolnay/rust-toolchain@master` is a branch). Pinning
+1. **Actions are pinned to tags, not commit hashes** (`dtolnay/rust-toolchain@master` is a branch). Pinning
    needs the hashes; Dependabot then keeps them current.
-3. **File-writing commands take any path** (`file.save`, `file.autosave`, `file.export_*`), so a client holding
+2. **File-writing commands take any path** (`file.save`, `file.autosave`, `file.export_*`), so a client holding
    the link token, or a script, can overwrite any file the user can. Intended for a trusted agent; options are
    confining live-link writes to the document's folder or asking the person.
-4. **Undo history has no byte budget** (200 steps, each a clone of the document), so a long loop of cheap
+3. **Undo history has no byte budget** (200 steps, each a clone of the document), so a long loop of cheap
    commands on a very large document can use gigabytes.
-5. **The link's queues are unbounded after the token is checked**, so a client that never reads its replies can
+4. **The link's queues are unbounded after the token is checked**, so a client that never reads its replies can
    grow memory.
-6. **Autosave, recovery and recent-file lists use default permissions** (often world-readable on Linux). The
+5. **Autosave, recovery and recent-file lists use default permissions** (often world-readable on Linux). The
    link file is owner-only. Windows relies on the profile folder's permissions.
-7. **Relative-origin jobs (current position) cannot check the bed**; a job near an edge can run into the frame
+6. **Relative-origin jobs (current position) cannot check the bed**; a job near an edge can run into the frame
    unless the controller's soft limits are on. The app warns when laser mode is off; it does not block the job.
-8. **Closing a browser tab mid-job** gives no chance to send a soft reset; the controller finishes its buffered
+7. **Closing a browser tab mid-job** gives no chance to send a soft reset; the controller finishes its buffered
    moves. A warning or a `beforeunload` prompt while a job runs would help.
 9. Two running instances share one link file; the first to quit removes the other's (reliability only).

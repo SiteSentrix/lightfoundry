@@ -544,3 +544,6 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   browser page, read-only build tokens, an audit workflow and Dependabot. Open items for a decision are in
   `docs/security-audit.md` (the main one: the bug-fix workflow runs `cargo test` while holding an API key).
   Checked by the full gate. Not done: hardware, third-party review, SHA-pinned actions.
+- **2026-10-17 — bug-fix workflow without builds.** `claude-fix.yml` no longer installs a toolchain or lets Claude
+  run `cargo`: the job holds the API key and reads untrusted issue text, so running repository code there could
+  leak the key. The pull request's own CI is the gate. Checked: workflow parses; not yet run on a real issue.
