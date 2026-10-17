@@ -199,6 +199,8 @@ pub struct LightFoundryApp {
     awaiting_upload: Option<UploadKind>,
     /// A program waiting for the person to confirm a start the bed cannot be checked for (relative start).
     pending_start: Option<String>,
+    /// The controller's settings were asked for on this connection (so jobs can be refused when laser mode is off).
+    settings_asked: bool,
     /// The person chose not to be asked again about relative starts in this session.
     relative_start_trusted: bool,
     /// Waiting for the host to finish choosing and opening a serial device.
@@ -381,6 +383,7 @@ impl LightFoundryApp {
             recorded_path: None,
             allow_close: false,
             pending_start: None,
+            settings_asked: false,
             relative_start_trusted: false,
             last_title: String::new(),
         };
@@ -1065,6 +1068,7 @@ impl LightFoundryApp {
         match transport {
             Ok(t) => {
                 self.link = Some(if self.platform.inline_link() { Link::connect_inline(t) } else { Link::connect(t) });
+                self.settings_asked = false;
                 self.say(tr("Connected"));
             }
             Err(e) => self.status = Some((trf!("Could not open the machine: {e}", e = i18n::tr_message(&e.to_string())), true)),
@@ -1097,6 +1101,15 @@ impl LightFoundryApp {
     pub(crate) fn start_job(&mut self, program: String) {
         if self.link.is_none() {
             self.status = Some((tr("Connect to a machine (or the simulator) first"), true));
+            return;
+        }
+        // Without laser mode ($32=1) GRBL leaves the beam on during travel moves of a laser program.
+        if self
+            .snap
+            .as_ref()
+            .is_some_and(|s| settings_ui::advice(&s.settings, &self.session.doc.machine).contains(&settings_ui::Advice::LaserModeOff))
+        {
+            self.status = Some((tr("Laser mode ($32) is off on this controller: turn it on in the machine settings before running a job"), true));
             return;
         }
         // From the head's position or a user origin the job's place on the bed is not known to the program, so
@@ -1191,6 +1204,7 @@ impl LightFoundryApp {
         match self.platform.open_serial(&port) {
             Ok(t) => {
                 self.link = Some(Link::connect(t));
+                self.settings_asked = false;
                 self.reconnect = None;
                 self.say(tr("Reconnected. Nothing is running; start the job again if you want to continue."));
             }
@@ -1229,6 +1243,11 @@ impl LightFoundryApp {
                 self.status = Some((tr("The machine connection was lost"), true));
             }
             return;
+        }
+        if !self.settings_asked && snap.status.is_some() {
+            // Once the controller answers, learn its settings: a job is refused when laser mode is off.
+            self.settings_asked = true;
+            let _ = link.request_settings();
         }
         if self.last_job.as_ref() != Some(&snap.job) {
             if let JobState::Finished(result) = &snap.job {

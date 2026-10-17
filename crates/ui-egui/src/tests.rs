@@ -1611,6 +1611,23 @@ mod machine_tests {
     }
 
     #[test]
+    fn a_job_is_refused_while_the_controller_is_not_in_laser_mode() {
+        let mut h = connected();
+        // The settings are fetched by themselves once the controller answers.
+        pump(&mut h, "the settings", |h| h.app.snap.as_ref().is_some_and(|s| s.settings.len() > 20));
+        h.app.link_do(|l| l.write_setting(32, 0.0));
+        pump(&mut h, "laser mode off", |h| h.app.snap.as_ref().and_then(|s| s.settings.get(&32)).is_some_and(|v| v == "0"));
+        h.app.start_job("G21\n".into());
+        assert!(matches!(&h.app.status, Some((m, true)) if m.contains("Laser mode")), "{:?}", h.app.status);
+        assert!(h.app.job_program.is_none() && h.app.pending_start.is_none());
+
+        h.app.link_do(|l| l.write_setting(32, 1.0));
+        pump(&mut h, "laser mode on", |h| h.app.snap.as_ref().and_then(|s| s.settings.get(&32)).is_some_and(|v| v == "1"));
+        h.app.start_job("G21\n".into());
+        assert!(h.app.job_program.is_some());
+    }
+
+    #[test]
     fn advice_ignores_missing_and_hostile_values() {
         use std::collections::BTreeMap;
 

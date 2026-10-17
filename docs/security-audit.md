@@ -34,14 +34,12 @@ Result: no critical issue, nothing that leaves the laser on or injects G-code, n
 | Current-position and user-origin jobs could not be checked against the bed and started without a word      | Starting one asks for confirmation first (with "do not ask again in this session")         |
 | Closing a browser tab mid-job (or with unsaved work) gave no warning                                       | The page asks the browser to confirm before closing or reloading while a job runs or work is unsaved |
 | Closing one app instance removed another's link file                                                       | Only the file that still names this instance's port is removed                             |
+| A controller not in laser mode (`$32=0`) could fire during travel moves of a started job                   | The app reads the controller's settings once it answers and refuses to start or frame a job while `$32=0`; the settings panel can turn it on |
 
 ## Still open
 
-1. **Controllers not in laser mode (`$32=0`)**: the program keeps `S` set during travel moves, so a controller
-   in spindle mode could fire on them. The settings panel warns; starting a job does not block or confirm. A
-   confirm (or a refusal) when the controller reports `$32=0` is the next step.
-2. **The link's reply-queue limit has no automated test** (it needs a client that stops reading large replies).
-3. **A hostile project file** can still hold up to 100,000 shapes (the importer's cap); the limits above keep
+1. **The link's reply-queue limit has no automated test** (it needs a client that stops reading large replies).
+2. **A hostile project file** can still hold up to 100,000 shapes (the importer's cap); the limits above keep
    copies and history bounded, but very large documents are slow. Not a safety issue.
-4. **Not covered by this audit**: a test on real hardware, a third-party review, a dependency licence review,
+3. **Not covered by this audit**: a test on real hardware, a third-party review, a dependency licence review,
    and the Windows owner-only permission on the data folder (it relies on the profile folder's access list).

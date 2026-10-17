@@ -554,3 +554,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   bed cannot be checked); the browser asks before the page closes while a job runs or work is unsaved; one app
   instance no longer removes another's link file. Tests for each except the reply-queue limit. Open: refuse or
   confirm a start when the controller is not in laser mode (`$32=0`); see `docs/security-audit.md`.
+- **2026-10-17 — laser mode check.** The app now asks the controller for its settings as soon as it answers, and
+  refuses to start (or frame, or resume) a job while `$32=0`: without laser mode GRBL does not turn the beam off
+  for travel moves. Controllers that report no `$32` (other dialects) are not blocked. Checked by a frame test
+  against the simulator (refused with laser mode off, accepted when turned on). That closes the audit's last
+  code item; `docs/security-audit.md` lists what is left (a reply-queue test, hardware, outside review).
