@@ -280,7 +280,11 @@ mod web {
                     break;
                 }
                 if let Ok(value) = js_sys::Reflect::get(&chunk, &JsValue::from_str("value")) {
-                    reading.borrow_mut().bytes.extend(js_sys::Uint8Array::new(&value).to_vec());
+                    let mut inbox = reading.borrow_mut();
+                    inbox.bytes.extend(js_sys::Uint8Array::new(&value).to_vec());
+                    // A device at the wrong speed (or a hostile one) may never send a line end: keep only the newest bytes.
+                    let excess = inbox.bytes.len().saturating_sub(MAX_INBOX_BYTES);
+                    inbox.bytes.drain(..excess);
                 }
             }
             reading.borrow_mut().closed = true;
@@ -288,6 +292,9 @@ mod web {
         let outbox = Rc::new(RefCell::new(Outbox::default()));
         Ok(Box::new(WebSerial { inbox, outbox, writer: Rc::new(port.writable().get_writer()) }))
     }
+
+    /// Most unread serial bytes kept (GRBL's replies are a few dozen bytes a line).
+    const MAX_INBOX_BYTES: usize = 64 * 1024;
 
     #[derive(Default)]
     struct Inbox {

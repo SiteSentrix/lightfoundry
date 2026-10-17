@@ -306,10 +306,10 @@ fn import_image(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     finite(&[p.x, p.y])?;
     let (mut reader, name) = match (&p.path, &p.data_base64) {
         (Some(path), _) => {
-            if std::fs::metadata(path)?.len() > MAX_IMAGE_FILE_BYTES {
+            let Some(bytes) = lightfoundry_format::read_capped(std::path::Path::new(path), MAX_IMAGE_FILE_BYTES)? else {
                 return Err(EngineError::Import("the image file is too large".into()));
-            }
-            (ImageReader::new(std::io::Cursor::new(std::fs::read(path)?)).with_guessed_format()?, file_name(path))
+            };
+            (ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format()?, file_name(path))
         }
         (None, Some(data)) => {
             if data.len() > MAX_IMAGE_FILE_BYTES as usize * 4 / 3 + 16 {
@@ -406,7 +406,8 @@ fn export_gcode(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
 
 fn source_bytes(p: &ImportParams) -> Result<Vec<u8>, EngineError> {
     match (&p.path, &p.data) {
-        (Some(path), _) => Ok(std::fs::read(path)?),
+        (Some(path), _) => lightfoundry_format::read_capped(std::path::Path::new(path), MAX_IMAGE_FILE_BYTES)?
+            .ok_or_else(|| EngineError::Import("the file is too large".into())),
         (None, Some(data)) => Ok(data.clone().into_bytes()),
         (None, None) => Err(EngineError::BadParams("give either path or data".into())),
     }

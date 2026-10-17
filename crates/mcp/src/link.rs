@@ -33,7 +33,7 @@ const MAX_CLIENTS: usize = 4;
 /// Longest accepted handshake line, in bytes.
 const MAX_HANDSHAKE_BYTES: usize = 512;
 /// How long a new connection may take to present its token.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const HANDSHAKE_TIMEOUT: Duration = if cfg!(test) { Duration::from_millis(600) } else { Duration::from_secs(5) };
 /// Requests answered per frame, so a flood cannot freeze the window.
 const MAX_PER_PASS: usize = 16;
 /// Bytes of randomness in the token.
@@ -166,8 +166,22 @@ fn client(stream: TcpStream, id: u64, token: &str, tx: &Sender<Event>, wake: &(d
     let mut input = BufReader::new(stream.try_clone()?);
     let mut output = stream.try_clone()?;
 
+    // The read timeout applies to each read, so a client sending a byte at a time could hold the slot for ever:
+    // give the whole handshake one deadline.
+    let handshaken = Arc::new(AtomicBool::new(false));
+    {
+        let (handshaken, stream) = (Arc::clone(&handshaken), stream.try_clone()?);
+        thread::Builder::new().name("lightfoundry-link-deadline".into()).spawn(move || {
+            thread::sleep(HANDSHAKE_TIMEOUT);
+            if !handshaken.load(Ordering::SeqCst) {
+                let _ = stream.shutdown(Shutdown::Both);
+            }
+        })?;
+    }
     let mut buf = Vec::new();
-    match read_capped_line(&mut input, &mut buf, MAX_HANDSHAKE_BYTES)? {
+    let line = read_capped_line(&mut input, &mut buf, MAX_HANDSHAKE_BYTES);
+    handshaken.store(true, Ordering::SeqCst);
+    match line? {
         Line::Ok => {}
         Line::End | Line::TooLong => return Err(io::Error::other("bad handshake")),
     }
@@ -304,22 +318,11 @@ fn write_link_file(path: &Path, port: u16, token: &str) -> io::Result<()> {
     file.flush()
 }
 
-/// A random hex token. Prefers the operating system's generator; falls back to the process-random
-/// hash keys the standard library seeds from it.
+/// A random hex token from the operating system's generator. If that is unavailable there is no token,
+/// and so no link: a guessable token would let another local process drive the app.
 fn new_token() -> io::Result<String> {
     let mut bytes = [0u8; TOKEN_BYTES];
-    let from_os = fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes)).is_ok();
-    if !from_os {
-        use std::hash::{BuildHasher, Hasher};
-        for chunk in bytes.chunks_mut(8) {
-            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-            h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
-            let word = h.finish().to_le_bytes();
-            for (dst, src) in chunk.iter_mut().zip(word) {
-                *dst = src;
-            }
-        }
-    }
+    getrandom::fill(&mut bytes).map_err(|e| io::Error::other(format!("no secure random numbers for the link token: {e}")))?;
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
@@ -360,6 +363,25 @@ mod tests {
             assert!(answer.contains("false"));
             let _ = writeln!(s, r#"{{"jsonrpc":"2.0","id":1,"method":"ping"}}"#);
             assert_eq!(server.serve_pending(&mut Session::new()), 0);
+        }
+
+        #[test]
+        fn a_client_that_dribbles_its_handshake_is_cut_off_at_the_deadline() {
+            let (file, _guard) = scratch("dribble");
+            let server = LinkServer::start(&file, || {}).unwrap();
+            let mut s = TcpStream::connect(server.address()).unwrap();
+            let started = std::time::Instant::now();
+            // One byte every 200 ms, never a line end: each read succeeds, so only a total deadline can stop it.
+            let mut cut = false;
+            for _ in 0..40 {
+                if s.write_all(b"x").is_err() {
+                    cut = true;
+                    break;
+                }
+                thread::sleep(Duration::from_millis(200));
+            }
+            assert!(cut, "the server kept a half-finished handshake for {:?}", started.elapsed());
+            assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
         }
 
         #[test]

@@ -14,6 +14,7 @@ a path needs at least {0} nodes
 a path needs between {minimum} and {MAX_NODES} nodes
 a preset needs a name
 a test grid has 1 to {MAX_COLS_ROWS} columns and rows and at most {MAX_CELLS} cells
+an array may add at most {MAX_NEW_SHAPES} shapes
 an array must make between 1 and {MAX_COPIES} copies
 an open path needs a positive offset distance (it becomes the outline around the line)
 at most {MAX_PRESETS} presets can be kept
@@ -109,6 +110,7 @@ the controller raised ALARM:{0}; clear it (unlock/home) before running again
 the controller rejected line {line} ({text}) with error:{code}
 the download was cancelled
 the file has no ENTITIES section
+the file is too large
 the font file is too large
 the font library is larger than this program will download; refusing
 the font library listing is not what was expected: {0}

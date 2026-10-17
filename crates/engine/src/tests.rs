@@ -1977,6 +1977,37 @@ mod robustness_tests {
         assert!(s.doc.shapes.is_empty());
     }
 
+    /// Arrays copy every selected shape: the total, not just the grid size, is bounded.
+    #[test]
+    fn an_array_of_many_shapes_cannot_multiply_into_millions() {
+        let mut s = Session::new();
+        for i in 0..30 {
+            s.execute("shape.rectangle", &json!({"x": i, "y": 0, "width": 1, "height": 1})).unwrap();
+        }
+        s.execute("edit.select_all", &Value::Null).unwrap();
+        let before = s.doc.shapes.len();
+        assert!(s.execute("arrange.grid", &json!({"columns": 100, "rows": 100})).is_err());
+        assert!(s.execute("arrange.circular", &json!({"count": 9000})).is_err());
+        assert_eq!(s.doc.shapes.len(), before, "a refused array changes nothing");
+        assert!(s.execute("arrange.grid", &json!({"columns": 2, "rows": 2})).is_ok());
+    }
+
+    /// A path that names an endless device must be refused, not read until memory runs out.
+    #[cfg(unix)]
+    #[test]
+    fn importing_from_an_endless_file_is_refused() {
+        let mut s = Session::new();
+        for (id, params) in [
+            ("file.import_svg", json!({ "path": "/dev/zero" })),
+            ("file.import_dxf", json!({ "path": "/dev/zero" })),
+            ("file.import_image", json!({ "path": "/dev/zero" })),
+            ("file.open", json!({ "path": "/dev/zero" })),
+        ] {
+            assert!(s.execute(id, &params).is_err(), "{id}");
+        }
+        assert!(s.doc.shapes.is_empty());
+    }
+
     /// Every command, with a menagerie of hostile parameters, must return (Ok or Err) and never panic.
     #[test]
     fn command_sweep_never_panics() {

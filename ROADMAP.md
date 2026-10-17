@@ -535,3 +535,12 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   the status bar found no successful command result still shown in English: what remains are the font-library
   download summaries and failures, which the hosts build. Checked by a test that a loader error is translated,
   and the full gate. Not done: those download messages, a non-Latin font in the browser, any shipped catalog.
+- **2026-10-17 — security audit.** Dependency advisories (`cargo audit`: clean), pattern scans, and two independent
+  code reviews of the file/command/agent-link surface and of G-code, the machine link, networking, the browser
+  build and the workflows; findings were verified before acting. Fixed (each with a regression test where code
+  could test it): uncapped reads of device paths (`/dev/zero`), the link token's weak fallback, a handshake that
+  could be held open for ever, array copies multiplying into millions, no soft-reset attempt after a failed write
+  mid-job, an unbounded browser serial buffer, a symlink-followed temp file when saving; plus a CSP for the
+  browser page, read-only build tokens, an audit workflow and Dependabot. Open items for a decision are in
+  `docs/security-audit.md` (the main one: the bug-fix workflow runs `cargo test` while holding an API key).
+  Checked by the full gate. Not done: hardware, third-party review, SHA-pinned actions.

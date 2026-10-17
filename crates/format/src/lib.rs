@@ -63,21 +63,35 @@ pub fn from_bytes(bytes: &[u8]) -> Result<Document, FormatError> {
 /// Writes to a sibling temp file, then renames, so a crash never leaves a half-written project.
 pub fn save(path: &Path, doc: &Document) -> Result<(), FormatError> {
     let bytes = to_bytes(doc)?;
-    let tmp = path.with_extension(format!("{EXTENSION}.tmp"));
-    {
-        let mut f = fs::File::create(&tmp)?;
+    // A name nobody can guess, created fresh (never through a link someone left behind).
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let tmp = path.with_extension(format!("{EXTENSION}.{}.{nanos}.tmp", std::process::id()));
+    let written = (|| -> std::io::Result<()> {
+        let mut f = fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
         f.write_all(&bytes)?;
-        f.sync_all()?;
+        f.sync_all()
+    })();
+    if let Err(e) = written.and_then(|()| fs::rename(&tmp, path)) {
+        let _ = fs::remove_file(&tmp);
+        return Err(e.into());
     }
-    fs::rename(&tmp, path)?;
     Ok(())
 }
 
 pub fn load(path: &Path) -> Result<Document, FormatError> {
-    if fs::metadata(path)?.len() as usize > MAX_FILE_BYTES {
-        return Err(FormatError::TooLarge);
+    match read_capped(path, MAX_FILE_BYTES as u64)? {
+        Some(bytes) => from_bytes(&bytes),
+        None => Err(FormatError::TooLarge),
     }
-    from_bytes(&fs::read(path)?)
+}
+
+/// Reads at most `limit` bytes of a file; `None` when there is more. The size is not taken from the file's
+/// metadata, which says 0 for devices and pipes (`/dev/zero` would otherwise be read until memory ran out).
+pub fn read_capped(path: &Path, limit: u64) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    fs::File::open(path)?.take(limit.saturating_add(1)).read_to_end(&mut bytes)?;
+    Ok((bytes.len() as u64 <= limit).then_some(bytes))
 }
 
 /// Repairs what can be repaired (dangling layers, id counter) and rejects what cannot.
@@ -120,6 +134,39 @@ mod tests {
     use lightfoundry_geom::rect_path;
 
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn reading_is_capped_even_for_files_that_claim_to_be_empty() {
+        // /dev/zero reports a length of 0 and never ends: it used to be read until memory ran out.
+        assert_eq!(read_capped(Path::new("/dev/zero"), 1000).unwrap(), None);
+        assert!(matches!(load(Path::new("/dev/zero")), Err(FormatError::TooLarge)));
+        let dir = std::env::temp_dir().join(format!("lf-format-cap-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("five.bin");
+        std::fs::write(&file, b"12345").unwrap();
+        assert_eq!(read_capped(&file, 5).unwrap().as_deref(), Some(&b"12345"[..]));
+        assert_eq!(read_capped(&file, 4).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saving_never_writes_through_a_planted_link_at_the_old_temp_name() {
+        let dir = std::env::temp_dir().join(format!("lf-format-link-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let victim = dir.join("victim.txt");
+        std::fs::write(&victim, "precious").unwrap();
+        let path = dir.join("x.lightfoundry");
+        std::os::unix::fs::symlink(&victim, dir.join("x.lightfoundry.tmp")).unwrap();
+        save(&path, &sample()).unwrap();
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "precious");
+        assert_eq!(load(&path).unwrap().shapes.len(), 1);
+        let leftovers: Vec<_> =
+            std::fs::read_dir(&dir).unwrap().filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        assert!(leftovers.iter().all(|n| !n.ends_with(".tmp") || n == "x.lightfoundry.tmp"), "{leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn sample() -> Document {
         let mut doc = Document::default();

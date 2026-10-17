@@ -30,6 +30,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Install build dependencies
         run: |
           sudo apt-get update

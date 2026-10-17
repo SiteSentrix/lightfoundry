@@ -535,6 +535,10 @@ impl Worker {
 
     fn fail_io(&mut self, e: DeviceError) {
         self.log(format!("! connection error: {e}"));
+        if self.job.is_some() {
+            // A failed write does not always mean the port is gone: try to stop the machine before giving up on it.
+            let _ = self.transport.write_all(&[realtime::SOFT_RESET]);
+        }
         self.job = None;
         self.update(|s| {
             s.connected = false;
@@ -843,6 +847,33 @@ mod tests {
             link.stop().unwrap();
             let s = tick_until(&link, "the stop", |s| matches!(s.job, JobState::Finished(Err(_))));
             assert!(s.connected, "stopping keeps the connection");
+        }
+
+        #[test]
+        fn a_write_error_in_the_middle_of_a_job_still_tries_a_soft_reset() {
+            use std::sync::{Arc, Mutex};
+            /// Fails one write (the third line of the job) and takes everything else, remembering what it was given.
+            struct Flaky(Arc<Mutex<(usize, Vec<u8>)>>);
+            impl Transport for Flaky {
+                fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+                    let mut state = self.0.lock().unwrap();
+                    state.0 += 1;
+                    if state.0 == 3 {
+                        return Err(io::Error::other("glitch"));
+                    }
+                    state.1.extend_from_slice(bytes);
+                    Ok(())
+                }
+
+                fn read_line(&mut self, _: Duration) -> io::Result<Option<String>> {
+                    Ok(None)
+                }
+            }
+            let seen = Arc::new(Mutex::new((0, Vec::new())));
+            let link = Link::connect_inline(Box::new(Flaky(Arc::clone(&seen))));
+            link.start_job(long_program(50)).unwrap();
+            tick_until(&link, "the disconnect", |s| !s.connected);
+            assert!(seen.lock().unwrap().1.contains(&realtime::SOFT_RESET), "a soft reset must be attempted after the write failed");
         }
 
         #[test]

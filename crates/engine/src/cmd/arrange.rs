@@ -8,6 +8,8 @@ use crate::{EngineError, Session};
 
 /// Most copies one array command may create.
 pub const MAX_COPIES: u32 = 10_000;
+/// Most shapes one array may add (the copies times the shapes being copied).
+pub const MAX_NEW_SHAPES: u64 = 200_000;
 
 pub(super) const COMMANDS: &[CommandSpec] = &[
     CommandSpec {
@@ -50,6 +52,7 @@ fn grid(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     finite(&[p.gap_x, p.gap_y])?;
     check_count(u64::from(p.columns).saturating_mul(u64::from(p.rows)))?;
     let ids = selected(s, &p.ids)?;
+    check_total(ids.len(), u64::from(p.columns).saturating_mul(u64::from(p.rows)))?;
     let b = s.doc.bounds_of(&ids).ok_or(EngineError::NothingSelected)?;
     let (pitch_x, pitch_y) = (b.width() + p.gap_x, b.height() + p.gap_y);
     let mut all = ids.clone();
@@ -95,6 +98,7 @@ fn circular(s: &mut Session, params: &Value) -> Result<Value, EngineError> {
     finite(&[p.radius, p.direction, p.angle])?;
     check_count(u64::from(p.count))?;
     let ids = selected(s, &p.ids)?;
+    check_total(ids.len(), u64::from(p.count))?;
     let b = s.doc.bounds_of(&ids).ok_or(EngineError::NothingSelected)?;
     let (c, dir) = (b.center(), p.direction.to_radians());
     let centre = Point::new(c.x + p.radius * dir.cos(), c.y + p.radius * dir.sin());
@@ -117,6 +121,14 @@ fn check_count(n: u64) -> Result<(), EngineError> {
     } else {
         Err(EngineError::BadParams(format!("an array must make between 1 and {MAX_COPIES} copies")))
     }
+}
+
+/// Refuses an array that would add more than [`MAX_NEW_SHAPES`] shapes.
+fn check_total(shapes: usize, copies: u64) -> Result<(), EngineError> {
+    if (shapes as u64).saturating_mul(copies) > MAX_NEW_SHAPES {
+        return Err(EngineError::BadParams(format!("an array may add at most {MAX_NEW_SHAPES} shapes")));
+    }
+    Ok(())
 }
 
 fn selected(s: &Session, ids: &Option<Vec<ShapeId>>) -> Result<Vec<ShapeId>, EngineError> {
