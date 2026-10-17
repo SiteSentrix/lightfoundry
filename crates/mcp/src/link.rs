@@ -42,7 +42,7 @@ const TOKEN_BYTES: usize = 32;
 /// instead of piling them up in memory.
 const EVENT_QUEUE: usize = 256;
 /// Replies waiting to be written to one agent. An agent that stops reading is disconnected when this fills.
-const OUT_QUEUE: usize = 256;
+const OUT_QUEUE: usize = if cfg!(test) { 4 } else { 256 };
 /// How long writing to an agent may stall before it is dropped.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -406,6 +406,42 @@ mod tests {
             }
             assert!(cut, "the server kept a half-finished handshake for {:?}", started.elapsed());
             assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        }
+
+        #[test]
+        fn an_agent_that_never_reads_its_replies_is_dropped_instead_of_filling_memory() {
+            let (file, _guard) = scratch("deaf");
+            let mut server = LinkServer::start(&file, || {}).unwrap();
+            let mut session = Session::new();
+            let (mut agent, _unread) = connect(&file);
+            let request = json!({"jsonrpc": "2.0", "id": 1, "method": "resources/read", "params": {"uri": "lightfoundry://reference/commands"}});
+            // Ask for the (large) command reference over and over without ever reading an answer. The socket
+            // buffers fill, the writer stalls, the queue fills, and the server hangs up on this agent.
+            let started = std::time::Instant::now();
+            let mut dropped = false;
+            'asking: for _ in 0..200 {
+                for _ in 0..50 {
+                    if writeln!(agent, "{request}").is_err() {
+                        dropped = true; // the server closed the connection on us
+                        break 'asking;
+                    }
+                }
+                for _ in 0..4 {
+                    server.serve_pending(&mut session);
+                }
+                if server.connections.is_empty() {
+                    dropped = true;
+                    break;
+                }
+                if started.elapsed() > Duration::from_secs(60) {
+                    break;
+                }
+            }
+            assert!(dropped, "the server kept queueing replies for an agent that reads nothing");
+            // Another agent is unaffected.
+            let (mut other, mut lines) = connect(&file);
+            writeln!(other, r#"{{"jsonrpc":"2.0","id":9,"method":"ping"}}"#).unwrap();
+            assert_eq!(read_one(&mut lines, &mut server, &mut session)["id"], json!(9));
         }
 
         #[test]

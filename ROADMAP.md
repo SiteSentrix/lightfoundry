@@ -567,3 +567,8 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   prompt. That closes the "not yet clicked through in a real browser" caveat on the browser translations and
   confirms the audit's CSP and tab-close warning. Not checked: Web Serial (needs a device), Firefox/Safari
   (no Web Serial there; the rest is untested).
+- **2026-10-17 — reply-queue test.** The agent link's limit on queued replies now has a test: an agent that
+  asks for the large command reference over and over without reading any answer is hung up on once the socket
+  buffers and the (test-sized) queue fill, while another agent keeps working; it fails if the drop is removed.
+  Closes the audit's last test gap. Left in `docs/security-audit.md`: very large hostile documents are slow, and
+  hardware, outside review and a licence review were out of scope.
