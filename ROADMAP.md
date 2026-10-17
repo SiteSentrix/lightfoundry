@@ -559,3 +559,11 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
   for travel moves. Controllers that report no `$32` (other dialects) are not blocked. Checked by a frame test
   against the simulator (refused with laser mode off, accepted when turned on). That closes the audit's last
   code item; `docs/security-audit.md` lists what is left (a reply-queue test, hardware, outside review).
+- **2026-10-17 — browser checks in real Chromium.** A fresh browser build, driven with Playwright (software
+  WebGL, real mouse events): the page loads under its content security policy with no violations; View >
+  Language > Load translation reads a catalog through the file chooser and the interface switches (Auswahl,
+  Rechteck, Bereit); a reload brings it back from local storage; Save translation template downloads
+  `translation-template.json`; and closing the tab after drawing a shape raises the browser's "leave site?"
+  prompt. That closes the "not yet clicked through in a real browser" caveat on the browser translations and
+  confirms the audit's CSP and tab-close warning. Not checked: Web Serial (needs a device), Firefox/Safari
+  (no Web Serial there; the rest is untested).
