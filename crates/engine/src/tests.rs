@@ -79,6 +79,27 @@ mod history_tests {
         }
         assert_eq!(undone, crate::HISTORY_LIMIT);
     }
+
+    #[test]
+    fn history_is_bounded_by_memory_too() {
+        let mut s = Session::new();
+        for _ in 0..50 {
+            rect(&mut s);
+        }
+        let one_step = s.doc.approx_bytes();
+        assert!(one_step > 0);
+        // Room for about five steps of a document this size: the oldest steps go first, the newest stay.
+        s.set_history_bytes_for_test(one_step * 5);
+        for _ in 0..30 {
+            rect(&mut s);
+        }
+        let mut undone = 0;
+        while s.can_undo() {
+            s.execute("edit.undo", &Value::Null).unwrap();
+            undone += 1;
+        }
+        assert!((1..=8).contains(&undone), "{undone} undo steps kept");
+    }
 }
 
 mod edit_tests {

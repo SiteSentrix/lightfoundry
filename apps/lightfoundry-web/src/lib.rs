@@ -12,7 +12,7 @@ pub mod fontindex;
 mod web {
     use eframe::wasm_bindgen::JsCast;
     use lightfoundry_engine::Session;
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use lightfoundry_device::Transport;
@@ -30,6 +30,8 @@ mod web {
             .dyn_into::<web_sys::HtmlCanvasElement>()
             .map_err(|_| JsValue::from_str("that element is not a canvas"))?;
         restore_fonts();
+        let leave_warning = Rc::new(Cell::new(false));
+        install_leave_warning(&leave_warning);
         eframe::WebRunner::new()
             .start(
                 canvas,
@@ -42,12 +44,30 @@ mod web {
                                 inbox: Rc::new(RefCell::new(None)),
                                 serial: Rc::new(RefCell::new(None)),
                                 font_job: Rc::new(RefCell::new(FontJob::default())),
+                                leave_warning,
                             }),
                         ),
                     }))
                 }),
             )
             .await
+    }
+
+    /// Asks the browser to confirm before the page is closed or reloaded while `flag` is set. A page cannot send
+    /// anything to the machine while it is being torn down, so a job stopped this way would run on unsupervised.
+    fn install_leave_warning(flag: &Rc<Cell<bool>>) {
+        let flag = Rc::clone(flag);
+        let handler = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+            if flag.get() {
+                event.prevent_default();
+            }
+        });
+        if let Some(window) = web_sys::window()
+            && window.add_event_listener_with_callback("beforeunload", handler.as_ref().unchecked_ref()).is_err()
+        {
+            log::warn!("could not watch for the page closing");
+        }
+        handler.forget(); // lives as long as the page
     }
 
     /// Files go through the browser's file chooser and downloads; there are no paths, serial ports
@@ -58,6 +78,8 @@ mod web {
         /// The serial device once the person has chosen it and it is open (or why not).
         serial: Rc<RefCell<Option<Result<Box<dyn Transport + Send>, String>>>>,
         font_job: Rc<RefCell<FontJob>>,
+        /// Whether closing the page would lose work or stop a job halfway (read by the `beforeunload` handler).
+        leave_warning: Rc<Cell<bool>>,
     }
 
     impl Platform for WebPlatform {
@@ -92,6 +114,10 @@ mod web {
         fn storage_get(&self, key: &str) -> Option<String> {
             // Storage can be missing or throw (private windows, blocked site data): then nothing is remembered.
             web_sys::window()?.local_storage().ok()??.get_item(key).ok()?
+        }
+
+        fn set_leave_warning(&self, on: bool) {
+            self.leave_warning.set(on);
         }
 
         fn storage_set(&self, key: &str, value: &str) {

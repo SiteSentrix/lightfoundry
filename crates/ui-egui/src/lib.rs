@@ -197,6 +197,10 @@ pub struct LightFoundryApp {
     interrupted: Option<job_position::JobPosition>,
     /// What a requested upload is for.
     awaiting_upload: Option<UploadKind>,
+    /// A program waiting for the person to confirm a start the bed cannot be checked for (relative start).
+    pending_start: Option<String>,
+    /// The person chose not to be asked again about relative starts in this session.
+    relative_start_trusted: bool,
     /// Waiting for the host to finish choosing and opening a serial device.
     awaiting_serial: bool,
     /// A font library download is running in the background.
@@ -376,6 +380,8 @@ impl LightFoundryApp {
             new_shape: [10.0, 10.0, 50.0, 30.0],
             recorded_path: None,
             allow_close: false,
+            pending_start: None,
+            relative_start_trusted: false,
             last_title: String::new(),
         };
         app.load_saved_translation();
@@ -390,6 +396,7 @@ impl LightFoundryApp {
         self.poll_link(ui.ctx());
         self.autosave_tick(ui.ctx());
         self.watch_close_and_title(ui.ctx());
+        self.platform.set_leave_warning(self.job_active() || self.session.dirty);
         self.track_recent();
         self.poll_upload(ui.ctx());
         self.poll_font_download(ui.ctx());
@@ -540,7 +547,7 @@ impl LightFoundryApp {
     }
 
     fn has_modal(&self) -> bool {
-        self.pending_recovery.is_some() || self.pending_action.is_some() || self.capturing.is_some()
+        self.pending_recovery.is_some() || self.pending_action.is_some() || self.pending_start.is_some() || self.capturing.is_some()
     }
 
     /// Writes the recovery copy while there are unsaved changes, and removes it once they are saved.
@@ -849,6 +856,32 @@ impl LightFoundryApp {
             }
             return;
         }
+        if self.pending_start.is_some() {
+            let mut answer = None;
+            egui::Modal::new(egui::Id::new("relative_start")).show(ctx, |ui| {
+                ui.heading(tr("Start from where the head is?"));
+                ui.label(tr("This job is placed from the head's position or your own origin, so LightFoundry cannot check that it fits on the bed from there."));
+                ui.label(tr("Make sure the head is where the job should begin and has room on every side, or turn on the controller's soft limits."));
+                ui.checkbox(&mut self.relative_start_trusted, tr("Do not ask again in this session"));
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button(tr("Start")).clicked() {
+                        answer = Some(true);
+                    }
+                    if ui.button(tr("Cancel")).clicked() {
+                        answer = Some(false);
+                        self.relative_start_trusted = false;
+                    }
+                });
+            });
+            if let Some(go) = answer
+                && let Some(program) = self.pending_start.take()
+                && go
+            {
+                self.begin_job(program);
+            }
+            return;
+        }
         let Some(action) = self.pending_action.clone() else { return };
         let name = self.session.path.as_ref().and_then(|p| p.file_name()).map_or("Untitled".to_string(), |n| n.to_string_lossy().into_owned());
         let mut answer = None;
@@ -1062,10 +1095,22 @@ impl LightFoundryApp {
     }
 
     pub(crate) fn start_job(&mut self, program: String) {
-        let Some(link) = &self.link else {
+        if self.link.is_none() {
             self.status = Some((tr("Connect to a machine (or the simulator) first"), true));
             return;
-        };
+        }
+        // From the head's position or a user origin the job's place on the bed is not known to the program, so
+        // the bed cannot be checked: make the person confirm.
+        if self.session.doc.job_origin.start_from != lightfoundry_doc::StartFrom::Absolute && !self.relative_start_trusted {
+            self.pending_start = Some(program);
+            return;
+        }
+        self.begin_job(program);
+    }
+
+    /// Hands the program to the machine link.
+    pub(crate) fn begin_job(&mut self, program: String) {
+        let Some(link) = &self.link else { return };
         let kept: std::sync::Arc<str> = program.as_str().into();
         if let Err(e) = link.start_job(program) {
             self.status = Some((i18n::tr_message(&e.to_string()), true));

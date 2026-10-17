@@ -67,6 +67,9 @@ pub enum Mode {
 
 /// Commands that replace the open document; the live link refuses them while it has unsaved changes.
 const REPLACES_DOCUMENT: &[&str] = &["file.new", "file.open", "file.recover"];
+/// Commands that write to a path the caller names. In the person's window an agent may only write beside the
+/// open project (or in the temporary folder): anything holding the link token could otherwise overwrite any file.
+const WRITES_PATH: &[&str] = &["file.save", "file.autosave", "file.export_svg", "file.export_gcode"];
 
 /// Handles one message; `None` for notifications, which get no reply.
 pub fn handle_line(session: &mut Session, line: &str) -> Option<Value> {
@@ -165,10 +168,52 @@ fn call_tool(session: &mut Session, params: &Value, mode: Mode) -> Result<Value,
             &Value::String(format!("{} would discard unsaved changes in the open window; ask the person to save first", spec.id)),
         ));
     }
+    if mode == Mode::Live
+        && WRITES_PATH.contains(&spec.id)
+        && let Some(path) = args.get("path").and_then(Value::as_str)
+        && let Err(why) = live_write_allowed(session.path.as_deref(), std::path::Path::new(path))
+    {
+        return Ok(tool_result(true, &Value::String(format!("{} refused: {why}", spec.id))));
+    }
     Ok(match session.execute(spec.id, &args) {
         Ok(v) => tool_result(false, &v),
         Err(e) => tool_result(true, &Value::String(e.to_string())),
     })
+}
+
+/// Whether an agent working in the person's window may write to `target`: inside the folder of the open project
+/// or the temporary folder, and never onto an existing link (which could lead anywhere).
+fn live_write_allowed(project: Option<&std::path::Path>, target: &std::path::Path) -> Result<(), String> {
+    use std::path::Path;
+    if let Ok(meta) = std::fs::symlink_metadata(target)
+        && meta.file_type().is_symlink()
+    {
+        return Err("the target is a symbolic link".into());
+    }
+    let absolute = if target.is_absolute() { target.to_path_buf() } else { std::env::current_dir().map_err(|e| e.to_string())?.join(target) };
+    // The file may not exist yet: resolve its folder (or the nearest folder that does) and put the name back.
+    let mut folder = absolute.parent().map(Path::to_path_buf).ok_or("the target has no folder")?;
+    let mut tail = vec![absolute.file_name().ok_or("the target has no file name")?.to_owned()];
+    let resolved = loop {
+        match std::fs::canonicalize(&folder) {
+            Ok(real) => break real,
+            Err(_) => {
+                tail.push(folder.file_name().ok_or("the folder does not exist")?.to_owned());
+                folder = folder.parent().map(Path::to_path_buf).ok_or("the folder does not exist")?;
+            }
+        }
+    };
+    let resolved = tail.iter().rev().fold(resolved, |acc, part| acc.join(part));
+    let allowed = project
+        .and_then(Path::parent)
+        .and_then(|dir| std::fs::canonicalize(if dir.as_os_str().is_empty() { Path::new(".") } else { dir }).ok())
+        .into_iter()
+        .chain(std::fs::canonicalize(std::env::temp_dir()).ok());
+    if allowed.into_iter().any(|dir| resolved.starts_with(dir)) {
+        Ok(())
+    } else {
+        Err("an agent may only write beside the open project or in the temporary folder; ask the person to save elsewhere".into())
+    }
 }
 
 fn tool_result(is_error: bool, value: &Value) -> Value {
@@ -399,6 +444,44 @@ mod tests {
 
     fn call(s: &mut Session, name: &str, args: Value) -> Value {
         ask(s, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}))
+    }
+
+    #[cfg(unix)]
+    mod live_write_tests {
+        use std::path::Path;
+
+        use super::*;
+
+        #[test]
+        fn an_agent_in_the_window_may_only_write_beside_the_project_or_in_the_temp_folder() {
+            let dir = std::env::temp_dir().join(format!("lf-live-write-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let project = dir.join("job.lightfoundry");
+            assert!(live_write_allowed(Some(&project), &dir.join("out.gcode")).is_ok());
+            assert!(live_write_allowed(Some(&project), &dir.join("new-folder/deeper/out.gcode")).is_ok(), "folders that do not exist yet");
+            assert!(live_write_allowed(None, &dir.join("out.gcode")).is_ok(), "the temporary folder");
+            for outside in ["/etc/passwd", "/usr/lib/x/y.gcode", "/root/.bashrc"] {
+                assert!(live_write_allowed(Some(&project), Path::new(outside)).is_err(), "{outside}");
+            }
+            assert!(live_write_allowed(Some(&project), &dir.join("../../../etc/passwd")).is_err(), "dots do not climb out");
+            // A link, or a folder that is a link, leads out of the allowed folders.
+            std::os::unix::fs::symlink("/etc/passwd", dir.join("pointer")).unwrap();
+            assert!(live_write_allowed(Some(&project), &dir.join("pointer")).is_err());
+            std::os::unix::fs::symlink("/usr", dir.join("gateway")).unwrap();
+            assert!(live_write_allowed(Some(&project), &dir.join("gateway/out.gcode")).is_err());
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn the_live_tools_refuse_paths_outside_the_project() {
+            let mut s = Session::new();
+            s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap();
+            let args = json!({ "path": "/usr/lf-should-not-exist.gcode" });
+            let live = call_tool(&mut s, &json!({"name": "file_export_gcode", "arguments": args}), Mode::Live).unwrap();
+            assert_eq!(live["isError"], json!(true));
+            assert!(live["content"][0]["text"].as_str().unwrap().contains("refused"), "{live}");
+            assert!(!Path::new("/usr/lf-should-not-exist.gcode").exists());
+        }
     }
 
     mod subscription_tests {

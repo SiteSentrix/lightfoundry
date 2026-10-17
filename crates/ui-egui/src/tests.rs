@@ -1651,6 +1651,32 @@ mod machine_tests {
     }
 
     #[test]
+    fn a_job_placed_from_the_head_waits_for_a_confirmation() {
+        let mut h = connected();
+        h.app.run("shape.rectangle", json!({"x": 10, "y": 10, "width": 20, "height": 20}));
+        h.app.run("job.set_origin", json!({"start_from": "current_position"}));
+        h.app.start_job("G21\n".into());
+        assert!(h.app.pending_start.is_some(), "nothing is sent before the person agrees");
+        assert!(h.app.job_program.is_none());
+        h.frame(vec![]);
+        assert!(h.app.has_modal());
+
+        // Cancel drops it; asking again and confirming sends it.
+        h.app.pending_start = None;
+        h.app.start_job("G21\n".into());
+        let program = h.app.pending_start.take().unwrap();
+        h.app.begin_job(program);
+        assert!(h.app.job_program.is_some());
+
+        // With absolute coordinates the bed is checked by the program itself: no question.
+        h.app.job_program = None;
+        h.app.run("job.set_origin", json!({"start_from": "absolute"}));
+        h.app.start_job("G21\n".into());
+        assert!(h.app.pending_start.is_none());
+        assert!(h.app.job_program.is_some());
+    }
+
+    #[test]
     fn starting_without_a_connection_explains_what_to_do() {
         let mut h = Harness::new();
         h.app.start_job("G21\n".into());
@@ -2542,6 +2568,45 @@ mod browser_file_tests {
         assert_eq!(again.app.browser_recent.entries.len(), 1);
         assert!(!shared.borrow().storage[crate::browser_recent::STORAGE_KEY].contains("other"), "the stored list follows");
         again.app.request(PendingAction::OpenStored("never-existed".into()));
+    }
+
+    #[test]
+    fn the_host_is_told_when_leaving_would_lose_work() {
+        struct Watch(Rc<std::cell::Cell<bool>>);
+        impl Platform for Watch {
+            fn pick_open(&self, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+                None
+            }
+
+            fn pick_save(&self, _: &str, _: &str, _: &[&str]) -> Option<std::path::PathBuf> {
+                None
+            }
+
+            fn set_leave_warning(&self, on: bool) {
+                self.0.set(on);
+            }
+
+            fn serial_ports(&self) -> Vec<String> {
+                Vec::new()
+            }
+
+            fn open_serial(&self, _: &str) -> Result<Box<dyn Transport + Send>, String> {
+                Err("no serial in this test".into())
+            }
+        }
+        let flag = Rc::new(std::cell::Cell::new(true));
+        let mut h = Harness {
+            ctx: egui::Context::default(),
+            app: LightFoundryApp::new(Session::new(), Box::new(Watch(Rc::clone(&flag)))),
+            time: 0.0,
+            modifiers: Modifiers::NONE,
+            sent_modifiers: Modifiers::NONE,
+        };
+        h.frame(vec![]);
+        assert!(!flag.get(), "an untouched document can be left");
+        h.app.run("shape.rectangle", json!({"x": 5, "y": 6, "width": 20, "height": 10}));
+        h.frame(vec![]);
+        assert!(flag.get(), "unsaved work must be confirmed");
     }
 
     #[test]

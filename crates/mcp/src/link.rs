@@ -18,7 +18,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -38,13 +38,20 @@ const HANDSHAKE_TIMEOUT: Duration = if cfg!(test) { Duration::from_millis(600) }
 const MAX_PER_PASS: usize = 16;
 /// Bytes of randomness in the token.
 const TOKEN_BYTES: usize = 32;
+/// Requests waiting for the app, in all: a client that sends faster than the window answers waits its turn
+/// instead of piling them up in memory.
+const EVENT_QUEUE: usize = 256;
+/// Replies waiting to be written to one agent. An agent that stops reading is disconnected when this fills.
+const OUT_QUEUE: usize = 256;
+/// How long writing to an agent may stall before it is dropped.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// What a connection thread tells the app thread, which owns the session and every connection's state.
 enum Event {
     /// An agent passed the handshake; everything for it goes out through `out`.
     Open {
         id: u64,
-        out: Sender<Value>,
+        out: SyncSender<Value>,
     },
     Line {
         id: u64,
@@ -57,7 +64,7 @@ enum Event {
 
 /// The app thread's view of one agent.
 struct Connection {
-    out: Sender<Value>,
+    out: SyncSender<Value>,
     subs: Subscriptions,
 }
 
@@ -79,7 +86,7 @@ impl LinkServer {
         let token = new_token()?;
         write_link_file(link_file, addr.port(), &token)?;
 
-        let (tx, events) = mpsc::channel();
+        let (tx, events) = mpsc::sync_channel(EVENT_QUEUE);
         let next_id = Arc::new(AtomicU64::new(1));
         let stop = Arc::new(AtomicBool::new(false));
         let clients = Arc::new(AtomicUsize::new(0));
@@ -123,6 +130,7 @@ impl LinkServer {
     /// requests were handled.
     pub fn serve_pending(&mut self, session: &mut Session) -> usize {
         let mut handled = 0;
+        let mut dropped = Vec::new();
         while handled < MAX_PER_PASS {
             let Ok(event) = self.events.try_recv() else { break };
             match event {
@@ -135,16 +143,24 @@ impl LinkServer {
                 Event::Line { id, line } => {
                     handled += 1;
                     let Some(conn) = self.connections.get_mut(&id) else { continue };
-                    if let Some(reply) = handle_line_with(session, line.trim(), Mode::Live, &mut conn.subs) {
-                        let _ = conn.out.send(reply); // the agent may have gone
+                    if let Some(reply) = handle_line_with(session, line.trim(), Mode::Live, &mut conn.subs)
+                        && conn.out.try_send(reply).is_err()
+                    {
+                        dropped.push(id); // gone, or not reading its replies
                     }
                 }
             }
         }
-        for conn in self.connections.values_mut() {
+        for (id, conn) in &mut self.connections {
             for note in conn.subs.changed(session) {
-                let _ = conn.out.send(note);
+                if conn.out.try_send(note).is_err() {
+                    dropped.push(*id);
+                    break;
+                }
             }
+        }
+        for id in dropped {
+            self.connections.remove(&id); // its writer ends and hangs up
         }
         handled
     }
@@ -154,15 +170,23 @@ impl Drop for LinkServer {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
         let _ = TcpStream::connect_timeout(&self.addr, Duration::from_millis(200)); // wakes the accept loop
-        let _ = fs::remove_file(&self.link_file);
+        // Another instance may have taken the file over since: only remove our own.
+        let ours = fs::read_to_string(&self.link_file)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .is_some_and(|v| v.get("port").and_then(Value::as_u64) == Some(u64::from(self.addr.port())));
+        if ours {
+            let _ = fs::remove_file(&self.link_file);
+        }
     }
 }
 
 /// One agent: checks the token, then forwards each line to the app. Answers and notifications come
 /// back through a writer thread, in the order the app produced them.
-fn client(stream: TcpStream, id: u64, token: &str, tx: &Sender<Event>, wake: &(dyn Fn() + Send + Sync)) -> io::Result<()> {
+fn client(stream: TcpStream, id: u64, token: &str, tx: &SyncSender<Event>, wake: &(dyn Fn() + Send + Sync)) -> io::Result<()> {
     stream.set_nodelay(true)?;
     stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let mut input = BufReader::new(stream.try_clone()?);
     let mut output = stream.try_clone()?;
 
@@ -193,7 +217,7 @@ fn client(stream: TcpStream, id: u64, token: &str, tx: &Sender<Event>, wake: &(d
     write_message(&mut output, &json!({ "ok": true }))?;
     stream.set_read_timeout(None)?;
 
-    let (out, queue) = mpsc::channel::<Value>();
+    let (out, queue) = mpsc::sync_channel::<Value>(OUT_QUEUE);
     thread::Builder::new().name("lightfoundry-link-writer".into()).spawn(move || {
         for message in queue {
             if write_message(&mut output, &message).is_err() {
@@ -211,7 +235,7 @@ fn client(stream: TcpStream, id: u64, token: &str, tx: &Sender<Event>, wake: &(d
             Line::End => return Ok(()),
             Line::TooLong => {
                 let reply = json!({ "jsonrpc": "2.0", "id": null, "error": { "code": -32600, "message": "message too large" } });
-                let _ = notice.send(reply);
+                let _ = notice.try_send(reply);
             }
             Line::Ok => {
                 let line = String::from_utf8_lossy(&buf).into_owned();
@@ -225,7 +249,7 @@ fn client(stream: TcpStream, id: u64, token: &str, tx: &Sender<Event>, wake: &(d
     result
 }
 
-fn send(tx: &Sender<Event>, wake: &(dyn Fn() + Send + Sync), event: Event) -> io::Result<()> {
+fn send(tx: &SyncSender<Event>, wake: &(dyn Fn() + Send + Sync), event: Event) -> io::Result<()> {
     tx.send(event).map_err(|_| io::Error::other("app closed"))?;
     wake();
     Ok(())
@@ -382,6 +406,19 @@ mod tests {
             }
             assert!(cut, "the server kept a half-finished handshake for {:?}", started.elapsed());
             assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        }
+
+        #[test]
+        fn closing_one_instance_leaves_the_link_file_of_another() {
+            let (file, _guard) = scratch("two");
+            let first = LinkServer::start(&file, || {}).unwrap();
+            let second = LinkServer::start(&file, || {}).unwrap();
+            drop(first);
+            assert!(file.exists(), "the second instance's file is still there");
+            let info: Value = serde_json::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+            assert_eq!(info["port"].as_u64(), Some(u64::from(second.address().port())));
+            drop(second);
+            assert!(!file.exists(), "and goes with its owner");
         }
 
         #[test]

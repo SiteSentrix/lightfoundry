@@ -26,22 +26,22 @@ Result: no critical issue, nothing that leaves the laser on or injects G-code, n
 | Checkouts kept the token in `.git/config`                                                                  | `persist-credentials: false` (CI, Desktop, Fix workflows)                                 |
 | No automated advisory or action updates                                                                    | `audit.yml` (weekly and on `Cargo.lock` changes) and `dependabot.yml`                     |
 | The bug-fix workflow ran `cargo test` while holding the API key, on untrusted issue text                   | It now runs no builds or tests (the pull request's CI runs the gate); keep requiring a maintainer to apply the `claude-fix` label after reading the issue |
+| Actions were pinned to tags, not commit hashes                                                            | Every action is pinned to a commit hash (with its version in a comment); Dependabot bumps them |
+| Agents in the open window could write any file the user can (`file.save`, `file.autosave`, exports)         | Over the live link they may only write beside the open project or in the temporary folder, never onto a link |
+| Undo history had no memory budget (200 steps, each a clone of the document)                                | Also bounded to about 256 MB of estimated shape data; the newest step is always kept       |
+| The link's queues were unbounded after the token check; a client that never reads could grow memory        | Bounded request and reply queues; an agent whose replies pile up, or whose writes stall for 30 s, is dropped (not covered by a test) |
+| Autosave, recovery, recent list and presets used default permissions                                       | The app's data folder is owner-only (mode 0700 on Unix; Windows relies on the profile folder) |
+| Current-position and user-origin jobs could not be checked against the bed and started without a word      | Starting one asks for confirmation first (with "do not ask again in this session")         |
+| Closing a browser tab mid-job (or with unsaved work) gave no warning                                       | The page asks the browser to confirm before closing or reloading while a job runs or work is unsaved |
+| Closing one app instance removed another's link file                                                       | Only the file that still names this instance's port is removed                             |
 
-## Open, for a decision
+## Still open
 
-1. **Actions are pinned to tags, not commit hashes** (`dtolnay/rust-toolchain@master` is a branch). Pinning
-   needs the hashes; Dependabot then keeps them current.
-2. **File-writing commands take any path** (`file.save`, `file.autosave`, `file.export_*`), so a client holding
-   the link token, or a script, can overwrite any file the user can. Intended for a trusted agent; options are
-   confining live-link writes to the document's folder or asking the person.
-3. **Undo history has no byte budget** (200 steps, each a clone of the document), so a long loop of cheap
-   commands on a very large document can use gigabytes.
-4. **The link's queues are unbounded after the token is checked**, so a client that never reads its replies can
-   grow memory.
-5. **Autosave, recovery and recent-file lists use default permissions** (often world-readable on Linux). The
-   link file is owner-only. Windows relies on the profile folder's permissions.
-6. **Relative-origin jobs (current position) cannot check the bed**; a job near an edge can run into the frame
-   unless the controller's soft limits are on. The app warns when laser mode is off; it does not block the job.
-7. **Closing a browser tab mid-job** gives no chance to send a soft reset; the controller finishes its buffered
-   moves. A warning or a `beforeunload` prompt while a job runs would help.
-9. Two running instances share one link file; the first to quit removes the other's (reliability only).
+1. **Controllers not in laser mode (`$32=0`)**: the program keeps `S` set during travel moves, so a controller
+   in spindle mode could fire on them. The settings panel warns; starting a job does not block or confirm. A
+   confirm (or a refusal) when the controller reports `$32=0` is the next step.
+2. **The link's reply-queue limit has no automated test** (it needs a client that stops reading large replies).
+3. **A hostile project file** can still hold up to 100,000 shapes (the importer's cap); the limits above keep
+   copies and history bounded, but very large documents are slow. Not a safety issue.
+4. **Not covered by this audit**: a test on real hardware, a third-party review, a dependency licence review,
+   and the Windows owner-only permission on the data folder (it relies on the profile folder's access list).

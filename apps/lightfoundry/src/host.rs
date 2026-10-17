@@ -156,3 +156,37 @@ fn data_dir() -> Option<PathBuf> {
         var("XDG_DATA_HOME").or_else(|| var("HOME").map(|h| h.join(".local").join("share")))
     }
 }
+
+/// Makes the app's own data folder (autosaves, recent projects, presets, the agent link file) readable by its
+/// owner only, so other people on a shared computer cannot read a person's designs. A failure is logged and
+/// the app carries on: the files inside are still written.
+pub fn make_data_folder_private() {
+    let Some(dir) = data_dir().map(|d| d.join("LightFoundry")) else { return };
+    if let Err(e) = make_private(&dir) {
+        log::warn!("could not make {} private: {e}", dir.display());
+    }
+}
+
+/// Creates `dir` if needed and, where the system has file modes, limits it to its owner.
+fn make_private(dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    #[cfg(unix)]
+    std::fs::set_permissions(dir, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_data_folder_becomes_owner_only() {
+        let dir = std::env::temp_dir().join(format!("lf-private-{}", std::process::id())).join("LightFoundry");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        make_private(&dir).unwrap();
+        let mode = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&dir).unwrap().permissions());
+        assert_eq!(mode & 0o077, 0, "{mode:o}");
+        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
+    }
+}

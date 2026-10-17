@@ -50,6 +50,22 @@ impl Default for Document {
 }
 
 impl Document {
+    /// A rough count of the memory the document's shapes use (picture pixels are shared between copies of a
+    /// document and not counted). Used to bound how much undo history is kept.
+    pub fn approx_bytes(&self) -> usize {
+        self.shapes
+            .iter()
+            .map(|s| {
+                let own = std::mem::size_of::<Shape>() + s.name.len();
+                own + match &s.kind {
+                    ShapeKind::Path { path } => std::mem::size_of_val(path.elements()),
+                    ShapeKind::Text { content, path, .. } => content.len() + std::mem::size_of_val(path.elements()),
+                    _ => 0,
+                }
+            })
+            .sum()
+    }
+
     pub fn layer(&self, id: LayerId) -> Option<&Layer> {
         self.layers.iter().find(|l| l.id == id)
     }

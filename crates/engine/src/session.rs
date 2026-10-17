@@ -5,11 +5,15 @@ use crate::{EngineError, cmd, guard};
 
 /// Undo steps kept.
 pub const HISTORY_LIMIT: usize = 200;
+/// Roughly how much memory the undo steps may use together (the newest step is always kept).
+pub const HISTORY_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Clone)]
 pub(crate) struct Snapshot {
     doc: Document,
     selection: Vec<ShapeId>,
+    /// Estimated memory of `doc` (see [`Document::approx_bytes`]).
+    bytes: usize,
 }
 
 /// One open document with its selection and history.
@@ -26,6 +30,8 @@ pub struct Session {
     pub job_selection_only: bool,
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
+    /// The undo memory budget (a field so tests can make it small).
+    history_bytes: usize,
 }
 
 impl Default for Session {
@@ -50,6 +56,7 @@ impl Session {
             job_selection_only: false,
             undo: Vec::new(),
             redo: Vec::new(),
+            history_bytes: HISTORY_BYTES,
         }
     }
 
@@ -134,10 +141,16 @@ impl Session {
 
     fn push_undo(&mut self, snap: Snapshot) {
         self.undo.push(snap);
-        if self.undo.len() > HISTORY_LIMIT {
-            self.undo.remove(0);
+        let mut total: usize = self.undo.iter().map(|s| s.bytes).sum();
+        while self.undo.len() > HISTORY_LIMIT || (total > self.history_bytes && self.undo.len() > 1) {
+            total = total.saturating_sub(self.undo.remove(0).bytes);
         }
         self.redo.clear();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_history_bytes_for_test(&mut self, bytes: usize) {
+        self.history_bytes = bytes;
     }
 
     #[cfg(test)]
@@ -146,7 +159,7 @@ impl Session {
     }
 
     pub(crate) fn snapshot(&self) -> Snapshot {
-        Snapshot { doc: self.doc.clone(), selection: self.selection.clone() }
+        Snapshot { doc: self.doc.clone(), selection: self.selection.clone(), bytes: self.doc.approx_bytes() }
     }
 
     pub(crate) fn restore(&mut self, s: Snapshot) {

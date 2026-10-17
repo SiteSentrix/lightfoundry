@@ -547,3 +547,10 @@ See [`docs/gaps.md`](docs/gaps.md) for the ranked work list and
 - **2026-10-17 — bug-fix workflow without builds.** `claude-fix.yml` no longer installs a toolchain or lets Claude
   run `cargo`: the job holds the API key and reads untrusted issue text, so running repository code there could
   leak the key. The pull request's own CI is the gate. Checked: workflow parses; not yet run on a real issue.
+- **2026-10-17 — security audit, the rest.** Every action pinned to a commit hash; agents in the open window may
+  only write beside the open project or in the temporary folder (never onto a link); undo history also bounded by
+  memory (about 256 MB estimated); bounded request/reply queues on the agent link with a write timeout; the data
+  folder owner-only; a confirmation before starting a job placed from the head's position or a user origin (the
+  bed cannot be checked); the browser asks before the page closes while a job runs or work is unsaved; one app
+  instance no longer removes another's link file. Tests for each except the reply-queue limit. Open: refuse or
+  confirm a start when the controller is not in laser mode (`$32=0`); see `docs/security-audit.md`.

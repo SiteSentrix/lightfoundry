@@ -53,6 +53,10 @@ pub trait Platform {
         None
     }
 
+    /// Called every frame: whether leaving now would lose work or interrupt a running job. A browser host
+    /// asks the person to confirm before the page is closed or reloaded; other hosts ignore it.
+    fn set_leave_warning(&self, _on: bool) {}
+
     /// Stores `value` under `key`; failures (a full or blocked storage) are the host's to log.
     fn storage_set(&self, _key: &str, _value: &str) {}
 
